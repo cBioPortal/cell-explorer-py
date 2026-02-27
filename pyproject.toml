@@ -10,3 +10,9 @@ dependencies = [
     "scanpy>=1.11.5",
     "zarrs>=0.2.2",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-watcher>=0.6.3",
+]
