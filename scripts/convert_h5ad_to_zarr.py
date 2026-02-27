@@ -4,6 +4,7 @@ Convert h5ad file to zarr format.
 """
 import argparse
 import gc
+from dataclasses import dataclass
 from pathlib import Path
 
 import anndata as ad
@@ -12,6 +13,19 @@ import numpy as np
 from scipy import sparse
 import sys
 import zarr
+
+
+@dataclass
+class ConversionConfig:
+    """Configuration for chunked h5ad-to-zarr conversion."""
+    input_file: Path
+    output_file: Path
+    var_chunk_size: int = 10
+    n_top_genes: int | None = None
+    keep_raw: bool = False
+    cell_chunk_size: int = 10000
+    shard_size: int | None = None
+    dtype: str = "float32"
 
 
 def convert_h5ad_to_zarr(input_file: Path, output_file: Path, obs_chunk_size: int | None = None, var_chunk_size: int | None = None, n_top_genes: int | None = None, keep_raw: bool = False, sparse_format: str = "csr", force_int32: bool = False, dense: bool = False) -> None:
@@ -109,68 +123,60 @@ def convert_h5ad_to_zarr(input_file: Path, output_file: Path, obs_chunk_size: in
     print(f"✓ Successfully converted to zarr format")
 
 
-def convert_h5ad_to_zarr_chunked(
-    input_file: Path,
-    output_file: Path,
-    var_chunk_size: int = 10,
-    n_top_genes: int | None = None,
-    keep_raw: bool = False,
-    cell_chunk_size: int = 10000,
-    shard_size: int | None = None,
-    dtype: str = "float32",
-) -> None:
-    """Convert h5ad to dense zarr using two-phase approach.
+def _init_zarrs() -> int:
+    """Enable zarrs-python Rust codec pipeline for parallel chunk encoding/decoding.
 
-    Phase 1: Single pass through h5ad → row-chunked temp zarr (aligned with CSR read pattern).
-    Phase 2: Rechunk temp zarr → final column-chunked zarr (all_cells, var_chunk_size).
+    Returns the number of CPU threads available.
     """
-    import shutil
-    import tempfile
-    import time
-
-    # Enable zarrs-python Rust codec pipeline for parallel chunk encoding/decoding
     import zarrs  # noqa: F401
     zarr.config.set({"codec_pipeline.path": "zarrs.ZarrsCodecPipeline"})
     n_cpus = __import__("os").cpu_count() or 8
     print(f"Using zarrs Rust codec pipeline ({n_cpus} threads)", flush=True)
+    return n_cpus
 
-    print(f"Reading h5ad file in backed mode: {input_file}", flush=True)
-    adata_backed = ad.read_h5ad(input_file, backed="r")
-    n_obs, n_vars = adata_backed.shape
-    print(f"Dataset shape: {n_obs:,} cells x {n_vars:,} genes", flush=True)
 
-    # Gene filtering
-    var_idx = None
-    if n_top_genes:
-        var_df = adata_backed.var
-        if "highly_variable_rank" in var_df.columns:
-            top_genes = var_df.nsmallest(n_top_genes, "highly_variable_rank").index
-            print(f"Filtering to top {len(top_genes)} HVGs using 'highly_variable_rank'")
-        elif "vst.variance.standardized" in var_df.columns:
-            top_genes = var_df.nlargest(n_top_genes, "vst.variance.standardized").index
-            print(f"Filtering to top {len(top_genes)} HVGs using 'vst.variance.standardized'")
-        elif "highly_variable" in var_df.columns:
-            top_genes = var_df[var_df["highly_variable"]].head(n_top_genes).index
-            print(f"Filtering to top {len(top_genes)} HVGs using 'highly_variable'")
-        else:
-            print("Warning: No HVG info found. Cannot filter in chunked mode.")
-            top_genes = None
+def _filter_hvgs(var_df, n_top_genes: int | None):
+    """Filter to top highly variable genes.
 
-        if top_genes is not None:
-            var_idx = adata_backed.var.index.isin(top_genes)
-            n_vars = var_idx.sum()
-            print(f"Filtered to {n_vars:,} genes")
+    Returns a boolean index into var_df, or None if no filtering is needed.
+    """
+    if not n_top_genes:
+        return None
 
-    v_chunk = min(var_chunk_size, n_vars)
-    n_cell_chunks = (n_obs + cell_chunk_size - 1) // cell_chunk_size
-    target_dtype = np.dtype(dtype)
+    if "highly_variable_rank" in var_df.columns:
+        top_genes = var_df.nsmallest(n_top_genes, "highly_variable_rank").index
+        print(f"Filtering to top {len(top_genes)} HVGs using 'highly_variable_rank'")
+    elif "vst.variance.standardized" in var_df.columns:
+        top_genes = var_df.nlargest(n_top_genes, "vst.variance.standardized").index
+        print(f"Filtering to top {len(top_genes)} HVGs using 'vst.variance.standardized'")
+    elif "highly_variable" in var_df.columns:
+        top_genes = var_df[var_df["highly_variable"]].head(n_top_genes).index
+        print(f"Filtering to top {len(top_genes)} HVGs using 'highly_variable'")
+    else:
+        print("Warning: No HVG info found. Cannot filter in chunked mode.")
+        return None
 
-    has_layers = bool(adata_backed.layers) and keep_raw
+    var_idx = var_df.index.isin(top_genes)
+    n_vars = var_idx.sum()
+    print(f"Filtered to {n_vars:,} genes")
+    return var_idx
+
+
+def _phase1_write_temp_zarr(config: ConversionConfig, adata_backed, var_idx, n_obs: int, n_vars: int):
+    """Phase 1: Single pass through h5ad → row-chunked temp zarr.
+
+    Returns (tmp_root, tmp_dir, phase1_time).
+    """
+    import tempfile
+    import time
+
+    has_layers = bool(adata_backed.layers) and config.keep_raw
     layer_names = list(adata_backed.layers.keys()) if has_layers else []
-    if not keep_raw and adata_backed.layers:
+    if not config.keep_raw and adata_backed.layers:
         print(f"Skipping layers (use --keep-raw to include): {list(adata_backed.layers.keys())}", flush=True)
 
-    # ── Phase 1: Single pass → row-chunked temp zarr ──────────────────────
+    n_cell_chunks = (n_obs + config.cell_chunk_size - 1) // config.cell_chunk_size
+
     tmp_dir = tempfile.mkdtemp(prefix="zarr_convert_")
     tmp_zarr_path = Path(tmp_dir) / "temp.zarr"
     print(f"\n=== Phase 1: Writing row-chunked temp zarr ===", flush=True)
@@ -184,12 +190,12 @@ def convert_h5ad_to_zarr_chunked(
     # 1000 genes per chunk → Phase 2 reads a 1000-gene slab (~40 MB) instead of
     # the full 28,476-gene row (~300 MB) per row-chunk. ~7.5x less decompression waste.
     tmp_var_chunk = min(1000, n_vars)
-    print(f"Temp zarr chunk shape: ({cell_chunk_size}, {tmp_var_chunk})", flush=True)
+    print(f"Temp zarr chunk shape: ({config.cell_chunk_size}, {tmp_var_chunk})", flush=True)
 
     tmp_X = tmp_root.create_array(
         "X",
         shape=(n_obs, n_vars),
-        chunks=(cell_chunk_size, tmp_var_chunk),
+        chunks=(config.cell_chunk_size, tmp_var_chunk),
         dtype="float32",
         overwrite=True,
     )
@@ -201,17 +207,17 @@ def convert_h5ad_to_zarr_chunked(
             tmp_layers[ln] = tmp_layers_group.create_array(
                 ln,
                 shape=(n_obs, n_vars),
-                chunks=(cell_chunk_size, tmp_var_chunk),
+                chunks=(config.cell_chunk_size, tmp_var_chunk),
                 dtype="float32",
                 overwrite=True,
             )
 
-    print(f"Streaming {n_obs:,} cells in {n_cell_chunks} chunks of {cell_chunk_size:,}", flush=True)
+    print(f"Streaming {n_obs:,} cells in {n_cell_chunks} chunks of {config.cell_chunk_size:,}", flush=True)
     phase1_start = time.time()
 
     for ci in range(n_cell_chunks):
-        c_start = ci * cell_chunk_size
-        c_end = min((ci + 1) * cell_chunk_size, n_obs)
+        c_start = ci * config.cell_chunk_size
+        c_end = min((ci + 1) * config.cell_chunk_size, n_obs)
 
         if var_idx is not None:
             chunk = adata_backed[c_start:c_end, var_idx].to_memory()
@@ -237,26 +243,45 @@ def convert_h5ad_to_zarr_chunked(
     phase1_time = time.time() - phase1_start
     print(f"Phase 1 complete in {phase1_time:.0f}s", flush=True)
 
-    # Close backed adata — no longer needed
+    return tmp_root, tmp_dir, phase1_time, has_layers, layer_names
+
+
+def _read_obsm_chunked(adata_backed, n_obs: int, cell_chunk_size: int) -> dict[str, np.ndarray]:
+    """Read obsm data from backed adata in chunks.
+
+    Returns dict mapping obsm keys to concatenated arrays.
+    """
+    obsm_data = {}
+    if not adata_backed.obsm:
+        return obsm_data
+
+    n_cell_chunks = (n_obs + cell_chunk_size - 1) // cell_chunk_size
+    for key in adata_backed.obsm.keys():
+        print(f"Reading obsm/{key} in chunks...", flush=True)
+        parts = []
+        for ci in range(n_cell_chunks):
+            c_start = ci * cell_chunk_size
+            c_end = min((ci + 1) * cell_chunk_size, n_obs)
+            chunk = adata_backed[c_start:c_end, :].to_memory()
+            parts.append(np.array(chunk.obsm[key]))
+            del chunk
+        obsm_data[key] = np.concatenate(parts, axis=0)
+        del parts
+        gc.collect()
+
+    return obsm_data
+
+
+def _extract_metadata(adata_backed, var_idx, n_obs: int, cell_chunk_size: int) -> dict:
+    """Collect all metadata from backed adata and close the file.
+
+    Returns a dict with keys: obs, var, obsm, uns, obsp, varp.
+    """
     adata_file = adata_backed.file
     obs_df = adata_backed.obs.copy()
     var_df_out = adata_backed.var[var_idx].copy() if var_idx is not None else adata_backed.var.copy()
 
-    # Collect obsm keys and data before closing
-    obsm_data = {}
-    if adata_backed.obsm:
-        for key in adata_backed.obsm.keys():
-            print(f"Reading obsm/{key} in chunks...", flush=True)
-            parts = []
-            for ci in range(n_cell_chunks):
-                c_start = ci * cell_chunk_size
-                c_end = min((ci + 1) * cell_chunk_size, n_obs)
-                chunk = adata_backed[c_start:c_end, :].to_memory()
-                parts.append(np.array(chunk.obsm[key]))
-                del chunk
-            obsm_data[key] = np.concatenate(parts, axis=0)
-            del parts
-            gc.collect()
+    obsm_data = _read_obsm_chunked(adata_backed, n_obs, cell_chunk_size)
 
     uns_data = dict(adata_backed.uns) if adata_backed.uns else None
     obsp_data = dict(adata_backed.obsp) if adata_backed.obsp else None
@@ -267,21 +292,37 @@ def convert_h5ad_to_zarr_chunked(
     del adata_backed
     gc.collect()
 
-    # ── Phase 2: Rechunk temp zarr → final column-chunked zarr ────────────
+    return {
+        "obs": obs_df,
+        "var": var_df_out,
+        "obsm": obsm_data,
+        "uns": uns_data,
+        "obsp": obsp_data,
+        "varp": varp_data,
+    }
+
+
+def _phase2_rechunk(config: ConversionConfig, tmp_root, n_obs: int, n_vars: int, v_chunk: int, has_layers: bool, layer_names: list[str]):
+    """Phase 2: Rechunk temp zarr → final column-chunked zarr.
+
+    Returns (final_root, final_store, phase2_time).
+    """
+    import time
+
+    target_dtype = np.dtype(config.dtype)
+
     shard_msg = ""
     shard_kwarg = {}
-    if shard_size is not None:
-        shard_kwarg["shards"] = (n_obs, shard_size)
-        shard_msg = f", shards=({n_obs:,}, {shard_size})"
+    if config.shard_size is not None:
+        shard_kwarg["shards"] = (n_obs, config.shard_size)
+        shard_msg = f", shards=({n_obs:,}, {config.shard_size})"
 
     print(f"\n=== Phase 2: Rechunking to ({n_obs:,}, {v_chunk}){shard_msg}, dtype={target_dtype} ===", flush=True)
 
-    final_store = zarr.storage.LocalStore(str(output_file))
+    final_store = zarr.storage.LocalStore(str(config.output_file))
     final_root = zarr.open_group(final_store, mode="w", zarr_format=3)
     final_root.attrs["encoding-type"] = "anndata"
     final_root.attrs["encoding-version"] = "0.1.0"
-
-    n_var_chunks = (n_vars + v_chunk - 1) // v_chunk
 
     final_X = final_root.create_array(
         "X",
@@ -313,10 +354,13 @@ def convert_h5ad_to_zarr_chunked(
     # Batch reads by shard size (or var_chunk_size if no sharding) to amortize
     # temp zarr decompression cost. Reading 30 genes at once costs the same
     # decompression as reading 1, but does 30x fewer iterations.
-    read_batch = shard_size if shard_size is not None else v_chunk
+    read_batch = config.shard_size if config.shard_size is not None else v_chunk
     n_batches = (n_vars + read_batch - 1) // read_batch
     print(f"Reading column slices from temp zarr in batches of {read_batch} ({n_batches} batches)...", flush=True)
     phase2_start = time.time()
+
+    tmp_X = tmp_root["X"]
+    tmp_layers_data = {ln: tmp_root[f"layers/{ln}"] for ln in layer_names} if has_layers else {}
 
     for bi in range(n_batches):
         b_start = bi * read_batch
@@ -327,7 +371,7 @@ def convert_h5ad_to_zarr_chunked(
         final_X[:, b_start:b_end] = col_data
 
         for ln in layer_names:
-            layer_col = np.array(tmp_layers[ln][:, b_start:b_end]).astype(target_dtype)
+            layer_col = np.array(tmp_layers_data[ln][:, b_start:b_end]).astype(target_dtype)
             final_layers[ln][:, b_start:b_end] = layer_col
 
         if (bi + 1) % 50 == 0 or bi == n_batches - 1:
@@ -338,11 +382,16 @@ def convert_h5ad_to_zarr_chunked(
     phase2_time = time.time() - phase2_start
     print(f"Phase 2 complete in {phase2_time:.0f}s", flush=True)
 
-    # ── Write metadata ────────────────────────────────────────────────────
-    print("Writing metadata...", flush=True)
-    write_elem(final_root, "obs", obs_df)
-    write_elem(final_root, "var", var_df_out)
+    return final_root, final_store, phase2_time
 
+
+def _write_metadata(final_root, final_store, metadata: dict, n_obs: int) -> None:
+    """Write obs, var, obsm, uns, obsp, varp to the final zarr store."""
+    print("Writing metadata...", flush=True)
+    write_elem(final_root, "obs", metadata["obs"])
+    write_elem(final_root, "var", metadata["var"])
+
+    obsm_data = metadata["obsm"]
     if obsm_data:
         obsm_group = final_root.require_group("obsm")
         for key, data in obsm_data.items():
@@ -359,15 +408,49 @@ def convert_h5ad_to_zarr_chunked(
             zarr_embed.attrs["encoding-version"] = "0.2.0"
             zarr_embed[:] = data
 
-    if uns_data:
+    if metadata["uns"]:
         print("Writing uns...", flush=True)
-        write_elem(final_root, "uns", uns_data)
-    if obsp_data:
-        write_elem(final_root, "obsp", obsp_data)
-    if varp_data:
-        write_elem(final_root, "varp", varp_data)
+        write_elem(final_root, "uns", metadata["uns"])
+    if metadata["obsp"]:
+        write_elem(final_root, "obsp", metadata["obsp"])
+    if metadata["varp"]:
+        write_elem(final_root, "varp", metadata["varp"])
 
     zarr.consolidate_metadata(final_store, zarr_format=3)
+
+
+def convert_h5ad_to_zarr_chunked(config: ConversionConfig) -> None:
+    """Convert h5ad to dense zarr using two-phase approach.
+
+    Phase 1: Single pass through h5ad → row-chunked temp zarr (aligned with CSR read pattern).
+    Phase 2: Rechunk temp zarr → final column-chunked zarr (all_cells, var_chunk_size).
+    """
+    import shutil
+
+    _init_zarrs()
+
+    print(f"Reading h5ad file in backed mode: {config.input_file}", flush=True)
+    adata_backed = ad.read_h5ad(config.input_file, backed="r")
+    n_obs, n_vars = adata_backed.shape
+    print(f"Dataset shape: {n_obs:,} cells x {n_vars:,} genes", flush=True)
+
+    var_idx = _filter_hvgs(adata_backed.var, config.n_top_genes)
+    if var_idx is not None:
+        n_vars = var_idx.sum()
+
+    v_chunk = min(config.var_chunk_size, n_vars)
+
+    tmp_root, tmp_dir, phase1_time, has_layers, layer_names = _phase1_write_temp_zarr(
+        config, adata_backed, var_idx, n_obs, n_vars,
+    )
+
+    metadata = _extract_metadata(adata_backed, var_idx, n_obs, config.cell_chunk_size)
+
+    final_root, final_store, phase2_time = _phase2_rechunk(
+        config, tmp_root, n_obs, n_vars, v_chunk, has_layers, layer_names,
+    )
+
+    _write_metadata(final_root, final_store, metadata, n_obs)
 
     # Clean up temp zarr
     print(f"Cleaning up temp dir: {tmp_dir}", flush=True)
@@ -472,9 +555,9 @@ def main():
     if args.chunked:
         if args.sparse_format != "csr" or args.force_int32:
             print("Note: --sparse-format and --force-int32 are ignored in chunked dense mode", file=sys.stderr)
-        convert_h5ad_to_zarr_chunked(
-            args.input_file,
-            args.output_file,
+        config = ConversionConfig(
+            input_file=args.input_file,
+            output_file=args.output_file,
             var_chunk_size=args.var_chunk_size,
             n_top_genes=args.n_top_genes,
             keep_raw=args.keep_raw,
@@ -482,6 +565,7 @@ def main():
             shard_size=args.shard_size,
             dtype=args.dtype,
         )
+        convert_h5ad_to_zarr_chunked(config)
     else:
         convert_h5ad_to_zarr(args.input_file, args.output_file, args.obs_chunk_size, args.var_chunk_size, args.n_top_genes, args.keep_raw, args.sparse_format, args.force_int32, args.dense)
 
