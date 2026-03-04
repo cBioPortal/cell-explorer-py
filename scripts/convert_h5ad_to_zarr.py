@@ -4,19 +4,48 @@ Convert h5ad file to zarr format.
 """
 import argparse
 import gc
-from dataclasses import dataclass
+import json
+import os
+import time
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Literal
 
 import anndata as ad
 from anndata.io import write_elem
 import numpy as np
+from pydantic import BaseModel, Field, field_validator
 from scipy import sparse
 import sys
 import zarr
 
 
-@dataclass
-class ConversionConfig:
+class CompressorSpec(BaseModel):
+    """Compressor specification for zarr arrays."""
+    name: str
+    level: int = 0
+    cname: str = "lz4"  # blosc only
+
+
+class ArrayEncoding(BaseModel):
+    """Encoding specification for a zarr array."""
+    chunks: list[int | str] | None = None
+    shards: list[int | str] | None = None
+    dtype: str | None = None
+    compressor: CompressorSpec | None = None
+
+
+class EncodingConfig(BaseModel):
+    """Full encoding config for all array types."""
+    X: ArrayEncoding = Field(default_factory=ArrayEncoding)
+    obsm: ArrayEncoding = Field(default_factory=ArrayEncoding)
+    obs: ArrayEncoding = Field(default_factory=ArrayEncoding)
+    obs_index: ArrayEncoding = Field(default_factory=ArrayEncoding, alias="obs/_index")
+
+    model_config = {"populate_by_name": True}
+
+
+class ConversionConfig(BaseModel):
     """Configuration for chunked h5ad-to-zarr conversion."""
     input_file: Path
     output_file: Path
@@ -26,6 +55,270 @@ class ConversionConfig:
     cell_chunk_size: int = 10000
     shard_size: int | None = None
     dtype: str = "float32"
+    obsm_cell_chunk_size: int = 50000
+    run_log: Path | None = None
+    log_dir: Path | None = None
+    encoding_config: Path | None = None
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    @field_validator("dtype")
+    @classmethod
+    def validate_dtype(cls, v: str) -> str:
+        allowed = {"float16", "float32", "float64"}
+        if v not in allowed:
+            raise ValueError(f"dtype must be one of {allowed}, got '{v}'")
+        return v
+
+
+RunStatus = Literal["running", "phase2", "completed", "failed", "cancelled", "killed"]
+
+
+class RunDataset(BaseModel):
+    """Dataset info for a conversion run."""
+    model_config = {"extra": "allow"}
+    n_obs: int | None = None
+    n_vars: int | None = None
+    input_size_gb: float | None = None
+    input_format: str | None = None
+
+
+class RunPerformance(BaseModel):
+    """Performance metrics for a conversion run."""
+    model_config = {"extra": "allow"}
+    start_time: str | None = None
+    end_time: str | None = None
+    phase1_time_s: int | None = None
+    phase2_time_s: int | None = None
+    total_time_s: int | None = None
+    output_size_gb: float | None = None
+    avg_chunk_size_mb: float | None = None
+    compression_ratio: float | None = None
+    phase2_rate_batches_per_min: float | None = None
+
+
+class RunZarrConfig(BaseModel):
+    """Zarr output config for a conversion run."""
+    model_config = {"extra": "allow"}
+    format: str | None = None
+    chunk_shape: list[int] | None = None
+    sharding: list[int] | None = None
+    dtype: str | None = None
+    compression: str | None = None
+    target_encoding: dict[str, Any] | None = None
+    actual_encoding: dict[str, Any] | None = None
+
+
+class RunConversionConfig(BaseModel):
+    """Conversion config snapshot for a run."""
+    model_config = {"extra": "allow"}
+    approach: str | None = None
+    cell_chunk_size: int | None = None
+    temp_var_chunk: int | None = None
+    codec_pipeline: str | None = None
+    threads: int | None = None
+    skip_layers: bool | None = None
+    obsm_keys: list[str] | None = None
+    phase2_read_batch: int | None = None
+
+
+class RunEntry(BaseModel):
+    """A single entry in the conversion run log."""
+    model_config = {"extra": "allow"}
+    run: int
+    date: str | None = None
+    status: RunStatus = "running"
+    script_args: dict[str, Any] | None = None
+    zarr_config: RunZarrConfig | None = None
+    conversion_config: RunConversionConfig | None = None
+    dataset: RunDataset | None = None
+    performance: RunPerformance | None = None
+    notes: str = ""
+    log_file: str | None = None
+
+
+class _LogTee:
+    """Tee stdout to both terminal and a log file."""
+
+    def __init__(self, log_file: Path):
+        self.terminal = sys.stdout
+        self.log = open(log_file, "w")
+
+    def write(self, msg):
+        self.terminal.write(msg)
+        self.log.write(msg)
+
+    def flush(self):
+        self.terminal.flush()
+        self.log.flush()
+
+    def close(self):
+        self.log.close()
+        sys.stdout = self.terminal
+
+
+def _read_runs(log_path: Path) -> list[RunEntry]:
+    """Read JSON array from run log file."""
+    if not log_path.exists() or log_path.stat().st_size == 0:
+        return []
+    with open(log_path) as f:
+        return [RunEntry.model_validate(r) for r in json.load(f)]
+
+
+def _write_runs(log_path: Path, runs: list[RunEntry]) -> None:
+    """Write JSON array to run log file."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "w") as f:
+        json.dump([r.model_dump(exclude_none=True) for r in runs], f, indent=2)
+        f.write("\n")
+
+
+def _get_next_run_number(runs: list[RunEntry]) -> int:
+    """Get the next run number."""
+    if not runs:
+        return 1
+    return max(r.run for r in runs) + 1
+
+
+def _resolve_template(value, variables: dict[str, int]):
+    """Resolve template strings like '{n_obs}' in encoding config values.
+
+    Returns the original string if the variable is not yet available.
+    """
+    if isinstance(value, str) and value.startswith("{") and value.endswith("}"):
+        key = value[1:-1]
+        if key in variables:
+            return variables[key]
+        return value
+    return value
+
+
+def _load_encoding_config(config_path: Path, variables: dict[str, int]) -> EncodingConfig:
+    """Load an encoding config JSON file and resolve template variables.
+
+    Template variables like {n_obs}, {n_vars}, {n_dim} are resolved using
+    the provided variables dict. Unresolvable templates are kept as strings.
+    """
+    with open(config_path) as f:
+        raw = json.load(f)
+
+    # Resolve templates in the raw dict before pydantic parsing
+    resolved = {}
+    for section, encoding in raw.items():
+        resolved[section] = {}
+        for key, val in encoding.items():
+            if isinstance(val, list):
+                resolved[section][key] = [_resolve_template(v, variables) for v in val]
+            elif isinstance(val, dict):
+                resolved[section][key] = val
+            else:
+                resolved[section][key] = _resolve_template(val, variables)
+    return EncodingConfig.model_validate(resolved)
+
+
+def _make_compressor(spec: CompressorSpec | dict | None):
+    """Create a zarr codec from a CompressorSpec or dict."""
+    if spec is None:
+        return "auto"
+    import zarr.codecs
+    if isinstance(spec, dict):
+        spec = CompressorSpec(**spec)
+    name = spec.name.lower()
+    if name == "zstd":
+        return zarr.codecs.ZstdCodec(level=spec.level)
+    elif name == "blosc":
+        return zarr.codecs.BloscCodec(cname=spec.cname, clevel=spec.level)
+    elif name == "gzip":
+        return zarr.codecs.GzipCodec(level=spec.level)
+    else:
+        raise ValueError(f"Unknown compressor: {name}")
+
+
+def _compute_output_stats(output_path: Path, n_obs: int, n_vars: int, dtype: str) -> dict:
+    """Compute output zarr stats: size, shard count, compression ratio."""
+    # Total output size
+    total_bytes = sum(
+        f.stat().st_size for f in output_path.rglob("*") if f.is_file()
+    )
+    output_size_gb = round(total_bytes / (1024**3), 1)
+
+    # X subtree stats
+    x_path = output_path / "X"
+    x_files = [f for f in x_path.rglob("*") if f.is_file() and f.name != "zarr.json"]
+    x_bytes = sum(f.stat().st_size for f in x_files)
+    n_shard_files = len(x_files)
+    avg_shard_size_mb = round(x_bytes / n_shard_files / (1024**2), 1) if n_shard_files else 0
+
+    # Compression ratio: uncompressed size / on-disk X size
+    element_size = np.dtype(dtype).itemsize
+    uncompressed_bytes = n_obs * n_vars * element_size
+    compression_ratio = round(uncompressed_bytes / x_bytes, 1) if x_bytes else 0
+
+    return {
+        "output_size_gb": output_size_gb,
+        "n_shard_files": n_shard_files,
+        "avg_shard_size_mb": avg_shard_size_mb,
+        "compression_ratio": compression_ratio,
+    }
+
+
+def _collect_target_encoding(encoding: "EncodingConfig") -> dict[str, Any]:
+    """Serialize the resolved encoding config for the run log."""
+    result = {}
+    for key, section in [("X", encoding.X), ("obsm", encoding.obsm),
+                         ("obs", encoding.obs), ("obs/_index", encoding.obs_index)]:
+        d = section.model_dump(exclude_none=True)
+        if d:
+            # Serialize CompressorSpec to plain dict
+            if "compressor" in d and isinstance(d["compressor"], dict):
+                d["compressor"] = {k: v for k, v in d["compressor"].items()
+                                   if k == "name" or (k == "level" and v != 0)}
+            result[key] = d
+    return result
+
+
+def _collect_actual_encoding(output_path: Path) -> dict[str, Any]:
+    """Read back actual zarr metadata for each array in the output store."""
+    store = zarr.open(str(output_path), mode="r")
+    result = {}
+
+    def _dir_size(p: Path) -> int:
+        return sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+
+    def _array_info(arr, arr_path: Path) -> dict[str, Any]:
+        info: dict[str, Any] = {
+            "shape": list(arr.shape),
+            "chunks": list(arr.chunks),
+            "dtype": str(arr.dtype),
+        }
+        if arr.shards is not None:
+            info["shards"] = list(arr.shards)
+        size_bytes = _dir_size(arr_path)
+        if size_bytes >= 1e9:
+            info["size_gb"] = round(size_bytes / 1e9, 2)
+        else:
+            info["size_mb"] = round(size_bytes / 1e6, 1)
+        return info
+
+    # X
+    if "X" in store:
+        result["X"] = _array_info(store["X"], output_path / "X")
+
+    # obsm arrays
+    if "obsm" in store:
+        for key in sorted(store["obsm"].keys()):
+            try:
+                arr = store[f"obsm/{key}"]
+                if hasattr(arr, "shape"):
+                    result[f"obsm/{key}"] = _array_info(arr, output_path / "obsm" / key)
+            except Exception:
+                pass
+
+    # obs/_index
+    if "obs" in store and "_index" in store["obs"]:
+        result["obs/_index"] = _array_info(store["obs/_index"], output_path / "obs" / "_index")
+
+    return result
 
 
 def convert_h5ad_to_zarr(input_file: Path, output_file: Path, obs_chunk_size: int | None = None, var_chunk_size: int | None = None, n_top_genes: int | None = None, keep_raw: bool = False, sparse_format: str = "csr", force_int32: bool = False, dense: bool = False) -> None:
@@ -302,7 +595,7 @@ def _extract_metadata(adata_backed, var_idx, n_obs: int, cell_chunk_size: int) -
     }
 
 
-def _phase2_rechunk(config: ConversionConfig, tmp_root, n_obs: int, n_vars: int, v_chunk: int, has_layers: bool, layer_names: list[str]):
+def _phase2_rechunk(config: ConversionConfig, tmp_root, n_obs: int, n_vars: int, v_chunk: int, has_layers: bool, layer_names: list[str], encoding: EncodingConfig | None = None):
     """Phase 2: Rechunk temp zarr → final column-chunked zarr.
 
     Returns (final_root, final_store, phase2_time).
@@ -313,9 +606,15 @@ def _phase2_rechunk(config: ConversionConfig, tmp_root, n_obs: int, n_vars: int,
 
     shard_msg = ""
     shard_kwarg = {}
+    compressor_kwarg = {}
     if config.shard_size is not None:
         shard_kwarg["shards"] = (n_obs, config.shard_size)
         shard_msg = f", shards=({n_obs:,}, {config.shard_size})"
+
+    # Encoding config compressor for X
+    x_enc = encoding.X if encoding else ArrayEncoding()
+    if x_enc.compressor:
+        compressor_kwarg["compressors"] = _make_compressor(x_enc.compressor)
 
     print(f"\n=== Phase 2: Rechunking to ({n_obs:,}, {v_chunk}){shard_msg}, dtype={target_dtype} ===", flush=True)
 
@@ -331,6 +630,7 @@ def _phase2_rechunk(config: ConversionConfig, tmp_root, n_obs: int, n_vars: int,
         dtype=target_dtype,
         overwrite=True,
         **shard_kwarg,
+        **compressor_kwarg,
     )
     final_X.attrs["encoding-type"] = "array"
     final_X.attrs["encoding-version"] = "0.2.0"
@@ -346,6 +646,7 @@ def _phase2_rechunk(config: ConversionConfig, tmp_root, n_obs: int, n_vars: int,
                 dtype=target_dtype,
                 overwrite=True,
                 **shard_kwarg,
+                **compressor_kwarg,
             )
             fl.attrs["encoding-type"] = "array"
             fl.attrs["encoding-version"] = "0.2.0"
@@ -385,28 +686,83 @@ def _phase2_rechunk(config: ConversionConfig, tmp_root, n_obs: int, n_vars: int,
     return final_root, final_store, phase2_time
 
 
-def _write_metadata(final_root, final_store, metadata: dict, n_obs: int) -> None:
+def _write_metadata(final_root, final_store, metadata: dict, config: ConversionConfig, encoding: EncodingConfig | None = None) -> None:
     """Write obs, var, obsm, uns, obsp, varp to the final zarr store."""
+    n_obs = len(metadata["obs"])
+    target_dtype = np.dtype(config.dtype)
     print("Writing metadata...", flush=True)
+
+    # Convert string columns to categoricals for compact storage
+    for label, df in [("obs", metadata["obs"]), ("var", metadata["var"])]:
+        str_cols = [c for c in df.columns if df[c].dtype == object]
+        if str_cols:
+            print(f"Converting {len(str_cols)} string column(s) in {label} to categorical: {str_cols}", flush=True)
+            for c in str_cols:
+                df[c] = df[c].astype("category")
+
     write_elem(final_root, "obs", metadata["obs"])
     write_elem(final_root, "var", metadata["var"])
 
     obsm_data = metadata["obsm"]
+    cell_chunk = min(config.obsm_cell_chunk_size, n_obs)
+    obsm_enc = encoding.obsm if encoding else ArrayEncoding()
+    obsm_compressor_kwarg = {}
+    if obsm_enc.compressor:
+        obsm_compressor_kwarg["compressors"] = _make_compressor(obsm_enc.compressor)
     if obsm_data:
         obsm_group = final_root.require_group("obsm")
         for key, data in obsm_data.items():
-            print(f"Writing obsm/{key}...", flush=True)
             n_dim = data.shape[1] if data.ndim > 1 else 1
+            # Resolve {n_dim} in obsm encoding per key
+            dim_vars = {"n_dim": n_dim, "n_obs": n_obs}
+            obsm_chunks = tuple(_resolve_template(v, dim_vars) for v in obsm_enc.chunks) if obsm_enc.chunks else (min(100_000, n_obs), 1)
+            obsm_shards = tuple(_resolve_template(v, dim_vars) for v in obsm_enc.shards) if obsm_enc.shards else (min(1_000_000, n_obs), n_dim)
+            print(f"Writing obsm/{key} shape=({n_obs}, {n_dim}), chunks={obsm_chunks}, shards={obsm_shards}, dtype={target_dtype}...", flush=True)
             zarr_embed = obsm_group.create_array(
                 key,
                 shape=(n_obs, n_dim),
-                chunks=(n_obs, n_dim),
-                dtype=data.dtype,
+                chunks=obsm_chunks,
+                shards=obsm_shards,
+                dtype=target_dtype,
                 overwrite=True,
+                **obsm_compressor_kwarg,
             )
             zarr_embed.attrs["encoding-type"] = "array"
             zarr_embed.attrs["encoding-version"] = "0.2.0"
-            zarr_embed[:] = data
+            zarr_embed[:] = data.astype(target_dtype)
+
+    # Rechunk obs/_index to align with obsm chunk boundaries
+    idx_enc = encoding.obs_index if encoding else ArrayEncoding()
+    obs_enc = encoding.obs if encoding else ArrayEncoding()
+    idx_compressor_kwarg = {}
+    if idx_enc.compressor:
+        idx_compressor_kwarg["compressors"] = _make_compressor(idx_enc.compressor)
+    elif obs_enc.compressor:
+        idx_compressor_kwarg["compressors"] = _make_compressor(obs_enc.compressor)
+    idx_chunk_size = idx_enc.chunks[0] if idx_enc.chunks else cell_chunk
+    idx_shard_kwarg = {}
+    if idx_enc.shards:
+        idx_shard_kwarg["shards"] = (idx_enc.shards[0],)
+    if "obs" in final_root:
+        obs_group = final_root["obs"]
+        if "_index" in obs_group:
+            old_index = obs_group["_index"]
+            index_data = old_index[:]
+            old_attrs = dict(old_index.attrs)
+            del obs_group["_index"]
+            shard_msg = f", shards=({idx_enc.shards[0]},)" if idx_enc.shards else ""
+            print(f"Rechunking obs/_index to chunks=({idx_chunk_size},){shard_msg} ...", flush=True)
+            new_index = obs_group.create_array(
+                "_index",
+                shape=index_data.shape,
+                chunks=(idx_chunk_size,),
+                dtype=index_data.dtype,
+                overwrite=True,
+                **idx_shard_kwarg,
+                **idx_compressor_kwarg,
+            )
+            new_index[:] = index_data
+            new_index.attrs.update(old_attrs)
 
     if metadata["uns"]:
         print("Writing uns...", flush=True)
@@ -419,6 +775,22 @@ def _write_metadata(final_root, final_store, metadata: dict, n_obs: int) -> None
     zarr.consolidate_metadata(final_store, zarr_format=3)
 
 
+def _update_run_entry(log_path: Path, run_number: int, updates: dict) -> None:
+    """Update fields on an existing run entry and write back to disk."""
+    runs = _read_runs(log_path)
+    for i, r in enumerate(runs):
+        if r.run == run_number:
+            d = r.model_dump(exclude_none=True)
+            for key, val in updates.items():
+                if isinstance(val, dict) and isinstance(d.get(key), dict):
+                    d[key].update(val)
+                else:
+                    d[key] = val
+            runs[i] = RunEntry.model_validate(d)
+            break
+    _write_runs(log_path, runs)
+
+
 def convert_h5ad_to_zarr_chunked(config: ConversionConfig) -> None:
     """Convert h5ad to dense zarr using two-phase approach.
 
@@ -427,11 +799,64 @@ def convert_h5ad_to_zarr_chunked(config: ConversionConfig) -> None:
     """
     import shutil
 
-    _init_zarrs()
+    n_cpus = _init_zarrs()
+
+    # --- Run logging: write initial "running" entry before h5ad read ---
+    run_number = None
+    log_tee = None
+    if config.run_log:
+        runs = _read_runs(config.run_log)
+        run_number = _get_next_run_number(runs)
+
+        log_dir = config.log_dir or config.run_log.parent / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file_path = log_dir / f"run-{run_number}.log"
+        log_file_rel = f"logs/run-{run_number}.log"
+
+        input_size_gb = round(config.input_file.stat().st_size / (1024**3), 1)
+
+        script_args = {
+            "input": str(config.input_file),
+            "output": str(config.output_file),
+            "--two-phase": True,
+            "--var-chunk-size": config.var_chunk_size,
+            "--keep-raw": config.keep_raw,
+            "--cell-chunk-size": config.cell_chunk_size,
+            "--dtype": config.dtype,
+            "--obsm-cell-chunk-size": config.obsm_cell_chunk_size,
+        }
+        if config.shard_size is not None:
+            script_args["--shard-size"] = config.shard_size
+        if config.n_top_genes is not None:
+            script_args["--n-top-genes"] = config.n_top_genes
+        if config.encoding_config is not None:
+            script_args["--encoding-config"] = str(config.encoding_config)
+
+        run_entry = RunEntry(
+            run=run_number,
+            date=datetime.now().strftime("%Y-%m-%d"),
+            status="running",
+            script_args=script_args,
+            dataset=RunDataset(
+                input_size_gb=input_size_gb,
+                input_format="sparse_csr",
+            ),
+            performance=RunPerformance(
+                start_time=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            ),
+            notes="",
+            log_file=log_file_rel,
+        )
+        runs.append(run_entry)
+        _write_runs(config.run_log, runs)
+
+        log_tee = _LogTee(log_file_path)
+        sys.stdout = log_tee
 
     print(f"Reading h5ad file in backed mode: {config.input_file}", flush=True)
     adata_backed = ad.read_h5ad(config.input_file, backed="r")
-    n_obs, n_vars = adata_backed.shape
+    n_obs, n_vars_orig = adata_backed.shape
+    n_vars = n_vars_orig
     print(f"Dataset shape: {n_obs:,} cells x {n_vars:,} genes", flush=True)
 
     var_idx = _filter_hvgs(adata_backed.var, config.n_top_genes)
@@ -440,24 +865,107 @@ def convert_h5ad_to_zarr_chunked(config: ConversionConfig) -> None:
 
     v_chunk = min(config.var_chunk_size, n_vars)
 
-    tmp_root, tmp_dir, phase1_time, has_layers, layer_names = _phase1_write_temp_zarr(
-        config, adata_backed, var_idx, n_obs, n_vars,
-    )
+    # --- Run logging: update with dataset info after h5ad read ---
+    if config.run_log and run_number is not None:
+        obsm_keys = list(adata_backed.obsm.keys()) if adata_backed.obsm else []
+        shard_str = [n_obs, config.shard_size] if config.shard_size else None
+        _update_run_entry(config.run_log, run_number, {
+            "zarr_config": {
+                "format": "v3",
+                "chunk_shape": [n_obs, v_chunk],
+                "sharding": shard_str,
+                "dtype": config.dtype,
+            },
+            "conversion_config": {
+                "approach": "two-phase-rechunk",
+                "cell_chunk_size": config.cell_chunk_size,
+                "temp_var_chunk": min(1000, n_vars),
+                "codec_pipeline": "zarrs-python",
+                "threads": n_cpus,
+                "skip_layers": not config.keep_raw,
+                "obsm_keys": obsm_keys,
+                "phase2_read_batch": config.shard_size if config.shard_size else v_chunk,
+            },
+            "dataset": {
+                "n_obs": n_obs,
+                "n_vars": n_vars,
+                "input_size_gb": round(config.input_file.stat().st_size / (1024**3), 1),
+                "input_format": "sparse_csr",
+            },
+        })
 
-    metadata = _extract_metadata(adata_backed, var_idx, n_obs, config.cell_chunk_size)
+    try:
+        # Load encoding config if provided
+        encoding = None
+        if config.encoding_config:
+            variables = {"n_obs": n_obs, "n_vars": n_vars}
+            encoding = _load_encoding_config(config.encoding_config, variables)
+            print(f"Using encoding config: {config.encoding_config}", flush=True)
 
-    final_root, final_store, phase2_time = _phase2_rechunk(
-        config, tmp_root, n_obs, n_vars, v_chunk, has_layers, layer_names,
-    )
+            # --- Run logging: target encoding ---
+            if config.run_log and run_number is not None:
+                _update_run_entry(config.run_log, run_number, {
+                    "zarr_config": {"target_encoding": _collect_target_encoding(encoding)},
+                })
 
-    _write_metadata(final_root, final_store, metadata, n_obs)
+        tmp_root, tmp_dir, phase1_time, has_layers, layer_names = _phase1_write_temp_zarr(
+            config, adata_backed, var_idx, n_obs, n_vars,
+        )
 
-    # Clean up temp zarr
-    print(f"Cleaning up temp dir: {tmp_dir}", flush=True)
-    shutil.rmtree(tmp_dir, ignore_errors=True)
+        # --- Run logging: phase 1 complete ---
+        if config.run_log and run_number is not None:
+            _update_run_entry(config.run_log, run_number, {
+                "status": "phase2",
+                "performance": {"phase1_time_s": round(phase1_time)},
+            })
 
-    total_time = phase1_time + phase2_time
-    print(f"\n✓ Done in {total_time:.0f}s (phase1: {phase1_time:.0f}s, phase2: {phase2_time:.0f}s)", flush=True)
+        metadata = _extract_metadata(adata_backed, var_idx, n_obs, config.cell_chunk_size)
+
+        final_root, final_store, phase2_time = _phase2_rechunk(
+            config, tmp_root, n_obs, n_vars, v_chunk, has_layers, layer_names, encoding,
+        )
+
+        _write_metadata(final_root, final_store, metadata, config, encoding)
+
+        # Clean up temp zarr
+        print(f"Cleaning up temp dir: {tmp_dir}", flush=True)
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        total_time = phase1_time + phase2_time
+        print(f"\n✓ Done in {total_time:.0f}s (phase1: {phase1_time:.0f}s, phase2: {phase2_time:.0f}s)", flush=True)
+
+        # --- Run logging: completed ---
+        if config.run_log and run_number is not None:
+            output_stats = _compute_output_stats(config.output_file, n_obs, n_vars, config.dtype)
+            read_batch = config.shard_size if config.shard_size else v_chunk
+            n_batches = (n_vars + read_batch - 1) // read_batch
+            phase2_rate = round(n_batches / (phase2_time / 60), 1) if phase2_time > 0 else 0
+            actual = _collect_actual_encoding(config.output_file)
+            _update_run_entry(config.run_log, run_number, {
+                "status": "completed",
+                "zarr_config": {"actual_encoding": actual},
+                "performance": {
+                    "end_time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    "phase1_time_s": round(phase1_time),
+                    "phase2_time_s": round(phase2_time),
+                    "total_time_s": round(total_time),
+                    "phase2_rate_batches_per_min": phase2_rate,
+                    **output_stats,
+                },
+            })
+
+    except Exception as e:
+        # --- Run logging: failed ---
+        if config.run_log and run_number is not None:
+            _update_run_entry(config.run_log, run_number, {
+                "status": "failed",
+                "performance": {"end_time": datetime.now(timezone.utc).isoformat(timespec="seconds")},
+                "notes": f"Error: {e}",
+            })
+        raise
+    finally:
+        if log_tee is not None:
+            log_tee.close()
 
 
 def main():
@@ -483,8 +991,7 @@ def main():
     parser.add_argument(
         "--var-chunk-size",
         type=int,
-        default=10,
-        help="Variable (gene) chunk size. Default: 10"
+        help="Variable (gene) chunk size. Default: 10. Overrides encoding config."
     )
     parser.add_argument(
         "--n-top-genes",
@@ -513,15 +1020,15 @@ def main():
         help="Cast sparse matrix indices/indptr to int32 for JavaScript/Vitessce compatibility. Will fail if values exceed int32 max."
     )
     parser.add_argument(
-        "--chunked",
+        "--two-phase",
         action="store_true",
-        help="Use chunked/streaming conversion: reads h5ad in backed mode and writes dense zarr incrementally. Low memory usage."
+        help="Use two-phase streaming conversion: reads h5ad in backed mode, writes row-chunked temp zarr, then rechunks to final column layout. Low memory usage."
     )
     parser.add_argument(
         "--cell-chunk-size",
         type=int,
         default=10000,
-        help="Number of cells per chunk in chunked mode. Default: 10000"
+        help="Number of cells per chunk in phase 1 streaming. Default: 10000"
     )
     parser.add_argument(
         "--shard-size",
@@ -531,9 +1038,28 @@ def main():
     parser.add_argument(
         "--dtype",
         type=str,
-        default="float32",
         choices=["float16", "float32", "float64"],
-        help="Data type for the output X matrix. Default: float32"
+        help="Data type for the output X matrix and obsm embeddings. Default: float32. Overrides encoding config."
+    )
+    parser.add_argument(
+        "--obsm-cell-chunk-size",
+        type=int,
+        help="Cell chunk size for obsm embedding arrays (enables progressive loading). Default: 50000. Overrides encoding config."
+    )
+    parser.add_argument(
+        "--run-log",
+        type=Path,
+        help="Path to JSON run log file (e.g. docs/conversion-runs.json). No logging if omitted."
+    )
+    parser.add_argument(
+        "--log-dir",
+        type=Path,
+        help="Directory for stdout log files. Defaults to <run-log-dir>/logs/"
+    )
+    parser.add_argument(
+        "--encoding-config",
+        type=Path,
+        help="Path to JSON encoding config file specifying chunks, shards, dtype, and compressor for X, obsm, and obs arrays."
     )
     args = parser.parse_args()
 
@@ -552,18 +1078,36 @@ def main():
         sys.exit(1)
 
     # Convert
-    if args.chunked:
+    if args.two_phase:
         if args.sparse_format != "csr" or args.force_int32:
-            print("Note: --sparse-format and --force-int32 are ignored in chunked dense mode", file=sys.stderr)
+            print("Note: --sparse-format and --force-int32 are ignored in two-phase mode", file=sys.stderr)
+
+        # Apply encoding config defaults for CLI args not explicitly set
+        enc_defaults = {}
+        if args.encoding_config and args.encoding_config.exists():
+            enc = EncodingConfig.model_validate_json(args.encoding_config.read_text())
+            if enc.X.chunks and len(enc.X.chunks) > 1 and isinstance(enc.X.chunks[1], int):
+                enc_defaults["var_chunk_size"] = enc.X.chunks[1]
+            if enc.X.shards and len(enc.X.shards) > 1 and isinstance(enc.X.shards[1], int):
+                enc_defaults["shard_size"] = enc.X.shards[1]
+            if enc.X.dtype:
+                enc_defaults["dtype"] = enc.X.dtype
+            if enc.obsm.chunks and len(enc.obsm.chunks) > 0 and isinstance(enc.obsm.chunks[0], int):
+                enc_defaults["obsm_cell_chunk_size"] = enc.obsm.chunks[0]
+
         config = ConversionConfig(
             input_file=args.input_file,
             output_file=args.output_file,
-            var_chunk_size=args.var_chunk_size,
+            var_chunk_size=args.var_chunk_size if args.var_chunk_size is not None else enc_defaults.get("var_chunk_size", 10),
             n_top_genes=args.n_top_genes,
             keep_raw=args.keep_raw,
             cell_chunk_size=args.cell_chunk_size,
-            shard_size=args.shard_size,
-            dtype=args.dtype,
+            shard_size=args.shard_size if args.shard_size is not None else enc_defaults.get("shard_size"),
+            dtype=args.dtype if args.dtype is not None else enc_defaults.get("dtype", "float32"),
+            obsm_cell_chunk_size=args.obsm_cell_chunk_size if args.obsm_cell_chunk_size is not None else enc_defaults.get("obsm_cell_chunk_size", 50000),
+            run_log=args.run_log,
+            log_dir=args.log_dir,
+            encoding_config=args.encoding_config,
         )
         convert_h5ad_to_zarr_chunked(config)
     else:

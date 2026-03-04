@@ -1,0 +1,55 @@
+{
+  "X": {
+    "chunks": [
+      "{n_obs}",
+      1
+    ],
+    "shards": [
+      "{n_obs}",
+      30
+    ],
+    "dtype": "float16",
+    "compressor": {
+      "name": "zstd",
+      "level": 1
+    }
+  },
+  "obsm": {
+    "chunks": [
+      100000,
+      1
+    ],
+    "shards": [
+      "{n_obs}",
+      "{n_dim}"
+    ],
+    "compressor": {
+      "name": "zstd",
+      "level": 1
+    }
+  },
+  "obs": {
+    "chunks": [
+      "{n_obs}"
+    ],
+    "shards": [
+      "{n_obs}"
+    ],
+    "compressor": {
+      "name": "zstd",
+      "level": 5
+    }
+  },
+  "obs/_index": {
+    "chunks": [
+      "{n_obs}"
+    ],
+    "shards": [
+      "{n_obs}"
+    ],
+    "compressor": {
+      "name": "zstd",
+      "level": 5
+    }
+  }
+}
