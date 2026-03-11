@@ -1,11 +1,8 @@
 """Tests for encoding config loading and resolution."""
 import json
 import pytest
-from pathlib import Path
 
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-from convert_h5ad_to_zarr import (
+from shardshaper.convert_h5ad_to_zarr import (
     _resolve_template,
     _load_encoding_config,
     _make_compressor,

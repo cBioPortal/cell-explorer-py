@@ -1,11 +1,8 @@
 """Tests for progressive run log writing."""
 import json
 import pytest
-from pathlib import Path
 
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-from convert_h5ad_to_zarr import (
+from shardshaper.convert_h5ad_to_zarr import (
     _read_runs,
     _write_runs,
     _get_next_run_number,
