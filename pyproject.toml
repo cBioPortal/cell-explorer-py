@@ -1,7 +1,7 @@
 [project]
 name = "shardshaper"
 version = "0.1.0"
-description = "Add your description here"
+description = "h5ad to Zarr conversion pipeline for single-cell RNA-seq data"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -15,8 +15,18 @@ dependencies = [
     "zarrs>=0.2.2",
 ]
 
+[project.scripts]
+shardshaper = "shardshaper.convert_h5ad_to_zarr:main"
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
     "pytest-watcher>=0.6.3",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/shardshaper"]
