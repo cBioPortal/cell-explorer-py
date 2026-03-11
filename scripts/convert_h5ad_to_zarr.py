@@ -717,6 +717,8 @@ def _write_metadata(final_root, final_store, metadata: dict, config: ConversionC
             dim_vars = {"n_dim": n_dim, "n_obs": n_obs}
             obsm_chunks = tuple(_resolve_template(v, dim_vars) for v in obsm_enc.chunks) if obsm_enc.chunks else (min(100_000, n_obs), 1)
             obsm_shards = tuple(_resolve_template(v, dim_vars) for v in obsm_enc.shards) if obsm_enc.shards else (min(1_000_000, n_obs), n_dim)
+            # Shard dims must be exact multiples of chunk dims (zarr v3 requirement)
+            obsm_shards = tuple(((s + c - 1) // c) * c for s, c in zip(obsm_shards, obsm_chunks))
             print(f"Writing obsm/{key} shape=({n_obs}, {n_dim}), chunks={obsm_chunks}, shards={obsm_shards}, dtype={target_dtype}...", flush=True)
             zarr_embed = obsm_group.create_array(
                 key,
@@ -902,10 +904,14 @@ def convert_h5ad_to_zarr_chunked(config: ConversionConfig) -> None:
             encoding = _load_encoding_config(config.encoding_config, variables)
             print(f"Using encoding config: {config.encoding_config}", flush=True)
 
-            # --- Run logging: target encoding ---
+            # --- Run logging: target encoding + raw config ---
             if config.run_log and run_number is not None:
+                encoding_config_raw = json.loads(config.encoding_config.read_text())
                 _update_run_entry(config.run_log, run_number, {
-                    "zarr_config": {"target_encoding": _collect_target_encoding(encoding)},
+                    "zarr_config": {
+                        "encoding_config_raw": encoding_config_raw,
+                        "target_encoding": _collect_target_encoding(encoding),
+                    },
                 })
 
         tmp_root, tmp_dir, phase1_time, has_layers, layer_names = _phase1_write_temp_zarr(
