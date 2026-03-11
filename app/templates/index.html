@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{# ── Macros ── #}
+
+{% macro kv(key, val, highlight=false) %}
+<span class="key">{{ key }}</span><span class="val{% if highlight %} hi{% endif %}">{{ val }}</span>
+{% endmacro %}
+
+{% macro enc_table(enc, kind) %}
+{% if enc %}
+<div class="section full">
+  <h3>{{ 'Target' if kind == 'target' else 'Actual' }} Encoding</h3>
+  <table class="enc-table">
+    <tr>
+      <th>Array</th><th>Chunks</th><th>Shards</th><th>Dtype</th>
+      {% if kind == 'actual' %}<th>Shape</th><th>Size</th>{% else %}<th>Compressor</th>{% endif %}
+    </tr>
+    {% for name, cfg in enc.items() %}
+    <tr>
+      <td class="arr-name">{{ name }}</td>
+      <td>{{ cfg.chunks | fmt_shape }}</td>
+      <td>{{ cfg.shards | fmt_shape if cfg.shards else '—' }}</td>
+      <td>{{ cfg.dtype or '—' }}</td>
+      {% if kind == 'actual' %}
+        <td class="dim">{{ cfg.shape | fmt_shape }}</td>
+        <td class="size">{{ cfg | fmt_size_auto }}</td>
+      {% else %}
+        <td>{{ cfg.compressor | fmt_compressor }}</td>
+      {% endif %}
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+{% endmacro %}
+
+{# ── Page content ── #}
+
+{% block content %}
+<header>
+  <h1>Zarr Conversion Runs</h1>
+  <div class="load-info">{{ runs | length }} run(s) from conversion-runs.json</div>
+</header>
+
+{# Summary #}
+<div class="summary">
+  <div class="stat-pill"><div class="label">Total Runs</div><div class="value blue">{{ summary.total }}</div></div>
+  <div class="stat-pill"><div class="label">Completed</div><div class="value green">{{ summary.completed }}</div></div>
+  <div class="stat-pill"><div class="label">Fastest</div><div class="value purple">{{ summary.fastest | fmt_time }}</div></div>
+  <div class="stat-pill"><div class="label">Best Compression</div><div class="value yellow">{{ '%sx' % summary.best_ratio if summary.best_ratio else '—' }}</div></div>
+</div>
+
+{# Tabs #}
+<div class="tabs" id="tabs">
+  <div class="tab active" data-tab="overview">Overview</div>
+  <div class="tab" data-tab="runs">Runs</div>
+</div>
+
+{# Overview #}
+<div class="tab-panel active" id="panel-overview">
+  <div class="charts">
+    <div class="chart-card"><h3>Conversion Time</h3><canvas id="timeChart"></canvas></div>
+    <div class="chart-card"><h3>Output Size</h3><canvas id="sizeChart"></canvas></div>
+    <div class="chart-card"><h3>Compression Ratio</h3><canvas id="ratioChart"></canvas></div>
+    <div class="chart-card"><h3>Phase 2 Rate</h3><canvas id="rateChart"></canvas></div>
+  </div>
+</div>
+
+{# Runs #}
+<div class="tab-panel" id="panel-runs">
+  <div class="runs">
+    {% for run in runs_reversed %}
+    {% set z = run.zarr_config %}
+    {% set c = run.conversion_config %}
+    {% set p = run.performance %}
+    {% set d = run.dataset %}
+    {% set has_perf = p and p.total_time_s is not none %}
+    {% set is_open = loop.index0 < 2 %}
+
+    <div class="run-card">
+      <div class="run-header" onclick="toggleBody(this)">
+        <span class="chevron {{ 'open' if is_open }}">▶</span>
+        <h2>Run {{ run.run }}</h2>
+        <span class="badge {{ run.status }}">{{ run.status }}</span>
+        {% if run.log_file %}
+        <button class="log-btn" onclick="event.stopPropagation(); toggleLog(this, {{ run.run }})">Log</button>
+        {% endif %}
+        <span class="run-date">{{ run.date or '' }}</span>
+      </div>
+
+      <div class="run-body {{ 'open' if is_open }}">
+        <div class="run-grid">
+          <div class="section">
+            <h3>Zarr Config</h3>
+            <div class="kv-grid">
+              {% if z %}
+              {{ kv('Format', 'v%s' % (z.format or '?')) }}
+              {{ kv('Chunks (X)', '(%s, %s)' % (z.chunk_shape[0] | fmt_number, z.chunk_shape[1]) if z.chunk_shape else '—', true) }}
+              {{ kv('Shards (X)', '(%s, %s)' % (z.sharding[0] | fmt_number, z.sharding[1]) if z.sharding else 'none', z.sharding is not none) }}
+              {{ kv('Dtype', z.dtype or '—', z.dtype == 'float16') }}
+              {% else %}
+              {{ kv('Config', '—') }}
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="section">
+            <h3>Dataset</h3>
+            <div class="kv-grid">
+              {% if d %}
+              {{ kv('Cells', d.n_obs | fmt_number) }}
+              {{ kv('Genes', d.n_vars | fmt_number) }}
+              {{ kv('Input size', d.input_size_gb | fmt_size) }}
+              {{ kv('Format', d.input_format or '—') }}
+              {% else %}
+              {{ kv('Dataset', '—') }}
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="section">
+            <h3>Conversion</h3>
+            <div class="kv-grid">
+              {% if c %}
+              {{ kv('Approach', c.approach or '—') }}
+              {{ kv('Cell chunk', c.cell_chunk_size | fmt_number) }}
+              {{ kv('Temp var chunk', c.temp_var_chunk | fmt_number) }}
+              {{ kv('Codec', c.codec_pipeline or '—') }}
+              {{ kv('Threads', c.threads | fmt_number) }}
+              {% else %}
+              {{ kv('Config', '—') }}
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="section">
+            <h3>Performance</h3>
+            <div class="kv-grid">
+              {% if p %}
+              {{ kv('Started', p.start_time | fmt_datetime) }}
+              {{ kv('Ended', p.end_time | fmt_datetime) }}
+              {% if has_perf %}
+              {{ kv('Phase 1', p.phase1_time_s | fmt_time) }}
+              {{ kv('Phase 2', p.phase2_time_s | fmt_time) }}
+              {{ kv('Total', p.total_time_s | fmt_time, true) }}
+              {{ kv('Output', p.output_size_gb | fmt_size) }}
+              {{ kv('Compression', '%sx' % p.compression_ratio if p.compression_ratio else '—') }}
+              {{ kv('Rate', p | fmt_rate) }}
+              {% else %}
+              <span class="notes">In progress…</span>
+              {% endif %}
+              {% else %}
+              {{ kv('Performance', '—') }}
+              {% endif %}
+            </div>
+          </div>
+
+          {% if z %}
+          {{ enc_table(z.target_encoding, 'target') }}
+          {{ enc_table(z.actual_encoding, 'actual') }}
+          {% endif %}
+
+          {% if run.script_args %}
+          <div class="section full">
+            <h3>Command</h3>
+            <div class="cmd">{{ run.script_args | build_cmd }}</div>
+          </div>
+          {% endif %}
+
+          {% if run.notes %}
+          <div class="section full">
+            <h3>Notes</h3>
+            <div class="notes">{{ run.notes }}</div>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if run.log_file %}
+      <div class="log-pre" id="log-{{ run.run }}"></div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
