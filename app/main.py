@@ -163,7 +163,7 @@ def fmt_rate(perf):
 def build_cmd(args):
     if not args:
         return ""
-    parts = ["python scripts/convert_h5ad_to_zarr.py", args.get("input", "")]
+    parts = ["shardshaper", args.get("input", "")]
     if args.get("output"):
         parts.append(args["output"])
     for k, v in args.items():
