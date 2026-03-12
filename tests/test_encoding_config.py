@@ -2,31 +2,25 @@
 import json
 import pytest
 
-from shardshaper.convert_h5ad_to_zarr import (
-    _resolve_template,
-    _load_encoding_config,
-    _make_compressor,
-    EncodingConfig,
-    ArrayEncoding,
-    CompressorSpec,
-)
+from shardshaper.encoding import resolve_template, load_encoding_config, make_compressor
+from shardshaper.models import EncodingConfig, ArrayEncoding, CompressorSpec
 
 
 class TestResolveTemplate:
     def test_resolves_known_variable(self):
-        assert _resolve_template("{n_obs}", {"n_obs": 4264929}) == 4264929
+        assert resolve_template("{n_obs}", {"n_obs": 4264929}) == 4264929
 
     def test_passes_through_unknown_variable(self):
-        assert _resolve_template("{n_dim}", {"n_obs": 100}) == "{n_dim}"
+        assert resolve_template("{n_dim}", {"n_obs": 100}) == "{n_dim}"
 
     def test_passes_through_int(self):
-        assert _resolve_template(50000, {"n_obs": 100}) == 50000
+        assert resolve_template(50000, {"n_obs": 100}) == 50000
 
     def test_passes_through_plain_string(self):
-        assert _resolve_template("float16", {}) == "float16"
+        assert resolve_template("float16", {}) == "float16"
 
     def test_passes_through_none(self):
-        assert _resolve_template(None, {}) is None
+        assert resolve_template(None, {}) is None
 
 
 class TestLoadEncodingConfig:
@@ -60,40 +54,40 @@ class TestLoadEncodingConfig:
         return p
 
     def test_resolves_n_obs_in_X(self, config_path):
-        enc = _load_encoding_config(config_path, {"n_obs": 1000, "n_vars": 500})
+        enc = load_encoding_config(config_path, {"n_obs": 1000, "n_vars": 500})
         assert enc.X.chunks == [1000, 1]
         assert enc.X.shards == [1000, 30]
 
     def test_defers_n_dim_in_obsm(self, config_path):
-        enc = _load_encoding_config(config_path, {"n_obs": 1000, "n_vars": 500})
+        enc = load_encoding_config(config_path, {"n_obs": 1000, "n_vars": 500})
         # {n_dim} not in variables, should pass through as string
         assert enc.obsm.chunks == [50000, "{n_dim}"]
         assert enc.obsm.shards == [50000, "{n_dim}"]
 
     def test_resolves_n_dim_when_provided(self, config_path):
-        enc = _load_encoding_config(config_path, {"n_obs": 1000, "n_vars": 500, "n_dim": 2})
+        enc = load_encoding_config(config_path, {"n_obs": 1000, "n_vars": 500, "n_dim": 2})
         assert enc.obsm.chunks == [50000, 2]
         assert enc.obsm.shards == [50000, 2]
 
     def test_preserves_literal_values(self, config_path):
-        enc = _load_encoding_config(config_path, {"n_obs": 1000, "n_vars": 500})
+        enc = load_encoding_config(config_path, {"n_obs": 1000, "n_vars": 500})
         assert enc.X.dtype == "float16"
         assert enc.obs.chunks == [50000]
 
     def test_preserves_compressor_dict(self, config_path):
-        enc = _load_encoding_config(config_path, {"n_obs": 1000, "n_vars": 500})
+        enc = load_encoding_config(config_path, {"n_obs": 1000, "n_vars": 500})
         assert enc.X.compressor == CompressorSpec(name="zstd", level=0)
         assert enc.obs.compressor == CompressorSpec(name="zstd", level=5)
 
     def test_obs_index_separate_from_obs(self, config_path):
-        enc = _load_encoding_config(config_path, {"n_obs": 1000, "n_vars": 500})
+        enc = load_encoding_config(config_path, {"n_obs": 1000, "n_vars": 500})
         assert enc.obs_index.shards == [500000]
         assert enc.obs.shards is None
 
     def test_empty_config(self, tmp_path):
         p = tmp_path / "empty.json"
         p.write_text("{}")
-        enc = _load_encoding_config(p, {"n_obs": 1000})
+        enc = load_encoding_config(p, {"n_obs": 1000})
         assert enc.X.chunks is None
         assert enc.obsm.chunks is None
         assert enc.obs.chunks is None
@@ -102,19 +96,19 @@ class TestLoadEncodingConfig:
 
 class TestMakeCompressor:
     def test_zstd_default(self):
-        c = _make_compressor({"name": "zstd"})
+        c = make_compressor({"name": "zstd"})
         assert "Zstd" in type(c).__name__
 
     def test_zstd_with_level(self):
-        c = _make_compressor({"name": "zstd", "level": 5})
+        c = make_compressor({"name": "zstd", "level": 5})
         assert c.level == 5
 
     def test_none_returns_auto(self):
-        assert _make_compressor(None) == "auto"
+        assert make_compressor(None) == "auto"
 
     def test_unknown_raises(self):
         with pytest.raises(ValueError, match="Unknown compressor"):
-            _make_compressor({"name": "lzma"})
+            make_compressor({"name": "lzma"})
 
 
 class TestEncodingConfigCLIDefaults:
