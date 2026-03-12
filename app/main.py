@@ -2,13 +2,13 @@
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
-
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from shardshaper.models import (
+    RunEntry, RunDataset, RunPerformance, RunZarrConfig, RunConversionConfig,
+)
 
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = APP_DIR.parent
@@ -18,69 +18,6 @@ LOGS_DIR = PROJECT_ROOT / "docs" / "logs"
 app = FastAPI(title="Zarr Conversion Dashboard")
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=APP_DIR / "templates")
-
-
-# ── Pydantic models (mirrored from convert_h5ad_to_zarr.py) ────
-
-RunStatus = Literal["running", "phase2", "completed", "failed", "cancelled", "killed"]
-
-
-class RunDataset(BaseModel):
-    model_config = {"extra": "allow"}
-    n_obs: int | None = None
-    n_vars: int | None = None
-    input_size_gb: float | None = None
-    input_format: str | None = None
-
-
-class RunPerformance(BaseModel):
-    model_config = {"extra": "allow"}
-    start_time: str | None = None
-    end_time: str | None = None
-    phase1_time_s: int | None = None
-    phase2_time_s: int | None = None
-    total_time_s: int | None = None
-    output_size_gb: float | None = None
-    avg_chunk_size_mb: float | None = None
-    compression_ratio: float | None = None
-    phase2_rate_batches_per_min: float | None = None
-
-
-class RunZarrConfig(BaseModel):
-    model_config = {"extra": "allow"}
-    format: str | None = None
-    chunk_shape: list[int] | None = None
-    sharding: list[int] | None = None
-    dtype: str | None = None
-    compression: str | None = None
-    target_encoding: dict[str, Any] | None = None
-    actual_encoding: dict[str, Any] | None = None
-
-
-class RunConversionConfig(BaseModel):
-    model_config = {"extra": "allow"}
-    approach: str | None = None
-    cell_chunk_size: int | None = None
-    temp_var_chunk: int | None = None
-    codec_pipeline: str | None = None
-    threads: int | None = None
-    skip_layers: bool | None = None
-    obsm_keys: list[str] | None = None
-    phase2_read_batch: int | None = None
-
-
-class RunEntry(BaseModel):
-    model_config = {"extra": "allow"}
-    run: int
-    date: str | None = None
-    status: RunStatus = "running"
-    script_args: dict[str, Any] | None = None
-    zarr_config: RunZarrConfig | None = None
-    conversion_config: RunConversionConfig | None = None
-    dataset: RunDataset | None = None
-    performance: RunPerformance | None = None
-    notes: str = ""
-    log_file: str | None = None
 
 
 # ── Data ─────────────────────────────────────────────────────────
