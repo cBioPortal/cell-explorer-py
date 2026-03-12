@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-shardshaper = "shardshaper.convert_h5ad_to_zarr:main"
+shardshaper = "shardshaper.cli:main"
 
 [dependency-groups]
 dev = [
