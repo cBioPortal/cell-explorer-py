@@ -198,6 +198,45 @@ css = [
 ]
 
 [[package]]
+name = "cell2zarr"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "anndata" },
+    { name = "fastapi" },
+    { name = "jinja2" },
+    { name = "jupyter" },
+    { name = "pydantic" },
+    { name = "scanpy" },
+    { name = "uvicorn" },
+    { name = "zarrs" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-watcher" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anndata", specifier = ">=0.12.6" },
+    { name = "fastapi", specifier = ">=0.134.0" },
+    { name = "jinja2", specifier = ">=3.1.6" },
+    { name = "jupyter", specifier = ">=1.1.1" },
+    { name = "pydantic", specifier = ">=2.12.5" },
+    { name = "scanpy", specifier = ">=1.11.5" },
+    { name = "uvicorn", specifier = ">=0.41.0" },
+    { name = "zarrs", specifier = ">=0.2.2" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-watcher", specifier = ">=0.6.3" },
+]
+
+[[package]]
 name = "certifi"
 version = "2025.11.12"
 source = { registry = "https://pypi.org/simple" }
@@ -2374,45 +2413,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/18/5d/3bf57dcd21979b887f014ea83c24ae194cfcd12b9e0fda66b957c69d1fca/setuptools-80.9.0.tar.gz", hash = "sha256:f36b47402ecde768dbfafc46e8e4207b4360c654f1f3bb84475f0a28628fb19c", size = 1319958, upload-time = "2025-05-27T00:56:51.443Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a3/dc/17031897dae0efacfea57dfd3a82fdd2a2aeb58e0ff71b77b87e44edc772/setuptools-80.9.0-py3-none-any.whl", hash = "sha256:062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922", size = 1201486, upload-time = "2025-05-27T00:56:49.664Z" },
-]
-
-[[package]]
-name = "shardshaper"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "anndata" },
-    { name = "fastapi" },
-    { name = "jinja2" },
-    { name = "jupyter" },
-    { name = "pydantic" },
-    { name = "scanpy" },
-    { name = "uvicorn" },
-    { name = "zarrs" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-watcher" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anndata", specifier = ">=0.12.6" },
-    { name = "fastapi", specifier = ">=0.134.0" },
-    { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "jupyter", specifier = ">=1.1.1" },
-    { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "scanpy", specifier = ">=1.11.5" },
-    { name = "uvicorn", specifier = ">=0.41.0" },
-    { name = "zarrs", specifier = ">=0.2.2" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=9.0.2" },
-    { name = "pytest-watcher", specifier = ">=0.6.3" },
 ]
 
 [[package]]

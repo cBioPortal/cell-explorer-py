@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from shardshaper.models import (
+from cell2zarr.models import (
     RunEntry, RunDataset, RunPerformance, RunZarrConfig, RunConversionConfig,
 )
 
@@ -100,7 +100,7 @@ def fmt_rate(perf):
 def build_cmd(args):
     if not args:
         return ""
-    parts = ["shardshaper", args.get("input", "")]
+    parts = ["cell2zarr", args.get("input", "")]
     if args.get("output"):
         parts.append(args["output"])
     for k, v in args.items():

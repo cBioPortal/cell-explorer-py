@@ -2,8 +2,8 @@
 import json
 import pytest
 
-from shardshaper.run_log import read_runs, write_runs, get_next_run_number, update_run_entry
-from shardshaper.models import RunEntry, RunDataset, RunPerformance, RunZarrConfig
+from cell2zarr.run_log import read_runs, write_runs, get_next_run_number, update_run_entry
+from cell2zarr.models import RunEntry, RunDataset, RunPerformance, RunZarrConfig
 
 
 @pytest.fixture

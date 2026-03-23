@@ -2,8 +2,8 @@
 import json
 import pytest
 
-from shardshaper.encoding import resolve_template, load_encoding_config, make_compressor
-from shardshaper.models import EncodingConfig, ArrayEncoding, CompressorSpec
+from cell2zarr.encoding import resolve_template, load_encoding_config, make_compressor
+from cell2zarr.models import EncodingConfig, ArrayEncoding, CompressorSpec
 
 
 class TestResolveTemplate:
