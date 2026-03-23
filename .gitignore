@@ -15,5 +15,8 @@ docs/
 # Data symlink
 data
 
+# Notebooks
+notebooks/
+
 # Local agent/AI config
 *.local.md
