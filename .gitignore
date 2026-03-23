@@ -11,3 +11,6 @@ wheels/
 
 # Documentation (generated/local)
 docs/
+
+# Local agent/AI config
+*.local.md
