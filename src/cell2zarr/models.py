@@ -1,4 +1,4 @@
-"""Pydantic models for shardshaper."""
+"""Pydantic models for cell2zarr."""
 from pathlib import Path
 from typing import Any, Literal
 

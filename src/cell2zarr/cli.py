@@ -1,4 +1,4 @@
-"""CLI entry point for shardshaper."""
+"""CLI entry point for cell2zarr."""
 import argparse
 import json
 import sys
