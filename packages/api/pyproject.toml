@@ -14,5 +14,9 @@ dependencies = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.uv.sources]
+cell-explorer-auth = { workspace = true }
+cell-explorer-core = { workspace = true }
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/cell_explorer_api"]

@@ -2,7 +2,6 @@
 name = "cell2zarr"
 version = "0.1.0"
 description = "h5ad to Zarr conversion pipeline for single-cell RNA-seq data"
-readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "anndata>=0.12.6",
