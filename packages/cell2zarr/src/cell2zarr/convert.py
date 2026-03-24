@@ -390,6 +390,7 @@ def _write_metadata(final_root, final_store, metadata: dict, config: ConversionC
             for c in str_cols:
                 df[c] = df[c].astype("category")
 
+    ad.settings.allow_write_nullable_strings = True
     write_elem(final_root, "obs", metadata["obs"])
     write_elem(final_root, "var", metadata["var"])
 
