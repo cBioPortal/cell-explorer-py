@@ -151,8 +151,7 @@ async def index(request: Request):
 
     runs_json = json.dumps([r.model_dump(exclude_none=True) for r in runs])
 
-    return templates.TemplateResponse("index.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "index.html", context={
         "runs": runs,
         "runs_reversed": list(reversed(runs)),
         "summary": summary,
