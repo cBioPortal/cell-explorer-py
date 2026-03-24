@@ -518,17 +518,17 @@ def convert_h5ad_to_zarr_chunked(config: ConversionConfig, hooks: dict[str, Call
         if hooks and "on_phase1_done" in hooks:
             hooks["on_phase1_done"](phase1_time=phase1_time)
 
-        metadata = _extract_metadata(adata_backed, var_idx, n_obs, config.cell_chunk_size)
-
         final_root, final_store, phase2_time = _phase2_rechunk(
             config, tmp_root, n_obs, n_vars, v_chunk, has_layers, layer_names, encoding,
         )
 
-        _write_metadata(final_root, final_store, metadata, config, encoding)
-
-        # Clean up temp zarr
+        # Clean up temp zarr before loading metadata to free memory
         print(f"Cleaning up temp dir: {tmp_dir}", flush=True)
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        metadata = _extract_metadata(adata_backed, var_idx, n_obs, config.cell_chunk_size)
+
+        _write_metadata(final_root, final_store, metadata, config, encoding)
 
         total_time = phase1_time + phase2_time
         print(f"\n✓ Done in {total_time:.0f}s (phase1: {phase1_time:.0f}s, phase2: {phase2_time:.0f}s)", flush=True)
