@@ -44,6 +44,7 @@ class ConversionConfig(BaseModel):
     run_log: Path | None = None
     log_dir: Path | None = None
     encoding_config: Path | None = None
+    temp_dir: Path | None = None
 
     model_config = {"arbitrary_types_allowed": True}
 

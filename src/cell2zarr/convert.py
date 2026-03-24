@@ -162,7 +162,7 @@ def _phase1_write_temp_zarr(config: ConversionConfig, adata_backed, var_idx, n_o
 
     n_cell_chunks = (n_obs + config.cell_chunk_size - 1) // config.cell_chunk_size
 
-    tmp_dir = tempfile.mkdtemp(prefix="zarr_convert_")
+    tmp_dir = tempfile.mkdtemp(prefix="zarr_convert_", dir=config.temp_dir)
     tmp_zarr_path = Path(tmp_dir) / "temp.zarr"
     print(f"\n=== Phase 1: Writing row-chunked temp zarr ===", flush=True)
     print(f"Temp location: {tmp_zarr_path}", flush=True)

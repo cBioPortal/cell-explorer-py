@@ -191,6 +191,11 @@ def main():
         type=Path,
         help="Path to JSON encoding config file specifying chunks, shards, dtype, and compressor for X, obsm, and obs arrays."
     )
+    parser.add_argument(
+        "--temp-dir",
+        type=Path,
+        help="Directory for phase 1 temp zarr. Defaults to system /tmp. Use a large disk if /tmp is too small."
+    )
     args = parser.parse_args()
 
     # Validate input file
@@ -238,6 +243,7 @@ def main():
             run_log=args.run_log,
             log_dir=args.log_dir,
             encoding_config=args.encoding_config,
+            temp_dir=args.temp_dir,
         )
 
         # Set up run logging and hooks if --run-log provided
