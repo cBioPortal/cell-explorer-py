@@ -11,7 +11,8 @@ from cell2zarr.models import (
 )
 
 APP_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = APP_DIR.parent
+PACKAGE_ROOT = APP_DIR.parent
+PROJECT_ROOT = PACKAGE_ROOT.parent.parent
 RUNS_FILE = PROJECT_ROOT / "docs" / "conversion-runs.json"
 LOGS_DIR = PROJECT_ROOT / "docs" / "logs"
 
