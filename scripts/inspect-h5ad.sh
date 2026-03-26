@@ -7,12 +7,5 @@ if [ -z "$1" ]; then
     exit 1
 fi
 
-uv run python -c "
-import h5py, sys
-with h5py.File(sys.argv[1], 'r') as f:
-    for key in f.keys():
-        if hasattr(f[key], 'keys'):
-            print(f'{key}: {list(f[key].keys())}')
-        else:
-            print(f'{key}: {f[key].shape} {f[key].dtype}')
-" "$1"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+uv run python "$SCRIPT_DIR/inspect_h5ad.py" "$1"
