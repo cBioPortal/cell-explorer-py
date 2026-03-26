@@ -163,3 +163,84 @@ class TestAddKeyToStore:
         import pytest
         with pytest.raises(SystemExit):
             add_key_to_store(h5ad_path, zarr_path, key="obsp", overwrite=False, dtype="float32")
+
+
+class TestAddLargeKeys:
+    def test_add_X(self, tmp_path):
+        h5ad_path = tmp_path / "test.h5ad"
+        zarr_path = tmp_path / "test.zarr"
+        adata = _create_test_h5ad(h5ad_path, n_obs=100, n_vars=50)
+        _create_test_store(zarr_path)
+
+        add_key_to_store(h5ad_path, zarr_path, key="X", overwrite=False, dtype="float32", temp_dir=tmp_path)
+
+        root = zarr.open_group(zarr.storage.LocalStore(str(zarr_path)), mode="r")
+        assert "X" in root
+        assert root["X"].shape == (100, 50)
+        np.testing.assert_array_almost_equal(root["X"][:], adata.X, decimal=5)
+
+    def test_add_X_overwrite_fails(self, tmp_path):
+        h5ad_path = tmp_path / "test.h5ad"
+        zarr_path = tmp_path / "test.zarr"
+        _create_test_h5ad(h5ad_path)
+        _create_test_store(zarr_path)
+
+        add_key_to_store(h5ad_path, zarr_path, key="X", overwrite=False, dtype="float32", temp_dir=tmp_path)
+
+        import pytest
+        with pytest.raises(SystemExit):
+            add_key_to_store(h5ad_path, zarr_path, key="X", overwrite=False, dtype="float32", temp_dir=tmp_path)
+
+    def test_add_X_overwrite_succeeds(self, tmp_path):
+        h5ad_path = tmp_path / "test.h5ad"
+        zarr_path = tmp_path / "test.zarr"
+        _create_test_h5ad(h5ad_path)
+        _create_test_store(zarr_path)
+
+        add_key_to_store(h5ad_path, zarr_path, key="X", overwrite=False, dtype="float32", temp_dir=tmp_path)
+        add_key_to_store(h5ad_path, zarr_path, key="X", overwrite=True, dtype="float32", temp_dir=tmp_path)
+
+        root = zarr.open_group(zarr.storage.LocalStore(str(zarr_path)), mode="r")
+        assert root["X"].shape == (100, 50)
+
+    def test_add_layer(self, tmp_path):
+        h5ad_path = tmp_path / "test.h5ad"
+        zarr_path = tmp_path / "test.zarr"
+        n_obs, n_vars = 50, 20
+        adata = _create_test_h5ad(h5ad_path, n_obs=n_obs, n_vars=n_vars)
+        adata.layers["counts"] = np.random.randn(n_obs, n_vars).astype(np.float32)
+        adata.write_h5ad(h5ad_path)
+        _create_test_store(zarr_path)
+
+        add_key_to_store(h5ad_path, zarr_path, key="layers/counts", overwrite=False, dtype="float32", temp_dir=tmp_path)
+
+        root = zarr.open_group(zarr.storage.LocalStore(str(zarr_path)), mode="r")
+        assert "layers" in root
+        assert "counts" in root["layers"]
+        assert root["layers"]["counts"].shape == (n_obs, n_vars)
+
+    def test_add_all_layers(self, tmp_path):
+        h5ad_path = tmp_path / "test.h5ad"
+        zarr_path = tmp_path / "test.zarr"
+        n_obs, n_vars = 50, 20
+        adata = _create_test_h5ad(h5ad_path, n_obs=n_obs, n_vars=n_vars)
+        adata.layers["counts"] = np.random.randn(n_obs, n_vars).astype(np.float32)
+        adata.layers["normalized"] = np.random.randn(n_obs, n_vars).astype(np.float32)
+        adata.write_h5ad(h5ad_path)
+        _create_test_store(zarr_path)
+
+        add_key_to_store(h5ad_path, zarr_path, key="layers", overwrite=False, dtype="float32", temp_dir=tmp_path)
+
+        root = zarr.open_group(zarr.storage.LocalStore(str(zarr_path)), mode="r")
+        assert "counts" in root["layers"]
+        assert "normalized" in root["layers"]
+
+    def test_add_raw_not_supported(self, tmp_path):
+        h5ad_path = tmp_path / "test.h5ad"
+        zarr_path = tmp_path / "test.zarr"
+        _create_test_h5ad(h5ad_path)
+        _create_test_store(zarr_path)
+
+        import pytest
+        with pytest.raises(SystemExit):
+            add_key_to_store(h5ad_path, zarr_path, key="raw", overwrite=False, dtype="float32")
