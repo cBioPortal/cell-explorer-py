@@ -376,10 +376,49 @@ def _phase2_rechunk(config: ConversionConfig, tmp_root, n_obs: int, n_vars: int,
     return final_root, final_store, phase2_time
 
 
+def write_obsm_to_store(
+    root,
+    obsm_data: dict[str, np.ndarray],
+    n_obs: int,
+    dtype: str = "float32",
+    encoding: EncodingConfig | None = None,
+    obsm_cell_chunk_size: int = 50000,
+) -> None:
+    """Write obsm arrays to a zarr store with chunking and sharding."""
+    if not obsm_data:
+        return
+
+    target_dtype = np.dtype(dtype)
+    obsm_enc = encoding.obsm if encoding else ArrayEncoding()
+    obsm_compressor_kwarg = {}
+    if obsm_enc.compressor:
+        obsm_compressor_kwarg["compressors"] = make_compressor(obsm_enc.compressor)
+
+    obsm_group = root.require_group("obsm")
+    for key, data in obsm_data.items():
+        n_dim = data.shape[1] if data.ndim > 1 else 1
+        dim_vars = {"n_dim": n_dim, "n_obs": n_obs}
+        obsm_chunks = tuple(resolve_template(v, dim_vars) for v in obsm_enc.chunks) if obsm_enc.chunks else (min(obsm_cell_chunk_size, n_obs), 1)
+        obsm_shards = tuple(resolve_template(v, dim_vars) for v in obsm_enc.shards) if obsm_enc.shards else (min(1_000_000, n_obs), n_dim)
+        obsm_shards = tuple(((s + c - 1) // c) * c for s, c in zip(obsm_shards, obsm_chunks))
+        print(f"Writing obsm/{key} shape=({n_obs}, {n_dim}), chunks={obsm_chunks}, shards={obsm_shards}, dtype={target_dtype}...", flush=True)
+        zarr_embed = obsm_group.create_array(
+            key,
+            shape=(n_obs, n_dim),
+            chunks=obsm_chunks,
+            shards=obsm_shards,
+            dtype=target_dtype,
+            overwrite=True,
+            **obsm_compressor_kwarg,
+        )
+        zarr_embed.attrs["encoding-type"] = "array"
+        zarr_embed.attrs["encoding-version"] = "0.2.0"
+        zarr_embed[:] = data.astype(target_dtype)
+
+
 def _write_metadata(final_root, final_store, metadata: dict, config: ConversionConfig, encoding: EncodingConfig | None = None) -> None:
     """Write obs, var, obsm, uns, obsp, varp to the final zarr store."""
     n_obs = len(metadata["obs"])
-    target_dtype = np.dtype(config.dtype)
     print("Writing metadata...", flush=True)
 
     # Convert string columns to categoricals for compact storage
@@ -394,35 +433,8 @@ def _write_metadata(final_root, final_store, metadata: dict, config: ConversionC
     write_elem(final_root, "obs", metadata["obs"])
     write_elem(final_root, "var", metadata["var"])
 
-    obsm_data = metadata["obsm"]
-    cell_chunk = min(config.obsm_cell_chunk_size, n_obs)
-    obsm_enc = encoding.obsm if encoding else ArrayEncoding()
-    obsm_compressor_kwarg = {}
-    if obsm_enc.compressor:
-        obsm_compressor_kwarg["compressors"] = make_compressor(obsm_enc.compressor)
-    if obsm_data:
-        obsm_group = final_root.require_group("obsm")
-        for key, data in obsm_data.items():
-            n_dim = data.shape[1] if data.ndim > 1 else 1
-            # Resolve {n_dim} in obsm encoding per key
-            dim_vars = {"n_dim": n_dim, "n_obs": n_obs}
-            obsm_chunks = tuple(resolve_template(v, dim_vars) for v in obsm_enc.chunks) if obsm_enc.chunks else (min(100_000, n_obs), 1)
-            obsm_shards = tuple(resolve_template(v, dim_vars) for v in obsm_enc.shards) if obsm_enc.shards else (min(1_000_000, n_obs), n_dim)
-            # Shard dims must be exact multiples of chunk dims (zarr v3 requirement)
-            obsm_shards = tuple(((s + c - 1) // c) * c for s, c in zip(obsm_shards, obsm_chunks))
-            print(f"Writing obsm/{key} shape=({n_obs}, {n_dim}), chunks={obsm_chunks}, shards={obsm_shards}, dtype={target_dtype}...", flush=True)
-            zarr_embed = obsm_group.create_array(
-                key,
-                shape=(n_obs, n_dim),
-                chunks=obsm_chunks,
-                shards=obsm_shards,
-                dtype=target_dtype,
-                overwrite=True,
-                **obsm_compressor_kwarg,
-            )
-            zarr_embed.attrs["encoding-type"] = "array"
-            zarr_embed.attrs["encoding-version"] = "0.2.0"
-            zarr_embed[:] = data.astype(target_dtype)
+    obsm_cell_chunk = min(config.obsm_cell_chunk_size, n_obs)
+    write_obsm_to_store(final_root, metadata["obsm"], n_obs, config.dtype, encoding, config.obsm_cell_chunk_size)
 
     # Rechunk obs/_index to align with obsm chunk boundaries
     idx_enc = encoding.obs_index if encoding else ArrayEncoding()
@@ -432,7 +444,7 @@ def _write_metadata(final_root, final_store, metadata: dict, config: ConversionC
         idx_compressor_kwarg["compressors"] = make_compressor(idx_enc.compressor)
     elif obs_enc.compressor:
         idx_compressor_kwarg["compressors"] = make_compressor(obs_enc.compressor)
-    idx_chunk_size = idx_enc.chunks[0] if idx_enc.chunks else cell_chunk
+    idx_chunk_size = idx_enc.chunks[0] if idx_enc.chunks else obsm_cell_chunk
     idx_shard_kwarg = {}
     if idx_enc.shards:
         idx_shard_kwarg["shards"] = (idx_enc.shards[0],)
