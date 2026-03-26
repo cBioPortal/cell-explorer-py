@@ -18,5 +18,8 @@ data
 # Notebooks
 notebooks/
 
+# Local scripts and config (machine-specific)
+.local/
+
 # Local agent/AI config
 *.local.md
