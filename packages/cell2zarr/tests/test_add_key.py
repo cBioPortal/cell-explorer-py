@@ -282,3 +282,27 @@ class TestCLISubcommands:
             capture_output=True, text=True,
         )
         assert result.returncode == 0
+
+
+class TestEndToEnd:
+    def test_convert_then_add_obsm(self, tmp_path):
+        """Full workflow: create zarr store, then add obsm with add_key_to_store."""
+        h5ad_path = tmp_path / "test.h5ad"
+        zarr_path = tmp_path / "test.zarr"
+
+        # Create h5ad with obsm
+        n_obs, n_vars = 50, 20
+        adata = _create_test_h5ad(h5ad_path, n_obs=n_obs, n_vars=n_vars)
+        original_umap = adata.obsm["X_umap"].copy()
+
+        # Create an empty zarr v3 store (simulating convert output)
+        _create_test_store(zarr_path)
+
+        # Add obsm using add_key_to_store
+        add_key_to_store(h5ad_path, zarr_path, key="obsm", overwrite=False, dtype="float32")
+
+        # Verify obsm is there and correct
+        root = zarr.open_group(zarr.storage.LocalStore(str(zarr_path)), mode="r")
+        assert "obsm" in root
+        assert "X_umap" in root["obsm"]
+        assert root["obsm"]["X_umap"].shape == (n_obs, 2)
