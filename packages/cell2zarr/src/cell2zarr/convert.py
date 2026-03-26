@@ -480,6 +480,156 @@ def _write_metadata(final_root, final_store, metadata: dict, config: ConversionC
     zarr.consolidate_metadata(final_store, zarr_format=3)
 
 
+SUB_KEY_ALLOWED = {"obsm", "layers"}
+
+VALID_KEYS = {"obs", "var", "obsm", "uns", "obsp", "varp", "X", "layers", "raw"}
+
+LARGE_KEYS = {"X", "layers", "raw"}
+
+
+def _add_obsm(adata, root, n_obs: int, sub_key: str | None, overwrite: bool, dtype: str, encoding: EncodingConfig | None) -> None:
+    """Write obsm (or a single sub-key of obsm) to the zarr store."""
+    if sub_key is not None:
+        if sub_key not in adata.obsm:
+            print(f"ERROR: obsm/{sub_key} not found in h5ad file", flush=True)
+            sys.exit(1)
+        keys_to_write = [sub_key]
+    else:
+        keys_to_write = list(adata.obsm.keys())
+
+    if not overwrite:
+        obsm_group = root["obsm"] if "obsm" in root else None
+        for k in keys_to_write:
+            if obsm_group is not None and k in obsm_group:
+                # Check at array level (not group level)
+                try:
+                    obsm_group[k]  # will raise if not exists
+                    print(f"ERROR: obsm/{k} already exists in zarr store. Use overwrite=True to overwrite.", flush=True)
+                    sys.exit(1)
+                except KeyError:
+                    pass
+
+    obsm_data = {k: np.array(adata.obsm[k]) for k in keys_to_write}
+    write_obsm_to_store(root, obsm_data, n_obs=n_obs, dtype=dtype, encoding=encoding)
+
+
+def _add_obs_or_var(adata, root, key: str, overwrite: bool) -> None:
+    """Write obs or var dataframe to the zarr store."""
+    if not overwrite and key in root:
+        print(f"ERROR: {key} already exists in zarr store. Use overwrite=True to overwrite.", flush=True)
+        sys.exit(1)
+
+    df = getattr(adata, key).copy()
+    str_cols = [c for c in df.columns if df[c].dtype == object]
+    if str_cols:
+        for c in str_cols:
+            df[c] = df[c].astype("category")
+
+    ad.settings.allow_write_nullable_strings = True
+    write_elem(root, key, df)
+
+
+def _add_write_elem_key(adata, root, key: str, overwrite: bool) -> None:
+    """Write uns, obsp, or varp to the zarr store."""
+    if not overwrite and key in root:
+        print(f"ERROR: {key} already exists in zarr store. Use overwrite=True to overwrite.", flush=True)
+        sys.exit(1)
+
+    data = getattr(adata, key)
+    if data is None or (hasattr(data, "__len__") and len(data) == 0):
+        print(f"WARNING: {key} is empty in h5ad file, skipping.", flush=True)
+        sys.exit(1)
+
+    write_elem(root, key, dict(data))
+
+
+def add_key_to_store(
+    h5ad_path: Path | str,
+    zarr_path: Path | str,
+    key: str,
+    overwrite: bool = False,
+    dtype: str = "float32",
+    encoding: EncodingConfig | None = None,
+    temp_dir: Path | str | None = None,
+) -> None:
+    """Add a key from an h5ad file to an existing zarr store.
+
+    Parameters
+    ----------
+    h5ad_path : Path or str
+        Path to the source h5ad file.
+    zarr_path : Path or str
+        Path to an existing zarr v3 store.
+    key : str
+        Key to write, e.g. "obsm", "obsm/X_umap", "obs", "var", "uns", "obsp", "varp".
+    overwrite : bool
+        If True, overwrite existing keys. If False, exit with error if key exists.
+    dtype : str
+        Data type for numeric arrays (e.g. "float32").
+    encoding : EncodingConfig or None
+        Optional encoding config for chunking/sharding/compression.
+    temp_dir : Path or None
+        Temporary directory (reserved for future use).
+    """
+    h5ad_path = Path(h5ad_path)
+    zarr_path = Path(zarr_path)
+
+    # Validate inputs
+    if not h5ad_path.exists():
+        print(f"ERROR: h5ad file not found: {h5ad_path}", flush=True)
+        sys.exit(1)
+    if not zarr_path.exists():
+        print(f"ERROR: zarr store not found: {zarr_path}", flush=True)
+        sys.exit(1)
+
+    # Parse key into top_key and optional sub_key
+    parts = key.split("/", 1)
+    top_key = parts[0]
+    sub_key = parts[1] if len(parts) > 1 else None
+
+    # Validate top_key
+    if top_key not in VALID_KEYS:
+        print(f"ERROR: Invalid key '{top_key}'. Must be one of: {sorted(VALID_KEYS)}", flush=True)
+        sys.exit(1)
+
+    # Validate sub_key usage
+    if sub_key is not None and top_key not in SUB_KEY_ALLOWED:
+        print(f"ERROR: Sub-keys are only allowed for: {sorted(SUB_KEY_ALLOWED)}. Got '{key}'.", flush=True)
+        sys.exit(1)
+
+    # Large keys not yet supported
+    if top_key in LARGE_KEYS:
+        print(f"ERROR: Writing '{top_key}' is not yet supported (Task 3). Only small keys are supported: obs, var, obsm, uns, obsp, varp.", flush=True)
+        sys.exit(1)
+
+    adata = None
+    try:
+        print(f"Reading h5ad file: {h5ad_path}", flush=True)
+        adata = ad.read_h5ad(h5ad_path, backed="r")
+        n_obs = adata.n_obs
+
+        store = zarr.storage.LocalStore(str(zarr_path))
+        root = zarr.open_group(store, mode="r+", zarr_format=3)
+
+        if top_key == "obsm":
+            _add_obsm(adata, root, n_obs, sub_key, overwrite, dtype, encoding)
+        elif top_key in ("obs", "var"):
+            _add_obs_or_var(adata, root, top_key, overwrite)
+        elif top_key in ("uns", "obsp", "varp"):
+            _add_write_elem_key(adata, root, top_key, overwrite)
+
+        zarr.consolidate_metadata(store, zarr_format=3)
+        print(f"Successfully wrote '{key}' to zarr store.", flush=True)
+
+    finally:
+        if adata is not None:
+            try:
+                if adata.file is not None:
+                    adata.file.close()
+            except Exception:
+                pass
+
+
 def convert_h5ad_to_zarr_chunked(config: ConversionConfig, hooks: dict[str, Callable] | None = None) -> None:
     """Convert h5ad to dense zarr using two-phase approach.
 
