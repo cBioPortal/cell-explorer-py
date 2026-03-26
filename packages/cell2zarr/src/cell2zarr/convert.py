@@ -376,10 +376,49 @@ def _phase2_rechunk(config: ConversionConfig, tmp_root, n_obs: int, n_vars: int,
     return final_root, final_store, phase2_time
 
 
+def write_obsm_to_store(
+    root,
+    obsm_data: dict[str, np.ndarray],
+    n_obs: int,
+    dtype: str = "float32",
+    encoding: EncodingConfig | None = None,
+    obsm_cell_chunk_size: int = 50000,
+) -> None:
+    """Write obsm arrays to a zarr store with chunking and sharding."""
+    if not obsm_data:
+        return
+
+    target_dtype = np.dtype(dtype)
+    obsm_enc = encoding.obsm if encoding else ArrayEncoding()
+    obsm_compressor_kwarg = {}
+    if obsm_enc.compressor:
+        obsm_compressor_kwarg["compressors"] = make_compressor(obsm_enc.compressor)
+
+    obsm_group = root.require_group("obsm")
+    for key, data in obsm_data.items():
+        n_dim = data.shape[1] if data.ndim > 1 else 1
+        dim_vars = {"n_dim": n_dim, "n_obs": n_obs}
+        obsm_chunks = tuple(resolve_template(v, dim_vars) for v in obsm_enc.chunks) if obsm_enc.chunks else (min(obsm_cell_chunk_size, n_obs), 1)
+        obsm_shards = tuple(resolve_template(v, dim_vars) for v in obsm_enc.shards) if obsm_enc.shards else (min(1_000_000, n_obs), n_dim)
+        obsm_shards = tuple(((s + c - 1) // c) * c for s, c in zip(obsm_shards, obsm_chunks))
+        print(f"Writing obsm/{key} shape=({n_obs}, {n_dim}), chunks={obsm_chunks}, shards={obsm_shards}, dtype={target_dtype}...", flush=True)
+        zarr_embed = obsm_group.create_array(
+            key,
+            shape=(n_obs, n_dim),
+            chunks=obsm_chunks,
+            shards=obsm_shards,
+            dtype=target_dtype,
+            overwrite=True,
+            **obsm_compressor_kwarg,
+        )
+        zarr_embed.attrs["encoding-type"] = "array"
+        zarr_embed.attrs["encoding-version"] = "0.2.0"
+        zarr_embed[:] = data.astype(target_dtype)
+
+
 def _write_metadata(final_root, final_store, metadata: dict, config: ConversionConfig, encoding: EncodingConfig | None = None) -> None:
     """Write obs, var, obsm, uns, obsp, varp to the final zarr store."""
     n_obs = len(metadata["obs"])
-    target_dtype = np.dtype(config.dtype)
     print("Writing metadata...", flush=True)
 
     # Convert string columns to categoricals for compact storage
@@ -394,35 +433,8 @@ def _write_metadata(final_root, final_store, metadata: dict, config: ConversionC
     write_elem(final_root, "obs", metadata["obs"])
     write_elem(final_root, "var", metadata["var"])
 
-    obsm_data = metadata["obsm"]
-    cell_chunk = min(config.obsm_cell_chunk_size, n_obs)
-    obsm_enc = encoding.obsm if encoding else ArrayEncoding()
-    obsm_compressor_kwarg = {}
-    if obsm_enc.compressor:
-        obsm_compressor_kwarg["compressors"] = make_compressor(obsm_enc.compressor)
-    if obsm_data:
-        obsm_group = final_root.require_group("obsm")
-        for key, data in obsm_data.items():
-            n_dim = data.shape[1] if data.ndim > 1 else 1
-            # Resolve {n_dim} in obsm encoding per key
-            dim_vars = {"n_dim": n_dim, "n_obs": n_obs}
-            obsm_chunks = tuple(resolve_template(v, dim_vars) for v in obsm_enc.chunks) if obsm_enc.chunks else (min(100_000, n_obs), 1)
-            obsm_shards = tuple(resolve_template(v, dim_vars) for v in obsm_enc.shards) if obsm_enc.shards else (min(1_000_000, n_obs), n_dim)
-            # Shard dims must be exact multiples of chunk dims (zarr v3 requirement)
-            obsm_shards = tuple(((s + c - 1) // c) * c for s, c in zip(obsm_shards, obsm_chunks))
-            print(f"Writing obsm/{key} shape=({n_obs}, {n_dim}), chunks={obsm_chunks}, shards={obsm_shards}, dtype={target_dtype}...", flush=True)
-            zarr_embed = obsm_group.create_array(
-                key,
-                shape=(n_obs, n_dim),
-                chunks=obsm_chunks,
-                shards=obsm_shards,
-                dtype=target_dtype,
-                overwrite=True,
-                **obsm_compressor_kwarg,
-            )
-            zarr_embed.attrs["encoding-type"] = "array"
-            zarr_embed.attrs["encoding-version"] = "0.2.0"
-            zarr_embed[:] = data.astype(target_dtype)
+    obsm_cell_chunk = min(config.obsm_cell_chunk_size, n_obs)
+    write_obsm_to_store(final_root, metadata["obsm"], n_obs, config.dtype, encoding, config.obsm_cell_chunk_size)
 
     # Rechunk obs/_index to align with obsm chunk boundaries
     idx_enc = encoding.obs_index if encoding else ArrayEncoding()
@@ -432,7 +444,7 @@ def _write_metadata(final_root, final_store, metadata: dict, config: ConversionC
         idx_compressor_kwarg["compressors"] = make_compressor(idx_enc.compressor)
     elif obs_enc.compressor:
         idx_compressor_kwarg["compressors"] = make_compressor(obs_enc.compressor)
-    idx_chunk_size = idx_enc.chunks[0] if idx_enc.chunks else cell_chunk
+    idx_chunk_size = idx_enc.chunks[0] if idx_enc.chunks else obsm_cell_chunk
     idx_shard_kwarg = {}
     if idx_enc.shards:
         idx_shard_kwarg["shards"] = (idx_enc.shards[0],)
@@ -466,6 +478,346 @@ def _write_metadata(final_root, final_store, metadata: dict, config: ConversionC
         write_elem(final_root, "varp", metadata["varp"])
 
     zarr.consolidate_metadata(final_store, zarr_format=3)
+
+
+SUB_KEY_ALLOWED = {"obsm", "layers"}
+
+VALID_KEYS = {"obs", "var", "obsm", "uns", "obsp", "varp", "X", "layers", "raw"}
+
+LARGE_KEYS = {"X", "layers"}
+
+
+def _add_large_matrix(
+    adata,
+    root,
+    store,
+    array_name: str,
+    matrix_getter,
+    overwrite: bool,
+    dtype: str,
+    encoding: EncodingConfig | None,
+    temp_dir: Path | str | None,
+    group_name: str | None = None,
+) -> None:
+    """Add a large matrix (X or a single layer) using a two-phase pipeline.
+
+    Parameters
+    ----------
+    adata : AnnData (backed)
+        Backed AnnData object to read from.
+    root : zarr.Group
+        Root group of the target zarr store.
+    store : zarr.storage.LocalStore
+        The target zarr store (for consolidate_metadata).
+    array_name : str
+        Name of the array to write (e.g. "X" or "counts").
+    matrix_getter : callable or None
+        Callable(chunk) -> matrix. None means use chunk.X.
+    overwrite : bool
+        If False, exit with error if the array already exists.
+    dtype : str
+        Target dtype string (e.g. "float32").
+    encoding : EncodingConfig or None
+        Optional encoding config.
+    temp_dir : Path, str, or None
+        Directory for temp zarr. Uses system temp if None.
+    group_name : str or None
+        Optional group within root to write into (e.g. "layers").
+    """
+    # Determine target group
+    if group_name is not None:
+        target_group = root.require_group(group_name)
+    else:
+        target_group = root
+
+    # Check overwrite
+    if not overwrite and array_name in target_group:
+        path = f"{group_name}/{array_name}" if group_name else array_name
+        print(f"ERROR: {path} already exists in zarr store. Use overwrite=True to overwrite.", flush=True)
+        sys.exit(1)
+
+    n_obs, n_vars = adata.n_obs, adata.n_vars
+    cell_chunk_size = 10000
+    tmp_var_chunk = min(1000, n_vars)
+
+    # Encoding config for this array
+    target_dtype = np.dtype(dtype)
+    x_enc = encoding.X if encoding else ArrayEncoding()
+    v_chunk = x_enc.chunks[1] if (x_enc.chunks and len(x_enc.chunks) > 1) else 10
+    v_chunk = min(v_chunk, n_vars)
+
+    shard_kwarg = {}
+    compressor_kwarg = {}
+    if x_enc.shards and len(x_enc.shards) > 1:
+        shard_kwarg["shards"] = (n_obs, x_enc.shards[1])
+    if x_enc.compressor:
+        compressor_kwarg["compressors"] = make_compressor(x_enc.compressor)
+
+    # Phase 1: stream h5ad → row-chunked temp zarr
+    tmp_dir_obj = tempfile.mkdtemp(prefix="zarr_convert_", dir=temp_dir)
+    tmp_zarr_path = Path(tmp_dir_obj) / "temp.zarr"
+    print(f"\n=== Phase 1: Writing row-chunked temp zarr for '{array_name}' ===", flush=True)
+    print(f"Temp location: {tmp_zarr_path}", flush=True)
+
+    tmp_store = zarr.storage.LocalStore(str(tmp_zarr_path))
+    tmp_root = zarr.open_group(tmp_store, mode="w", zarr_format=3)
+    tmp_arr = tmp_root.create_array(
+        "data",
+        shape=(n_obs, n_vars),
+        chunks=(cell_chunk_size, tmp_var_chunk),
+        dtype="float32",
+        overwrite=True,
+    )
+
+    n_cell_chunks = (n_obs + cell_chunk_size - 1) // cell_chunk_size
+    print(f"Streaming {n_obs:,} cells in {n_cell_chunks} chunks of {cell_chunk_size:,}", flush=True)
+    phase1_start = time.time()
+
+    for ci in range(n_cell_chunks):
+        c_start = ci * cell_chunk_size
+        c_end = min((ci + 1) * cell_chunk_size, n_obs)
+        chunk = adata[c_start:c_end, :].to_memory()
+
+        if matrix_getter is not None:
+            mat = matrix_getter(chunk)
+        else:
+            mat = chunk.X
+
+        mat_dense = mat.toarray() if sparse.issparse(mat) else np.asarray(mat)
+        tmp_arr[c_start:c_end, :] = mat_dense.astype(np.float32)
+
+        del chunk, mat_dense
+        gc.collect()
+
+        if (ci + 1) % 50 == 0 or ci == n_cell_chunks - 1:
+            elapsed = time.time() - phase1_start
+            pct = (ci + 1) / n_cell_chunks * 100
+            print(f"  Cell chunk {ci + 1}/{n_cell_chunks} ({pct:.0f}%) — {elapsed:.0f}s elapsed", flush=True)
+
+    phase1_time = time.time() - phase1_start
+    print(f"Phase 1 complete in {phase1_time:.0f}s", flush=True)
+
+    # Phase 2: rechunk temp → column-oriented final array
+    print(f"\n=== Phase 2: Rechunking '{array_name}' to ({n_obs:,}, {v_chunk}), dtype={target_dtype} ===", flush=True)
+    final_arr = target_group.create_array(
+        array_name,
+        shape=(n_obs, n_vars),
+        chunks=(n_obs, v_chunk),
+        dtype=target_dtype,
+        overwrite=True,
+        **shard_kwarg,
+        **compressor_kwarg,
+    )
+    final_arr.attrs["encoding-type"] = "array"
+    final_arr.attrs["encoding-version"] = "0.2.0"
+
+    read_batch = v_chunk
+    n_batches = (n_vars + read_batch - 1) // read_batch
+    phase2_start = time.time()
+
+    for bi in range(n_batches):
+        b_start = bi * read_batch
+        b_end = min((bi + 1) * read_batch, n_vars)
+        col_data = np.array(tmp_arr[:, b_start:b_end]).astype(target_dtype)
+        final_arr[:, b_start:b_end] = col_data
+
+        if (bi + 1) % 50 == 0 or bi == n_batches - 1:
+            elapsed = time.time() - phase2_start
+            pct = (bi + 1) / n_batches * 100
+            print(f"  Batch {bi + 1}/{n_batches} ({pct:.0f}%) — {elapsed:.0f}s elapsed", flush=True)
+
+    phase2_time = time.time() - phase2_start
+    print(f"Phase 2 complete in {phase2_time:.0f}s", flush=True)
+
+    # Cleanup
+    print(f"Cleaning up temp dir: {tmp_dir_obj}", flush=True)
+    shutil.rmtree(tmp_dir_obj, ignore_errors=True)
+
+
+def _add_layers(
+    adata,
+    root,
+    store,
+    sub_key: str | None,
+    overwrite: bool,
+    dtype: str,
+    encoding: EncodingConfig | None,
+    temp_dir: Path | str | None,
+) -> None:
+    """Write layers (or a single layer) to the zarr store using the two-phase pipeline."""
+    if sub_key is not None:
+        if sub_key not in adata.layers:
+            print(f"ERROR: layers/{sub_key} not found in h5ad file", flush=True)
+            sys.exit(1)
+        layer_names = [sub_key]
+    else:
+        layer_names = list(adata.layers.keys())
+
+    for ln in layer_names:
+        print(f"Processing layer: {ln}", flush=True)
+        _add_large_matrix(
+            adata,
+            root,
+            store,
+            array_name=ln,
+            matrix_getter=lambda chunk, name=ln: chunk.layers[name],
+            overwrite=overwrite,
+            dtype=dtype,
+            encoding=encoding,
+            temp_dir=temp_dir,
+            group_name="layers",
+        )
+
+
+def _add_obsm(adata, root, n_obs: int, sub_key: str | None, overwrite: bool, dtype: str, encoding: EncodingConfig | None) -> None:
+    """Write obsm (or a single sub-key of obsm) to the zarr store."""
+    if sub_key is not None:
+        if sub_key not in adata.obsm:
+            print(f"ERROR: obsm/{sub_key} not found in h5ad file", flush=True)
+            sys.exit(1)
+        keys_to_write = [sub_key]
+    else:
+        keys_to_write = list(adata.obsm.keys())
+
+    if not overwrite:
+        obsm_group = root["obsm"] if "obsm" in root else None
+        for k in keys_to_write:
+            if obsm_group is not None and k in obsm_group:
+                # Check at array level (not group level)
+                try:
+                    obsm_group[k]  # will raise if not exists
+                    print(f"ERROR: obsm/{k} already exists in zarr store. Use overwrite=True to overwrite.", flush=True)
+                    sys.exit(1)
+                except KeyError:
+                    pass
+
+    obsm_data = {k: np.array(adata.obsm[k]) for k in keys_to_write}
+    write_obsm_to_store(root, obsm_data, n_obs=n_obs, dtype=dtype, encoding=encoding)
+
+
+def _add_obs_or_var(adata, root, key: str, overwrite: bool) -> None:
+    """Write obs or var dataframe to the zarr store."""
+    if not overwrite and key in root:
+        print(f"ERROR: {key} already exists in zarr store. Use overwrite=True to overwrite.", flush=True)
+        sys.exit(1)
+
+    df = getattr(adata, key).copy()
+    str_cols = [c for c in df.columns if df[c].dtype == object]
+    if str_cols:
+        for c in str_cols:
+            df[c] = df[c].astype("category")
+
+    ad.settings.allow_write_nullable_strings = True
+    write_elem(root, key, df)
+
+
+def _add_write_elem_key(adata, root, key: str, overwrite: bool) -> None:
+    """Write uns, obsp, or varp to the zarr store."""
+    if not overwrite and key in root:
+        print(f"ERROR: {key} already exists in zarr store. Use overwrite=True to overwrite.", flush=True)
+        sys.exit(1)
+
+    data = getattr(adata, key)
+    if data is None or (hasattr(data, "__len__") and len(data) == 0):
+        print(f"WARNING: {key} is empty in h5ad file, skipping.", flush=True)
+        sys.exit(1)
+
+    write_elem(root, key, dict(data))
+
+
+def add_key_to_store(
+    h5ad_path: Path | str,
+    zarr_path: Path | str,
+    key: str,
+    overwrite: bool = False,
+    dtype: str = "float32",
+    encoding: EncodingConfig | None = None,
+    temp_dir: Path | str | None = None,
+) -> None:
+    """Add a key from an h5ad file to an existing zarr store.
+
+    Parameters
+    ----------
+    h5ad_path : Path or str
+        Path to the source h5ad file.
+    zarr_path : Path or str
+        Path to an existing zarr v3 store.
+    key : str
+        Key to write, e.g. "obsm", "obsm/X_umap", "obs", "var", "uns", "obsp", "varp".
+    overwrite : bool
+        If True, overwrite existing keys. If False, exit with error if key exists.
+    dtype : str
+        Data type for numeric arrays (e.g. "float32").
+    encoding : EncodingConfig or None
+        Optional encoding config for chunking/sharding/compression.
+    temp_dir : Path or None
+        Temporary directory (reserved for future use).
+    """
+    h5ad_path = Path(h5ad_path)
+    zarr_path = Path(zarr_path)
+
+    # Validate inputs
+    if not h5ad_path.exists():
+        print(f"ERROR: h5ad file not found: {h5ad_path}", flush=True)
+        sys.exit(1)
+    if not zarr_path.exists():
+        print(f"ERROR: zarr store not found: {zarr_path}", flush=True)
+        sys.exit(1)
+
+    # Parse key into top_key and optional sub_key
+    parts = key.split("/", 1)
+    top_key = parts[0]
+    sub_key = parts[1] if len(parts) > 1 else None
+
+    # Validate top_key
+    if top_key not in VALID_KEYS:
+        print(f"ERROR: Invalid key '{top_key}'. Must be one of: {sorted(VALID_KEYS)}", flush=True)
+        sys.exit(1)
+
+    # Validate sub_key usage
+    if sub_key is not None and top_key not in SUB_KEY_ALLOWED:
+        print(f"ERROR: Sub-keys are only allowed for: {sorted(SUB_KEY_ALLOWED)}. Got '{key}'.", flush=True)
+        sys.exit(1)
+
+    # raw is not yet supported
+    if top_key == "raw":
+        print(f"ERROR: Writing 'raw' is not yet supported.", flush=True)
+        sys.exit(1)
+
+    # Initialize zarrs codec pipeline for large keys
+    if top_key in LARGE_KEYS:
+        _init_zarrs()
+
+    adata = None
+    try:
+        print(f"Reading h5ad file: {h5ad_path}", flush=True)
+        adata = ad.read_h5ad(h5ad_path, backed="r")
+        n_obs = adata.n_obs
+
+        store = zarr.storage.LocalStore(str(zarr_path))
+        root = zarr.open_group(store, mode="r+", zarr_format=3)
+
+        if top_key == "X":
+            _add_large_matrix(adata, root, store, "X", None, overwrite, dtype, encoding, temp_dir)
+        elif top_key == "layers":
+            _add_layers(adata, root, store, sub_key, overwrite, dtype, encoding, temp_dir)
+        elif top_key == "obsm":
+            _add_obsm(adata, root, n_obs, sub_key, overwrite, dtype, encoding)
+        elif top_key in ("obs", "var"):
+            _add_obs_or_var(adata, root, top_key, overwrite)
+        elif top_key in ("uns", "obsp", "varp"):
+            _add_write_elem_key(adata, root, top_key, overwrite)
+
+        zarr.consolidate_metadata(store, zarr_format=3)
+        print(f"Successfully wrote '{key}' to zarr store.", flush=True)
+
+    finally:
+        if adata is not None:
+            try:
+                if adata.file is not None:
+                    adata.file.close()
+            except Exception:
+                pass
 
 
 def convert_h5ad_to_zarr_chunked(config: ConversionConfig, hooks: dict[str, Callable] | None = None) -> None:

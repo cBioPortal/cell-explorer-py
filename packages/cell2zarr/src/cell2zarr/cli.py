@@ -98,106 +98,8 @@ def _build_run_hooks(config: ConversionConfig, run_number: int) -> dict:
     }
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Convert h5ad file to zarr format"
-    )
-    parser.add_argument(
-        "input_file",
-        type=Path,
-        help="Input h5ad file"
-    )
-    parser.add_argument(
-        "output_file",
-        type=Path,
-        nargs="?",
-        help="Output zarr directory (defaults to input filename with .zarr extension)"
-    )
-    parser.add_argument(
-        "--obs-chunk-size",
-        type=int,
-        help="Observation (cell) chunk size. If not specified, uses full dataset size."
-    )
-    parser.add_argument(
-        "--var-chunk-size",
-        type=int,
-        help="Variable (gene) chunk size. Default: 10. Overrides encoding config."
-    )
-    parser.add_argument(
-        "--n-top-genes",
-        type=int,
-        help="Filter to top N highly variable genes before writing to zarr"
-    )
-    parser.add_argument(
-        "--keep-raw",
-        action="store_true",
-        help="Keep raw counts in the output (default: remove to save space)"
-    )
-    parser.add_argument(
-        "--sparse-format",
-        choices=["csr", "csc"],
-        default="csr",
-        help="Sparse matrix format: csr (row-oriented, good for cell access) or csc (column-oriented, good for gene access). Default: csr"
-    )
-    parser.add_argument(
-        "--dense",
-        action="store_true",
-        help="Convert sparse matrix to dense array before writing to zarr"
-    )
-    parser.add_argument(
-        "--force-int32",
-        action="store_true",
-        help="Cast sparse matrix indices/indptr to int32 for JavaScript/Vitessce compatibility. Will fail if values exceed int32 max."
-    )
-    parser.add_argument(
-        "--two-phase",
-        action="store_true",
-        help="Use two-phase streaming conversion: reads h5ad in backed mode, writes row-chunked temp zarr, then rechunks to final column layout. Low memory usage."
-    )
-    parser.add_argument(
-        "--cell-chunk-size",
-        type=int,
-        default=10000,
-        help="Number of cells per chunk in phase 1 streaming. Default: 10000"
-    )
-    parser.add_argument(
-        "--shard-size",
-        type=int,
-        help="Number of genes per shard (zarr v3 sharding). If not set, no sharding is used."
-    )
-    parser.add_argument(
-        "--dtype",
-        type=str,
-        choices=["float16", "float32", "float64"],
-        help="Data type for the output X matrix and obsm embeddings. Default: float32. Overrides encoding config."
-    )
-    parser.add_argument(
-        "--obsm-cell-chunk-size",
-        type=int,
-        help="Cell chunk size for obsm embedding arrays (enables progressive loading). Default: 50000. Overrides encoding config."
-    )
-    parser.add_argument(
-        "--run-log",
-        type=Path,
-        help="Path to JSON run log file (e.g. docs/conversion-runs.json). No logging if omitted."
-    )
-    parser.add_argument(
-        "--log-dir",
-        type=Path,
-        help="Directory for stdout log files. Defaults to <run-log-dir>/logs/"
-    )
-    parser.add_argument(
-        "--encoding-config",
-        type=Path,
-        help="Path to JSON encoding config file specifying chunks, shards, dtype, and compressor for X, obsm, and obs arrays."
-    )
-    parser.add_argument(
-        "--temp-dir",
-        type=Path,
-        help="Directory for phase 1 temp zarr. Defaults to system /tmp. Use a large disk if /tmp is too small."
-    )
-    args = parser.parse_args()
-
+def _handle_convert(args):
+    """Handle the convert subcommand (or legacy positional invocation)."""
     # Validate input file
     if not args.input_file.exists():
         print(f"Error: Input file '{args.input_file}' does not exist", file=sys.stderr)
@@ -307,6 +209,151 @@ def main():
                 log_tee.close()
     else:
         convert_h5ad_to_zarr(args.input_file, args.output_file, args.obs_chunk_size, args.var_chunk_size, args.n_top_genes, args.keep_raw, args.sparse_format, args.force_int32, args.dense)
+
+
+def _handle_add(args):
+    """Handle the add subcommand."""
+    from .convert import add_key_to_store
+    from .encoding import load_encoding_config
+
+    encoding = None
+    if args.encoding_config and args.encoding_config.exists():
+        encoding = load_encoding_config(args.encoding_config, {})
+
+    add_key_to_store(
+        h5ad_path=args.h5ad_file,
+        zarr_path=args.zarr_store,
+        key=args.key,
+        overwrite=args.overwrite,
+        dtype=args.dtype,
+        encoding=encoding,
+        temp_dir=args.temp_dir,
+    )
+
+
+def main():
+    known_subcommands = {"convert", "add"}
+    if len(sys.argv) > 1 and sys.argv[1] not in known_subcommands and not sys.argv[1].startswith("-"):
+        sys.argv.insert(1, "convert")
+
+    parser = argparse.ArgumentParser(
+        description="Convert h5ad file to zarr format"
+    )
+    subparsers = parser.add_subparsers(dest="command")
+
+    # --- convert subparser ---
+    convert_parser = subparsers.add_parser("convert", help="Convert h5ad file to Zarr store")
+    convert_parser.add_argument(
+        "input_file",
+        type=Path,
+        help="Input h5ad file"
+    )
+    convert_parser.add_argument(
+        "output_file",
+        type=Path,
+        nargs="?",
+        help="Output zarr directory (defaults to input filename with .zarr extension)"
+    )
+    convert_parser.add_argument(
+        "--obs-chunk-size",
+        type=int,
+        help="Observation (cell) chunk size. If not specified, uses full dataset size."
+    )
+    convert_parser.add_argument(
+        "--var-chunk-size",
+        type=int,
+        help="Variable (gene) chunk size. Default: 10. Overrides encoding config."
+    )
+    convert_parser.add_argument(
+        "--n-top-genes",
+        type=int,
+        help="Filter to top N highly variable genes before writing to zarr"
+    )
+    convert_parser.add_argument(
+        "--keep-raw",
+        action="store_true",
+        help="Keep raw counts in the output (default: remove to save space)"
+    )
+    convert_parser.add_argument(
+        "--sparse-format",
+        choices=["csr", "csc"],
+        default="csr",
+        help="Sparse matrix format: csr (row-oriented, good for cell access) or csc (column-oriented, good for gene access). Default: csr"
+    )
+    convert_parser.add_argument(
+        "--dense",
+        action="store_true",
+        help="Convert sparse matrix to dense array before writing to zarr"
+    )
+    convert_parser.add_argument(
+        "--force-int32",
+        action="store_true",
+        help="Cast sparse matrix indices/indptr to int32 for JavaScript/Vitessce compatibility. Will fail if values exceed int32 max."
+    )
+    convert_parser.add_argument(
+        "--two-phase",
+        action="store_true",
+        help="Use two-phase streaming conversion: reads h5ad in backed mode, writes row-chunked temp zarr, then rechunks to final column layout. Low memory usage."
+    )
+    convert_parser.add_argument(
+        "--cell-chunk-size",
+        type=int,
+        default=10000,
+        help="Number of cells per chunk in phase 1 streaming. Default: 10000"
+    )
+    convert_parser.add_argument(
+        "--shard-size",
+        type=int,
+        help="Number of genes per shard (zarr v3 sharding). If not set, no sharding is used."
+    )
+    convert_parser.add_argument(
+        "--dtype",
+        type=str,
+        choices=["float16", "float32", "float64"],
+        help="Data type for the output X matrix and obsm embeddings. Default: float32. Overrides encoding config."
+    )
+    convert_parser.add_argument(
+        "--obsm-cell-chunk-size",
+        type=int,
+        help="Cell chunk size for obsm embedding arrays (enables progressive loading). Default: 50000. Overrides encoding config."
+    )
+    convert_parser.add_argument(
+        "--run-log",
+        type=Path,
+        help="Path to JSON run log file (e.g. docs/conversion-runs.json). No logging if omitted."
+    )
+    convert_parser.add_argument(
+        "--log-dir",
+        type=Path,
+        help="Directory for stdout log files. Defaults to <run-log-dir>/logs/"
+    )
+    convert_parser.add_argument(
+        "--encoding-config",
+        type=Path,
+        help="Path to JSON encoding config file specifying chunks, shards, dtype, and compressor for X, obsm, and obs arrays."
+    )
+    convert_parser.add_argument(
+        "--temp-dir",
+        type=Path,
+        help="Directory for phase 1 temp zarr. Defaults to system /tmp. Use a large disk if /tmp is too small."
+    )
+
+    # --- add subparser ---
+    add_parser = subparsers.add_parser("add", help="Add a key from h5ad to an existing Zarr store")
+    add_parser.add_argument("h5ad_file", type=Path, help="Input h5ad file")
+    add_parser.add_argument("zarr_store", type=Path, help="Existing Zarr store directory")
+    add_parser.add_argument("--key", required=True, help="Key to add (e.g. obsm, obsm/X_umap, obs, X, layers/counts)")
+    add_parser.add_argument("--overwrite", action="store_true", help="Overwrite existing keys")
+    add_parser.add_argument("--encoding-config", type=Path, help="Path to JSON encoding config")
+    add_parser.add_argument("--dtype", type=str, choices=["float16", "float32", "float64"], default="float32", help="Target dtype. Default: float32")
+    add_parser.add_argument("--temp-dir", type=Path, help="Temp directory for large keys (X, layers)")
+
+    args = parser.parse_args()
+
+    if args.command == "add":
+        _handle_add(args)
+    else:
+        _handle_convert(args)
 
 
 if __name__ == "__main__":
