@@ -9,6 +9,7 @@ from typing import Any, Callable
 import anndata as ad
 from anndata.io import write_elem
 import numpy as np
+import pandas as pd
 from scipy import sparse
 import sys
 import zarr
@@ -423,7 +424,7 @@ def _write_metadata(final_root, final_store, metadata: dict, config: ConversionC
 
     # Convert string columns to categoricals for compact storage
     for label, df in [("obs", metadata["obs"]), ("var", metadata["var"])]:
-        str_cols = [c for c in df.columns if df[c].dtype == object]
+        str_cols = [c for c in df.columns if pd.api.types.is_string_dtype(df[c]) and not isinstance(df[c].dtype, pd.CategoricalDtype)]
         if str_cols:
             print(f"Converting {len(str_cols)} string column(s) in {label} to categorical: {str_cols}", flush=True)
             for c in str_cols:
@@ -702,7 +703,7 @@ def _add_obs_or_var(adata, root, key: str, overwrite: bool) -> None:
         sys.exit(1)
 
     df = getattr(adata, key).copy()
-    str_cols = [c for c in df.columns if df[c].dtype == object]
+    str_cols = [c for c in df.columns if pd.api.types.is_string_dtype(df[c]) and not isinstance(df[c].dtype, pd.CategoricalDtype)]
     if str_cols:
         for c in str_cols:
             df[c] = df[c].astype("category")
