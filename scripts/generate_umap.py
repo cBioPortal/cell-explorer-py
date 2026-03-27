@@ -41,11 +41,8 @@ def generate_umap(
     adata_hvg = adata[:, adata.var.highly_variable].copy()
     print(f"HVG shape: {adata_hvg.shape}", flush=True)
 
-    print("Scaling...", flush=True)
-    sc.pp.scale(adata_hvg, max_value=10)
-
-    print(f"Computing PCA (n_comps={n_comps})...", flush=True)
-    sc.tl.pca(adata_hvg, n_comps=n_comps)
+    print(f"Computing PCA (n_comps={n_comps}, chunked)...", flush=True)
+    sc.pp.pca(adata_hvg, n_comps=n_comps, chunked=True, chunk_size=10000)
 
     print(f"Computing neighbors (n_neighbors={n_neighbors}, n_pcs={n_pcs})...", flush=True)
     sc.pp.neighbors(adata_hvg, n_neighbors=n_neighbors, n_pcs=n_pcs)
