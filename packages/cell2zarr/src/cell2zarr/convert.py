@@ -796,7 +796,7 @@ def add_key_to_store(
         n_obs = adata.n_obs
 
         store = zarr.storage.LocalStore(str(zarr_path))
-        root = zarr.open_group(store, mode="r+", zarr_format=3)
+        root = zarr.open_group(store, mode="r+", zarr_format=3, use_consolidated=False)
 
         if top_key == "X":
             _add_large_matrix(adata, root, store, "X", None, overwrite, dtype, encoding, temp_dir)
