@@ -8,6 +8,7 @@ Usage:
     python scripts/generate_umap.py input.h5ad output.h5ad --n-top-genes 3000 --n-neighbors 30
 """
 import argparse
+import gc
 import sys
 import time
 from pathlib import Path
@@ -29,9 +30,6 @@ def generate_umap(
     adata = sc.read_h5ad(input_path)
     print(f"Shape: {adata.shape[0]:,} cells x {adata.shape[1]:,} genes", flush=True)
 
-    # Store raw counts before modifying X
-    adata.raw = adata
-
     print("Normalizing...", flush=True)
     sc.pp.normalize_total(adata, target_sum=1e4)
     sc.pp.log1p(adata)
@@ -41,8 +39,13 @@ def generate_umap(
     adata_hvg = adata[:, adata.var.highly_variable].copy()
     print(f"HVG shape: {adata_hvg.shape}", flush=True)
 
-    print(f"Computing PCA (n_comps={n_comps}, chunked)...", flush=True)
-    sc.pp.pca(adata_hvg, n_comps=n_comps, chunked=True, chunk_size=10000)
+    # Free full adata before expensive steps
+    del adata
+    gc.collect()
+    print("Freed full adata from memory", flush=True)
+
+    print(f"Computing PCA (n_comps={n_comps})...", flush=True)
+    sc.pp.pca(adata_hvg, n_comps=n_comps, zero_center=False)
 
     print(f"Computing neighbors (n_neighbors={n_neighbors}, n_pcs={n_pcs})...", flush=True)
     sc.pp.neighbors(adata_hvg, n_neighbors=n_neighbors, n_pcs=n_pcs)
@@ -50,9 +53,13 @@ def generate_umap(
     print("Computing UMAP...", flush=True)
     sc.tl.umap(adata_hvg)
 
-    # Copy embeddings back to full adata
+    # Reload original to attach embeddings and save
+    print(f"Reloading {input_path} to attach embeddings...", flush=True)
+    adata = sc.read_h5ad(input_path)
     adata.obsm["X_pca"] = adata_hvg.obsm["X_pca"]
     adata.obsm["X_umap"] = adata_hvg.obsm["X_umap"]
+    del adata_hvg
+    gc.collect()
 
     print(f"Writing {output_path}...", flush=True)
     adata.write_h5ad(output_path)
