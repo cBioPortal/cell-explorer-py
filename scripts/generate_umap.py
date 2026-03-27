@@ -61,6 +61,8 @@ def generate_umap(
     del adata_hvg
     gc.collect()
 
+    import anndata as ad
+    ad.settings.allow_write_nullable_strings = True
     print(f"Writing {output_path}...", flush=True)
     adata.write_h5ad(output_path)
 
