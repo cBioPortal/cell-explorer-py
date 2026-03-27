@@ -53,12 +53,41 @@ def generate_umap(
     print("Computing UMAP...", flush=True)
     sc.tl.umap(adata_hvg)
 
-    # Reload original to attach embeddings and save
-    print(f"Reloading {input_path} to attach embeddings...", flush=True)
-    adata = sc.read_h5ad(input_path)
-    adata.obsm["X_pca"] = adata_hvg.obsm["X_pca"]
-    adata.obsm["X_umap"] = adata_hvg.obsm["X_umap"]
+    # Save computed results before freeing adata_hvg
+    pca_coords = adata_hvg.obsm["X_pca"]
+    umap_coords = adata_hvg.obsm["X_umap"]
+    neighbors_connectivities = adata_hvg.obsp["connectivities"].copy()
+    neighbors_distances = adata_hvg.obsp["distances"].copy()
+    neighbors_params = dict(adata_hvg.uns["neighbors"])
+    pca_variance = adata_hvg.uns["pca"].copy() if "pca" in adata_hvg.uns else None
+    hvg_var = adata_hvg.var.copy()
     del adata_hvg
+    gc.collect()
+
+    # Reload original to attach all results
+    print(f"Reloading {input_path} to attach results...", flush=True)
+    adata = sc.read_h5ad(input_path)
+
+    # Embeddings
+    adata.obsm["X_pca"] = pca_coords
+    adata.obsm["X_umap"] = umap_coords
+
+    # Neighbors graph (enables re-running UMAP without recomputing neighbors)
+    adata.obsp["connectivities"] = neighbors_connectivities
+    adata.obsp["distances"] = neighbors_distances
+    adata.uns["neighbors"] = neighbors_params
+
+    # PCA variance info
+    if pca_variance is not None:
+        adata.uns["pca"] = pca_variance
+
+    # HVG annotations (merge into var)
+    for col in ["highly_variable", "means", "dispersions", "dispersions_norm"]:
+        if col in hvg_var.columns:
+            adata.var[col] = False if col == "highly_variable" else 0.0
+            adata.var.loc[hvg_var.index, col] = hvg_var[col]
+
+    del pca_coords, umap_coords, neighbors_connectivities, neighbors_distances
     gc.collect()
 
     import anndata as ad
