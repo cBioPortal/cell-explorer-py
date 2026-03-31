@@ -248,6 +248,7 @@ def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes
             # Remove all handlers added during this run
             logger.handlers.clear()
     else:
+        _setup_logging()
         convert_h5ad_to_zarr(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes, keep_raw, sparse_format, force_int32, dense)
 
 
@@ -261,6 +262,8 @@ def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes
 @click.option("--temp-dir", type=click.Path(path_type=Path), help="Temp directory for large keys (X, layers).")
 def add(h5ad_file, zarr_store, key, overwrite, encoding_config, dtype, temp_dir):
     """Add a key from h5ad to an existing Zarr store."""
+    _setup_logging()
+
     from .convert import add_key_to_store
     from .encoding import load_encoding_config
 
