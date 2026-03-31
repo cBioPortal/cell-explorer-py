@@ -21,12 +21,13 @@ from .convert import convert_h5ad_to_zarr, convert_h5ad_to_zarr_chunked
 def _setup_logging(log_file: Path | None = None, level: int = logging.INFO):
     """Configure cell2zarr logger with stdout and file handler."""
     logger = logging.getLogger("cell2zarr")
+    logger.handlers.clear()
     logger.setLevel(level)
 
     formatter = logging.Formatter("[%(asctime)s] %(levelname)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
     # Always log to stdout
-    stream_handler = logging.StreamHandler()
+    stream_handler = logging.StreamHandler(sys.stdout)
     stream_handler.setFormatter(formatter)
     logger.addHandler(stream_handler)
 
@@ -162,7 +163,6 @@ def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes
         log_file = output_file.with_suffix('.log')
 
     _setup_logging(log_file, getattr(logging, log_level.upper()))
-    logger = logging.getLogger("cell2zarr")
 
     if two_phase:
         if sparse_format != "csr" or force_int32:
@@ -239,10 +239,7 @@ def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes
 
             hooks = _build_run_hooks(config, run_number)
 
-        try:
-            convert_h5ad_to_zarr_chunked(config, hooks=hooks)
-        finally:
-            logger.handlers.clear()
+        convert_h5ad_to_zarr_chunked(config, hooks=hooks)
     else:
         convert_h5ad_to_zarr(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes, keep_raw, sparse_format, force_int32, dense)
 
