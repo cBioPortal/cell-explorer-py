@@ -1,5 +1,6 @@
 """CLI entry point for cell2zarr."""
 import json
+import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,15 +12,36 @@ from .models import (
     ConversionConfig, EncodingConfig, RunDataset, RunEntry, RunPerformance,
 )
 from .run_log import (
-    LogTee, read_runs, write_runs, get_next_run_number, update_run_entry,
+    read_runs, write_runs, get_next_run_number, update_run_entry,
     compute_output_stats, collect_target_encoding, collect_actual_encoding,
 )
 from .convert import convert_h5ad_to_zarr, convert_h5ad_to_zarr_chunked
 
 
+def _setup_logging(log_file: Path | None = None, level: int = logging.INFO):
+    """Configure cell2zarr logger with stdout and file handler."""
+    logger = logging.getLogger("cell2zarr")
+    logger.handlers.clear()
+    logger.setLevel(level)
+
+    formatter = logging.Formatter("[%(asctime)s] %(levelname)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+
+    # Always log to stdout
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
+
+    # Log to file
+    if log_file is not None:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+
+
 def _build_run_hooks(config: ConversionConfig, run_number: int) -> dict:
     """Build hooks dict that wires conversion events to run log updates."""
-    log_path = config.run_log
+    log_path = config.run_db
 
     def on_dataset_read(*, n_obs, n_vars, v_chunk, adata_backed, config, n_cpus):
         obsm_keys = list(adata_backed.obsm.keys()) if adata_backed.obsm else []
@@ -120,19 +142,27 @@ def cli():
 @click.option("--shard-size", type=int, help="Genes per shard (zarr v3 sharding).")
 @click.option("--dtype", type=click.Choice(["float16", "float32", "float64"]), help="Output dtype. Default: float32.")
 @click.option("--obsm-cell-chunk-size", type=int, help="Cell chunk size for obsm arrays. Default: 50000.")
-@click.option("--run-log", type=click.Path(path_type=Path), help="Path to JSON run log file.")
-@click.option("--log-dir", type=click.Path(path_type=Path), help="Directory for stdout log files.")
+@click.option("--log-file", type=click.Path(path_type=Path), help="Log file path. Default: <output>.log.")
+@click.option("--run-db", type=click.Path(path_type=Path), help="Path to JSON run history database.")
 @click.option("--encoding-config", type=click.Path(exists=True, path_type=Path), help="Path to JSON encoding config.")
 @click.option("--temp-dir", type=click.Path(path_type=Path), help="Directory for phase 1 temp zarr.")
+@click.option("--log-level", type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False), default="INFO", help="Log level. Default: INFO.")
 def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes,
             keep_raw, sparse_format, dense, force_int32, two_phase, cell_chunk_size,
-            shard_size, dtype, obsm_cell_chunk_size, run_log, log_dir, encoding_config, temp_dir):
+            shard_size, dtype, obsm_cell_chunk_size, log_file, run_db, encoding_config, temp_dir,
+            log_level):
     """Convert h5ad file to Zarr store."""
     if output_file is None:
         output_file = input_file.with_suffix('.zarr')
 
     if output_file.exists():
         raise click.ClickException(f"Output '{output_file}' already exists")
+
+    # Default log file: <output>.log
+    if log_file is None:
+        log_file = output_file.with_suffix('.log')
+
+    _setup_logging(log_file, getattr(logging, log_level.upper()))
 
     if two_phase:
         if sparse_format != "csr" or force_int32:
@@ -160,22 +190,15 @@ def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes
             shard_size=shard_size if shard_size is not None else enc_defaults.get("shard_size"),
             dtype=dtype if dtype is not None else enc_defaults.get("dtype", "float32"),
             obsm_cell_chunk_size=obsm_cell_chunk_size if obsm_cell_chunk_size is not None else enc_defaults.get("obsm_cell_chunk_size", 50000),
-            run_log=run_log,
-            log_dir=log_dir,
+            run_db=run_db,
             encoding_config=encoding_config,
             temp_dir=temp_dir,
         )
 
         hooks = None
-        log_tee = None
-        if config.run_log:
-            runs = read_runs(config.run_log)
+        if config.run_db:
+            runs = read_runs(config.run_db)
             run_number = get_next_run_number(runs)
-
-            log_dir_path = config.log_dir or config.run_log.parent / "logs"
-            log_dir_path.mkdir(parents=True, exist_ok=True)
-            log_file_path = log_dir_path / f"run-{run_number}.log"
-            log_file_rel = f"logs/run-{run_number}.log"
 
             input_size_gb = round(config.input_file.stat().st_size / (1024**3), 1)
 
@@ -209,21 +232,14 @@ def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes
                     start_time=datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 ),
                 notes="",
-                log_file=log_file_rel,
+                log_file=str(log_file),
             )
             runs.append(run_entry)
-            write_runs(config.run_log, runs)
-
-            log_tee = LogTee(log_file_path)
-            sys.stdout = log_tee
+            write_runs(config.run_db, runs)
 
             hooks = _build_run_hooks(config, run_number)
 
-        try:
-            convert_h5ad_to_zarr_chunked(config, hooks=hooks)
-        finally:
-            if log_tee is not None:
-                log_tee.close()
+        convert_h5ad_to_zarr_chunked(config, hooks=hooks)
     else:
         convert_h5ad_to_zarr(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes, keep_raw, sparse_format, force_int32, dense)
 
@@ -235,9 +251,15 @@ def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes
 @click.option("--overwrite", is_flag=True, help="Overwrite existing keys.")
 @click.option("--encoding-config", type=click.Path(exists=True, path_type=Path), help="Path to JSON encoding config.")
 @click.option("--dtype", type=click.Choice(["float16", "float32", "float64"]), default="float32", help="Target dtype. Default: float32.")
+@click.option("--log-file", type=click.Path(path_type=Path), help="Log file path. Default: <zarr_store>.add.log.")
+@click.option("--log-level", type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False), default="INFO", help="Log level. Default: INFO.")
 @click.option("--temp-dir", type=click.Path(path_type=Path), help="Temp directory for large keys (X, layers).")
-def add(h5ad_file, zarr_store, key, overwrite, encoding_config, dtype, temp_dir):
+def add(h5ad_file, zarr_store, key, overwrite, encoding_config, dtype, log_file, log_level, temp_dir):
     """Add a key from h5ad to an existing Zarr store."""
+    if log_file is None:
+        log_file = Path(str(zarr_store) + ".add.log")
+    _setup_logging(log_file, getattr(logging, log_level.upper()))
+
     from .convert import add_key_to_store
     from .encoding import load_encoding_config
 

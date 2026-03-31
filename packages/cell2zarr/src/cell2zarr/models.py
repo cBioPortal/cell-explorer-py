@@ -41,8 +41,7 @@ class ConversionConfig(BaseModel):
     shard_size: int | None = None
     dtype: str = "float32"
     obsm_cell_chunk_size: int = 50000
-    run_log: Path | None = None
-    log_dir: Path | None = None
+    run_db: Path | None = None
     encoding_config: Path | None = None
     temp_dir: Path | None = None
 

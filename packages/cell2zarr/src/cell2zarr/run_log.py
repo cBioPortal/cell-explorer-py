@@ -1,6 +1,5 @@
 """Run log persistence and stats collection."""
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -8,26 +7,6 @@ import numpy as np
 import zarr
 
 from .models import EncodingConfig, RunEntry
-
-
-class LogTee:
-    """Tee stdout to both terminal and a log file."""
-
-    def __init__(self, log_file: Path):
-        self.terminal = sys.stdout
-        self.log = open(log_file, "w")
-
-    def write(self, msg):
-        self.terminal.write(msg)
-        self.log.write(msg)
-
-    def flush(self):
-        self.terminal.flush()
-        self.log.flush()
-
-    def close(self):
-        self.log.close()
-        sys.stdout = self.terminal
 
 
 def read_runs(log_path: Path) -> list[RunEntry]:
