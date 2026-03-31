@@ -1,5 +1,6 @@
 """CLI entry point for cell2zarr."""
 import json
+import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,10 +12,35 @@ from .models import (
     ConversionConfig, EncodingConfig, RunDataset, RunEntry, RunPerformance,
 )
 from .run_log import (
-    LogTee, read_runs, write_runs, get_next_run_number, update_run_entry,
+    read_runs, write_runs, get_next_run_number, update_run_entry,
     compute_output_stats, collect_target_encoding, collect_actual_encoding,
 )
 from .convert import convert_h5ad_to_zarr, convert_h5ad_to_zarr_chunked
+
+
+def _setup_logging(run_log: Path | None = None, log_dir: Path | None = None, run_number: int | None = None):
+    """Configure cell2zarr logger with stdout and optional file handler."""
+    logger = logging.getLogger("cell2zarr")
+    logger.setLevel(logging.INFO)
+
+    formatter = logging.Formatter("[%(asctime)s] %(levelname)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+
+    # Always log to stdout
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
+
+    # Log to file if run-log is provided
+    if run_log and run_number is not None:
+        log_dir_path = log_dir or run_log.parent / "logs"
+        log_dir_path.mkdir(parents=True, exist_ok=True)
+        log_file_path = log_dir_path / f"run-{run_number}.log"
+        file_handler = logging.FileHandler(log_file_path)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+        return log_file_path
+
+    return None
 
 
 def _build_run_hooks(config: ConversionConfig, run_number: int) -> dict:
@@ -167,14 +193,11 @@ def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes
         )
 
         hooks = None
-        log_tee = None
         if config.run_log:
             runs = read_runs(config.run_log)
             run_number = get_next_run_number(runs)
 
-            log_dir_path = config.log_dir or config.run_log.parent / "logs"
-            log_dir_path.mkdir(parents=True, exist_ok=True)
-            log_file_path = log_dir_path / f"run-{run_number}.log"
+            log_file_path = _setup_logging(config.run_log, config.log_dir, run_number)
             log_file_rel = f"logs/run-{run_number}.log"
 
             input_size_gb = round(config.input_file.stat().st_size / (1024**3), 1)
@@ -214,16 +237,16 @@ def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes
             runs.append(run_entry)
             write_runs(config.run_log, runs)
 
-            log_tee = LogTee(log_file_path)
-            sys.stdout = log_tee
-
             hooks = _build_run_hooks(config, run_number)
+        else:
+            _setup_logging()
 
+        logger = logging.getLogger("cell2zarr")
         try:
             convert_h5ad_to_zarr_chunked(config, hooks=hooks)
         finally:
-            if log_tee is not None:
-                log_tee.close()
+            # Remove all handlers added during this run
+            logger.handlers.clear()
     else:
         convert_h5ad_to_zarr(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes, keep_raw, sparse_format, force_int32, dense)
 

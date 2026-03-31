@@ -1,5 +1,6 @@
 """h5ad to Zarr conversion pipeline."""
 import gc
+import logging
 import shutil
 import tempfile
 import time
@@ -17,17 +18,19 @@ import zarr
 from .models import ArrayEncoding, ConversionConfig, EncodingConfig
 from .encoding import load_encoding_config, make_compressor, resolve_template
 
+logger = logging.getLogger("cell2zarr")
+
 
 def convert_h5ad_to_zarr(input_file: Path, output_file: Path, obs_chunk_size: int | None = None, var_chunk_size: int | None = None, n_top_genes: int | None = None, keep_raw: bool = False, sparse_format: str = "csr", force_int32: bool = False, dense: bool = False) -> None:
     """Convert an h5ad file to zarr format."""
-    print(f"Reading h5ad file: {input_file}")
+    logger.info(f"Reading h5ad file: {input_file}")
     adata = ad.read_h5ad(input_file)
 
-    print(f"Dataset shape: {adata.shape}")
+    logger.info(f"Dataset shape: {adata.shape}")
 
     # Remove raw counts if requested
     if not keep_raw and adata.raw is not None:
-        print(f"Removing raw counts to reduce file size")
+        logger.info("Removing raw counts to reduce file size")
         adata.raw = None
 
     # Filter to top highly variable genes if requested
@@ -35,68 +38,68 @@ def convert_h5ad_to_zarr(input_file: Path, output_file: Path, obs_chunk_size: in
         if 'highly_variable_rank' in adata.var.columns:
             # Use existing ranking
             top_genes = adata.var.nsmallest(n_top_genes, 'highly_variable_rank').index
-            print(f"Filtering to top {len(top_genes)} highly variable genes using 'highly_variable_rank'")
+            logger.info(f"Filtering to top {len(top_genes)} highly variable genes using 'highly_variable_rank'")
             adata = adata[:, top_genes].copy()
         elif 'vst.variance.standardized' in adata.var.columns:
             # Use vst.variance.standardized for ranking (higher is more variable)
             top_genes = adata.var.nlargest(n_top_genes, 'vst.variance.standardized').index
-            print(f"Filtering to top {len(top_genes)} highly variable genes using 'vst.variance.standardized'")
+            logger.info(f"Filtering to top {len(top_genes)} highly variable genes using 'vst.variance.standardized'")
             adata = adata[:, top_genes].copy()
         elif 'highly_variable' in adata.var.columns:
             # Just take the first n_top_genes that are highly variable
             hvg = adata.var[adata.var['highly_variable']].head(n_top_genes).index
-            print(f"Filtering to top {len(hvg)} highly variable genes using 'highly_variable' column")
+            logger.info(f"Filtering to top {len(hvg)} highly variable genes using 'highly_variable' column")
             adata = adata[:, hvg].copy()
         else:
-            print(f"Warning: No highly variable gene information found, computing with scanpy")
+            logger.warning("No highly variable gene information found, computing with scanpy")
             import scanpy as sc
             sc.pp.highly_variable_genes(adata, n_top_genes=n_top_genes)
             adata = adata[:, adata.var['highly_variable']].copy()
         # Ensure X matrix is properly copied (not a view)
         if sparse.issparse(adata.X):
             adata.X = sparse.csr_matrix(adata.X)
-            print(f"Reconstructed sparse matrix: nnz={adata.X.nnz:,}")
-        print(f"New dataset shape: {adata.shape}")
+            logger.info(f"Reconstructed sparse matrix: nnz={adata.X.nnz:,}")
+        logger.info(f"New dataset shape: {adata.shape}")
 
     # Convert sparse matrix format if needed
     if sparse_format == "csc":
         if sparse.issparse(adata.X):
             if not isinstance(adata.X, sparse.csc_matrix):
-                print(f"Converting X matrix to CSC format")
+                logger.info("Converting X matrix to CSC format")
                 adata.X = adata.X.tocsc()
             else:
-                print(f"X matrix is already in CSC format")
+                logger.info("X matrix is already in CSC format")
         else:
-            print(f"Converting dense X matrix to CSC sparse format")
+            logger.info("Converting dense X matrix to CSC sparse format")
             adata.X = sparse.csc_matrix(adata.X)
     elif sparse_format == "csr":
         if sparse.issparse(adata.X):
             if not isinstance(adata.X, sparse.csr_matrix):
-                print(f"Converting X matrix to CSR format")
+                logger.info("Converting X matrix to CSR format")
                 adata.X = adata.X.tocsr()
             else:
-                print(f"X matrix is already in CSR format")
+                logger.info("X matrix is already in CSR format")
         else:
-            print(f"Converting dense X matrix to CSR sparse format")
+            logger.info("Converting dense X matrix to CSR sparse format")
             adata.X = sparse.csr_matrix(adata.X)
 
     # Convert to dense if requested
     if dense and sparse.issparse(adata.X):
-        print(f"Converting sparse matrix to dense array")
+        logger.info("Converting sparse matrix to dense array")
         adata.X = adata.X.toarray()
-        print(f"Dense matrix shape: {adata.X.shape}, dtype: {adata.X.dtype}")
+        logger.info(f"Dense matrix shape: {adata.X.shape}, dtype: {adata.X.dtype}")
 
     # Cast sparse matrix indices to int32 if requested (for JavaScript compatibility)
     if force_int32 and sparse.issparse(adata.X):
         max_int32 = np.iinfo(np.int32).max
         if adata.X.indptr[-1] > max_int32:
-            print(f"ERROR: indptr max value ({adata.X.indptr[-1]:,}) exceeds int32 max ({max_int32:,})")
-            print(f"Cannot safely cast to int32. Try reducing the dataset size.")
+            logger.error(f"indptr max value ({adata.X.indptr[-1]:,}) exceeds int32 max ({max_int32:,})")
+            logger.error("Cannot safely cast to int32. Try reducing the dataset size.")
             sys.exit(1)
         if adata.X.indices.max() > max_int32:
-            print(f"ERROR: indices max value ({adata.X.indices.max():,}) exceeds int32 max ({max_int32:,})")
+            logger.error(f"indices max value ({adata.X.indices.max():,}) exceeds int32 max ({max_int32:,})")
             sys.exit(1)
-        print(f"Casting sparse matrix indices/indptr to int32 (nnz: {adata.X.nnz:,})")
+        logger.info(f"Casting sparse matrix indices/indptr to int32 (nnz: {adata.X.nnz:,})")
         adata.X.indices = adata.X.indices.astype(np.int32)
         adata.X.indptr = adata.X.indptr.astype(np.int32)
 
@@ -104,12 +107,12 @@ def convert_h5ad_to_zarr(input_file: Path, output_file: Path, obs_chunk_size: in
         obs_chunk = obs_chunk_size if obs_chunk_size else adata.shape[0]
         var_chunk = var_chunk_size if var_chunk_size else adata.shape[1]
         chunks = (obs_chunk, var_chunk)
-        print(f"Writing to zarr with chunks {chunks}: {output_file}")
+        logger.info(f"Writing to zarr with chunks {chunks}: {output_file}")
         adata.write_zarr(output_file, chunks=chunks)
     else:
-        print(f"Writing to zarr: {output_file}")
+        logger.info(f"Writing to zarr: {output_file}")
         adata.write_zarr(output_file)
-    print(f"✓ Successfully converted to zarr format")
+    logger.info("Successfully converted to zarr format")
 
 
 def _init_zarrs() -> int:
@@ -120,7 +123,7 @@ def _init_zarrs() -> int:
     import zarrs  # noqa: F401
     zarr.config.set({"codec_pipeline.path": "zarrs.ZarrsCodecPipeline"})
     n_cpus = __import__("os").cpu_count() or 8
-    print(f"Using zarrs Rust codec pipeline ({n_cpus} threads)", flush=True)
+    logger.info(f"Using zarrs Rust codec pipeline ({n_cpus} threads)")
     return n_cpus
 
 
@@ -134,20 +137,20 @@ def _filter_hvgs(var_df, n_top_genes: int | None):
 
     if "highly_variable_rank" in var_df.columns:
         top_genes = var_df.nsmallest(n_top_genes, "highly_variable_rank").index
-        print(f"Filtering to top {len(top_genes)} HVGs using 'highly_variable_rank'")
+        logger.info(f"Filtering to top {len(top_genes)} HVGs using 'highly_variable_rank'")
     elif "vst.variance.standardized" in var_df.columns:
         top_genes = var_df.nlargest(n_top_genes, "vst.variance.standardized").index
-        print(f"Filtering to top {len(top_genes)} HVGs using 'vst.variance.standardized'")
+        logger.info(f"Filtering to top {len(top_genes)} HVGs using 'vst.variance.standardized'")
     elif "highly_variable" in var_df.columns:
         top_genes = var_df[var_df["highly_variable"]].head(n_top_genes).index
-        print(f"Filtering to top {len(top_genes)} HVGs using 'highly_variable'")
+        logger.info(f"Filtering to top {len(top_genes)} HVGs using 'highly_variable'")
     else:
-        print("Warning: No HVG info found. Cannot filter in chunked mode.")
+        logger.warning("No HVG info found. Cannot filter in chunked mode.")
         return None
 
     var_idx = var_df.index.isin(top_genes)
     n_vars = var_idx.sum()
-    print(f"Filtered to {n_vars:,} genes")
+    logger.info(f"Filtered to {n_vars:,} genes")
     return var_idx
 
 
@@ -159,14 +162,14 @@ def _phase1_write_temp_zarr(config: ConversionConfig, adata_backed, var_idx, n_o
     has_layers = bool(adata_backed.layers) and config.keep_raw
     layer_names = list(adata_backed.layers.keys()) if has_layers else []
     if not config.keep_raw and adata_backed.layers:
-        print(f"Skipping layers (use --keep-raw to include): {list(adata_backed.layers.keys())}", flush=True)
+        logger.info(f"Skipping layers (use --keep-raw to include): {list(adata_backed.layers.keys())}")
 
     n_cell_chunks = (n_obs + config.cell_chunk_size - 1) // config.cell_chunk_size
 
     tmp_dir = tempfile.mkdtemp(prefix="zarr_convert_", dir=config.temp_dir)
     tmp_zarr_path = Path(tmp_dir) / "temp.zarr"
-    print(f"\n=== Phase 1: Writing row-chunked temp zarr ===", flush=True)
-    print(f"Temp location: {tmp_zarr_path}", flush=True)
+    logger.info("=== Phase 1: Writing row-chunked temp zarr ===")
+    logger.info(f"Temp location: {tmp_zarr_path}")
 
     tmp_store = zarr.storage.LocalStore(str(tmp_zarr_path))
     tmp_root = zarr.open_group(tmp_store, mode="w", zarr_format=3)
@@ -176,7 +179,7 @@ def _phase1_write_temp_zarr(config: ConversionConfig, adata_backed, var_idx, n_o
     # 1000 genes per chunk → Phase 2 reads a 1000-gene slab (~40 MB) instead of
     # the full 28,476-gene row (~300 MB) per row-chunk. ~7.5x less decompression waste.
     tmp_var_chunk = min(1000, n_vars)
-    print(f"Temp zarr chunk shape: ({config.cell_chunk_size}, {tmp_var_chunk})", flush=True)
+    logger.info(f"Temp zarr chunk shape: ({config.cell_chunk_size}, {tmp_var_chunk})")
 
     tmp_X = tmp_root.create_array(
         "X",
@@ -198,7 +201,7 @@ def _phase1_write_temp_zarr(config: ConversionConfig, adata_backed, var_idx, n_o
                 overwrite=True,
             )
 
-    print(f"Streaming {n_obs:,} cells in {n_cell_chunks} chunks of {config.cell_chunk_size:,}", flush=True)
+    logger.info(f"Streaming {n_obs:,} cells in {n_cell_chunks} chunks of {config.cell_chunk_size:,}")
     phase1_start = time.time()
 
     for ci in range(n_cell_chunks):
@@ -221,13 +224,13 @@ def _phase1_write_temp_zarr(config: ConversionConfig, adata_backed, var_idx, n_o
         if (ci + 1) % 50 == 0 or ci == n_cell_chunks - 1:
             elapsed = time.time() - phase1_start
             pct = (ci + 1) / n_cell_chunks * 100
-            print(f"  Cell chunk {ci + 1}/{n_cell_chunks} ({pct:.0f}%) — {elapsed:.0f}s elapsed", flush=True)
+            logger.info(f"  Cell chunk {ci + 1}/{n_cell_chunks} ({pct:.0f}%) — {elapsed:.0f}s elapsed")
 
         del chunk, X_dense
         gc.collect()
 
     phase1_time = time.time() - phase1_start
-    print(f"Phase 1 complete in {phase1_time:.0f}s", flush=True)
+    logger.info(f"Phase 1 complete in {phase1_time:.0f}s")
 
     return tmp_root, tmp_dir, phase1_time, has_layers, layer_names
 
@@ -243,7 +246,7 @@ def _read_obsm_chunked(adata_backed, n_obs: int, cell_chunk_size: int) -> dict[s
 
     n_cell_chunks = (n_obs + cell_chunk_size - 1) // cell_chunk_size
     for key in adata_backed.obsm.keys():
-        print(f"Reading obsm/{key} in chunks...", flush=True)
+        logger.info(f"Reading obsm/{key} in chunks...")
         parts = []
         for ci in range(n_cell_chunks):
             c_start = ci * cell_chunk_size
@@ -307,7 +310,7 @@ def _phase2_rechunk(config: ConversionConfig, tmp_root, n_obs: int, n_vars: int,
     if x_enc.compressor:
         compressor_kwarg["compressors"] = make_compressor(x_enc.compressor)
 
-    print(f"\n=== Phase 2: Rechunking to ({n_obs:,}, {v_chunk}){shard_msg}, dtype={target_dtype} ===", flush=True)
+    logger.info(f"=== Phase 2: Rechunking to ({n_obs:,}, {v_chunk}){shard_msg}, dtype={target_dtype} ===")
 
     final_store = zarr.storage.LocalStore(str(config.output_file))
     final_root = zarr.open_group(final_store, mode="w", zarr_format=3)
@@ -348,7 +351,7 @@ def _phase2_rechunk(config: ConversionConfig, tmp_root, n_obs: int, n_vars: int,
     # decompression as reading 1, but does 30x fewer iterations.
     read_batch = config.shard_size if config.shard_size is not None else v_chunk
     n_batches = (n_vars + read_batch - 1) // read_batch
-    print(f"Reading column slices from temp zarr in batches of {read_batch} ({n_batches} batches)...", flush=True)
+    logger.info(f"Reading column slices from temp zarr in batches of {read_batch} ({n_batches} batches)...")
     phase2_start = time.time()
 
     tmp_X = tmp_root["X"]
@@ -369,10 +372,10 @@ def _phase2_rechunk(config: ConversionConfig, tmp_root, n_obs: int, n_vars: int,
         if (bi + 1) % 50 == 0 or bi == n_batches - 1:
             elapsed = time.time() - phase2_start
             pct = (bi + 1) / n_batches * 100
-            print(f"  Batch {bi + 1}/{n_batches} ({pct:.0f}%) — {elapsed:.0f}s elapsed", flush=True)
+            logger.info(f"  Batch {bi + 1}/{n_batches} ({pct:.0f}%) — {elapsed:.0f}s elapsed")
 
     phase2_time = time.time() - phase2_start
-    print(f"Phase 2 complete in {phase2_time:.0f}s", flush=True)
+    logger.info(f"Phase 2 complete in {phase2_time:.0f}s")
 
     return final_root, final_store, phase2_time
 
@@ -402,7 +405,7 @@ def write_obsm_to_store(
         obsm_chunks = tuple(resolve_template(v, dim_vars) for v in obsm_enc.chunks) if obsm_enc.chunks else (min(obsm_cell_chunk_size, n_obs), 1)
         obsm_shards = tuple(resolve_template(v, dim_vars) for v in obsm_enc.shards) if obsm_enc.shards else (min(1_000_000, n_obs), n_dim)
         obsm_shards = tuple(((s + c - 1) // c) * c for s, c in zip(obsm_shards, obsm_chunks))
-        print(f"Writing obsm/{key} shape=({n_obs}, {n_dim}), chunks={obsm_chunks}, shards={obsm_shards}, dtype={target_dtype}...", flush=True)
+        logger.info(f"Writing obsm/{key} shape=({n_obs}, {n_dim}), chunks={obsm_chunks}, shards={obsm_shards}, dtype={target_dtype}...")
         zarr_embed = obsm_group.create_array(
             key,
             shape=(n_obs, n_dim),
@@ -420,13 +423,13 @@ def write_obsm_to_store(
 def _write_metadata(final_root, final_store, metadata: dict, config: ConversionConfig, encoding: EncodingConfig | None = None) -> None:
     """Write obs, var, obsm, uns, obsp, varp to the final zarr store."""
     n_obs = len(metadata["obs"])
-    print("Writing metadata...", flush=True)
+    logger.info("Writing metadata...")
 
     # Convert string columns to categoricals for compact storage
     for label, df in [("obs", metadata["obs"]), ("var", metadata["var"])]:
         str_cols = [c for c in df.columns if pd.api.types.is_string_dtype(df[c]) and not isinstance(df[c].dtype, pd.CategoricalDtype)]
         if str_cols:
-            print(f"Converting {len(str_cols)} string column(s) in {label} to categorical: {str_cols}", flush=True)
+            logger.info(f"Converting {len(str_cols)} string column(s) in {label} to categorical: {str_cols}")
             for c in str_cols:
                 df[c] = df[c].astype("category")
 
@@ -457,7 +460,7 @@ def _write_metadata(final_root, final_store, metadata: dict, config: ConversionC
             old_attrs = dict(old_index.attrs)
             del obs_group["_index"]
             shard_msg = f", shards=({idx_enc.shards[0]},)" if idx_enc.shards else ""
-            print(f"Rechunking obs/_index to chunks=({idx_chunk_size},){shard_msg} ...", flush=True)
+            logger.info(f"Rechunking obs/_index to chunks=({idx_chunk_size},){shard_msg} ...")
             new_index = obs_group.create_array(
                 "_index",
                 shape=index_data.shape,
@@ -471,7 +474,7 @@ def _write_metadata(final_root, final_store, metadata: dict, config: ConversionC
             new_index.attrs.update(old_attrs)
 
     if metadata["uns"]:
-        print("Writing uns...", flush=True)
+        logger.info("Writing uns...")
         write_elem(final_root, "uns", metadata["uns"])
     if metadata["obsp"]:
         write_elem(final_root, "obsp", metadata["obsp"])
@@ -534,7 +537,7 @@ def _add_large_matrix(
     # Check overwrite
     if not overwrite and array_name in target_group:
         path = f"{group_name}/{array_name}" if group_name else array_name
-        print(f"ERROR: {path} already exists in zarr store. Use overwrite=True to overwrite.", flush=True)
+        logger.error(f"{path} already exists in zarr store. Use overwrite=True to overwrite.")
         sys.exit(1)
 
     n_obs, n_vars = adata.n_obs, adata.n_vars
@@ -557,8 +560,8 @@ def _add_large_matrix(
     # Phase 1: stream h5ad → row-chunked temp zarr
     tmp_dir_obj = tempfile.mkdtemp(prefix="zarr_convert_", dir=temp_dir)
     tmp_zarr_path = Path(tmp_dir_obj) / "temp.zarr"
-    print(f"\n=== Phase 1: Writing row-chunked temp zarr for '{array_name}' ===", flush=True)
-    print(f"Temp location: {tmp_zarr_path}", flush=True)
+    logger.info(f"=== Phase 1: Writing row-chunked temp zarr for '{array_name}' ===")
+    logger.info(f"Temp location: {tmp_zarr_path}")
 
     tmp_store = zarr.storage.LocalStore(str(tmp_zarr_path))
     tmp_root = zarr.open_group(tmp_store, mode="w", zarr_format=3)
@@ -571,7 +574,7 @@ def _add_large_matrix(
     )
 
     n_cell_chunks = (n_obs + cell_chunk_size - 1) // cell_chunk_size
-    print(f"Streaming {n_obs:,} cells in {n_cell_chunks} chunks of {cell_chunk_size:,}", flush=True)
+    logger.info(f"Streaming {n_obs:,} cells in {n_cell_chunks} chunks of {cell_chunk_size:,}")
     phase1_start = time.time()
 
     for ci in range(n_cell_chunks):
@@ -593,13 +596,13 @@ def _add_large_matrix(
         if (ci + 1) % 50 == 0 or ci == n_cell_chunks - 1:
             elapsed = time.time() - phase1_start
             pct = (ci + 1) / n_cell_chunks * 100
-            print(f"  Cell chunk {ci + 1}/{n_cell_chunks} ({pct:.0f}%) — {elapsed:.0f}s elapsed", flush=True)
+            logger.info(f"  Cell chunk {ci + 1}/{n_cell_chunks} ({pct:.0f}%) — {elapsed:.0f}s elapsed")
 
     phase1_time = time.time() - phase1_start
-    print(f"Phase 1 complete in {phase1_time:.0f}s", flush=True)
+    logger.info(f"Phase 1 complete in {phase1_time:.0f}s")
 
     # Phase 2: rechunk temp → column-oriented final array
-    print(f"\n=== Phase 2: Rechunking '{array_name}' to ({n_obs:,}, {v_chunk}), dtype={target_dtype} ===", flush=True)
+    logger.info(f"=== Phase 2: Rechunking '{array_name}' to ({n_obs:,}, {v_chunk}), dtype={target_dtype} ===")
     final_arr = target_group.create_array(
         array_name,
         shape=(n_obs, n_vars),
@@ -625,13 +628,13 @@ def _add_large_matrix(
         if (bi + 1) % 50 == 0 or bi == n_batches - 1:
             elapsed = time.time() - phase2_start
             pct = (bi + 1) / n_batches * 100
-            print(f"  Batch {bi + 1}/{n_batches} ({pct:.0f}%) — {elapsed:.0f}s elapsed", flush=True)
+            logger.info(f"  Batch {bi + 1}/{n_batches} ({pct:.0f}%) — {elapsed:.0f}s elapsed")
 
     phase2_time = time.time() - phase2_start
-    print(f"Phase 2 complete in {phase2_time:.0f}s", flush=True)
+    logger.info(f"Phase 2 complete in {phase2_time:.0f}s")
 
     # Cleanup
-    print(f"Cleaning up temp dir: {tmp_dir_obj}", flush=True)
+    logger.info(f"Cleaning up temp dir: {tmp_dir_obj}")
     shutil.rmtree(tmp_dir_obj, ignore_errors=True)
 
 
@@ -648,14 +651,14 @@ def _add_layers(
     """Write layers (or a single layer) to the zarr store using the two-phase pipeline."""
     if sub_key is not None:
         if sub_key not in adata.layers:
-            print(f"ERROR: layers/{sub_key} not found in h5ad file", flush=True)
+            logger.error(f"layers/{sub_key} not found in h5ad file")
             sys.exit(1)
         layer_names = [sub_key]
     else:
         layer_names = list(adata.layers.keys())
 
     for ln in layer_names:
-        print(f"Processing layer: {ln}", flush=True)
+        logger.info(f"Processing layer: {ln}")
         _add_large_matrix(
             adata,
             root,
@@ -674,7 +677,7 @@ def _add_obsm(adata, root, n_obs: int, sub_key: str | None, overwrite: bool, dty
     """Write obsm (or a single sub-key of obsm) to the zarr store."""
     if sub_key is not None:
         if sub_key not in adata.obsm:
-            print(f"ERROR: obsm/{sub_key} not found in h5ad file", flush=True)
+            logger.error(f"obsm/{sub_key} not found in h5ad file")
             sys.exit(1)
         keys_to_write = [sub_key]
     else:
@@ -687,7 +690,7 @@ def _add_obsm(adata, root, n_obs: int, sub_key: str | None, overwrite: bool, dty
                 # Check at array level (not group level)
                 try:
                     obsm_group[k]  # will raise if not exists
-                    print(f"ERROR: obsm/{k} already exists in zarr store. Use overwrite=True to overwrite.", flush=True)
+                    logger.error(f"obsm/{k} already exists in zarr store. Use overwrite=True to overwrite.")
                     sys.exit(1)
                 except KeyError:
                     pass
@@ -699,7 +702,7 @@ def _add_obsm(adata, root, n_obs: int, sub_key: str | None, overwrite: bool, dty
 def _add_obs_or_var(adata, root, key: str, overwrite: bool) -> None:
     """Write obs or var dataframe to the zarr store."""
     if not overwrite and key in root:
-        print(f"ERROR: {key} already exists in zarr store. Use overwrite=True to overwrite.", flush=True)
+        logger.error(f"{key} already exists in zarr store. Use overwrite=True to overwrite.")
         sys.exit(1)
 
     df = getattr(adata, key).copy()
@@ -715,12 +718,12 @@ def _add_obs_or_var(adata, root, key: str, overwrite: bool) -> None:
 def _add_write_elem_key(adata, root, key: str, overwrite: bool) -> None:
     """Write uns, obsp, or varp to the zarr store."""
     if not overwrite and key in root:
-        print(f"ERROR: {key} already exists in zarr store. Use overwrite=True to overwrite.", flush=True)
+        logger.error(f"{key} already exists in zarr store. Use overwrite=True to overwrite.")
         sys.exit(1)
 
     data = getattr(adata, key)
     if data is None or (hasattr(data, "__len__") and len(data) == 0):
-        print(f"WARNING: {key} is empty in h5ad file, skipping.", flush=True)
+        logger.warning(f"{key} is empty in h5ad file, skipping.")
         sys.exit(1)
 
     write_elem(root, key, dict(data))
@@ -759,10 +762,10 @@ def add_key_to_store(
 
     # Validate inputs
     if not h5ad_path.exists():
-        print(f"ERROR: h5ad file not found: {h5ad_path}", flush=True)
+        logger.error(f"h5ad file not found: {h5ad_path}")
         sys.exit(1)
     if not zarr_path.exists():
-        print(f"ERROR: zarr store not found: {zarr_path}", flush=True)
+        logger.error(f"zarr store not found: {zarr_path}")
         sys.exit(1)
 
     # Parse key into top_key and optional sub_key
@@ -772,17 +775,17 @@ def add_key_to_store(
 
     # Validate top_key
     if top_key not in VALID_KEYS:
-        print(f"ERROR: Invalid key '{top_key}'. Must be one of: {sorted(VALID_KEYS)}", flush=True)
+        logger.error(f"Invalid key '{top_key}'. Must be one of: {sorted(VALID_KEYS)}")
         sys.exit(1)
 
     # Validate sub_key usage
     if sub_key is not None and top_key not in SUB_KEY_ALLOWED:
-        print(f"ERROR: Sub-keys are only allowed for: {sorted(SUB_KEY_ALLOWED)}. Got '{key}'.", flush=True)
+        logger.error(f"Sub-keys are only allowed for: {sorted(SUB_KEY_ALLOWED)}. Got '{key}'.")
         sys.exit(1)
 
     # raw is not yet supported
     if top_key == "raw":
-        print(f"ERROR: Writing 'raw' is not yet supported.", flush=True)
+        logger.error("Writing 'raw' is not yet supported.")
         sys.exit(1)
 
     # Initialize zarrs codec pipeline for large keys
@@ -791,7 +794,7 @@ def add_key_to_store(
 
     adata = None
     try:
-        print(f"Reading h5ad file: {h5ad_path}", flush=True)
+        logger.info(f"Reading h5ad file: {h5ad_path}")
         adata = ad.read_h5ad(h5ad_path, backed="r")
         n_obs = adata.n_obs
 
@@ -810,7 +813,7 @@ def add_key_to_store(
             _add_write_elem_key(adata, root, top_key, overwrite)
 
         zarr.consolidate_metadata(store, zarr_format=3)
-        print(f"Successfully wrote '{key}' to zarr store.", flush=True)
+        logger.info(f"Successfully wrote '{key}' to zarr store.")
 
     finally:
         if adata is not None:
@@ -836,11 +839,11 @@ def convert_h5ad_to_zarr_chunked(config: ConversionConfig, hooks: dict[str, Call
     """
     n_cpus = _init_zarrs()
 
-    print(f"Reading h5ad file in backed mode: {config.input_file}", flush=True)
+    logger.info(f"Reading h5ad file in backed mode: {config.input_file}")
     adata_backed = ad.read_h5ad(config.input_file, backed="r")
     n_obs, n_vars_orig = adata_backed.shape
     n_vars = n_vars_orig
-    print(f"Dataset shape: {n_obs:,} cells x {n_vars:,} genes", flush=True)
+    logger.info(f"Dataset shape: {n_obs:,} cells x {n_vars:,} genes")
 
     var_idx = _filter_hvgs(adata_backed.var, config.n_top_genes)
     if var_idx is not None:
@@ -860,7 +863,7 @@ def convert_h5ad_to_zarr_chunked(config: ConversionConfig, hooks: dict[str, Call
         if config.encoding_config:
             variables = {"n_obs": n_obs, "n_vars": n_vars}
             encoding = load_encoding_config(config.encoding_config, variables)
-            print(f"Using encoding config: {config.encoding_config}", flush=True)
+            logger.info(f"Using encoding config: {config.encoding_config}")
 
             if hooks and "on_encoding_loaded" in hooks:
                 hooks["on_encoding_loaded"](encoding=encoding, config_path=config.encoding_config)
@@ -877,7 +880,7 @@ def convert_h5ad_to_zarr_chunked(config: ConversionConfig, hooks: dict[str, Call
         )
 
         # Clean up temp zarr before loading metadata to free memory
-        print(f"Cleaning up temp dir: {tmp_dir}", flush=True)
+        logger.info(f"Cleaning up temp dir: {tmp_dir}")
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
         metadata = _extract_metadata(adata_backed, var_idx, n_obs, config.cell_chunk_size)
@@ -885,7 +888,7 @@ def convert_h5ad_to_zarr_chunked(config: ConversionConfig, hooks: dict[str, Call
         _write_metadata(final_root, final_store, metadata, config, encoding)
 
         total_time = phase1_time + phase2_time
-        print(f"\n✓ Done in {total_time:.0f}s (phase1: {phase1_time:.0f}s, phase2: {phase2_time:.0f}s)", flush=True)
+        logger.info(f"Done in {total_time:.0f}s (phase1: {phase1_time:.0f}s, phase2: {phase2_time:.0f}s)")
 
         if hooks and "on_complete" in hooks:
             hooks["on_complete"](
