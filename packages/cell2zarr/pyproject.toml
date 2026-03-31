@@ -12,10 +12,12 @@ dependencies = [
     "scanpy>=1.11.5",
     "uvicorn>=0.41.0",
     "zarrs>=0.2.2",
+    "click>=8.1",
+    "click-default-group>=1.2",
 ]
 
 [project.scripts]
-cell2zarr = "cell2zarr.cli:main"
+cell2zarr = "cell2zarr.cli:cli"
 
 [build-system]
 requires = ["hatchling"]

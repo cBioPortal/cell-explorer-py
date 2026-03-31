@@ -246,7 +246,8 @@ class TestAddLargeKeys:
             add_key_to_store(h5ad_path, zarr_path, key="raw", overwrite=False, dtype="float32")
 
 
-import subprocess
+from click.testing import CliRunner
+from cell2zarr.cli import cli
 
 
 class TestCLISubcommands:
@@ -256,11 +257,20 @@ class TestCLISubcommands:
         _create_test_h5ad(h5ad_path, n_obs=10, n_vars=5)
         zarr_path = tmp_path / "test.zarr"
 
-        result = subprocess.run(
-            ["uv", "run", "cell2zarr", str(h5ad_path), str(zarr_path)],
-            capture_output=True, text=True,
-        )
-        assert result.returncode == 0
+        runner = CliRunner()
+        result = runner.invoke(cli, [str(h5ad_path), str(zarr_path)])
+        assert result.exit_code == 0, result.output
+        assert zarr_path.exists()
+
+    def test_convert_explicit_subcommand(self, tmp_path):
+        """cell2zarr convert should work explicitly."""
+        h5ad_path = tmp_path / "test.h5ad"
+        _create_test_h5ad(h5ad_path, n_obs=10, n_vars=5)
+        zarr_path = tmp_path / "test.zarr"
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["convert", str(h5ad_path), str(zarr_path)])
+        assert result.exit_code == 0, result.output
         assert zarr_path.exists()
 
     def test_add_subcommand(self, tmp_path):
@@ -268,20 +278,11 @@ class TestCLISubcommands:
         h5ad_path = tmp_path / "test.h5ad"
         zarr_path = tmp_path / "test.zarr"
         _create_test_h5ad(h5ad_path, n_obs=10, n_vars=5)
+        _create_test_store(zarr_path)
 
-        # First create a store via convert (use --two-phase to get zarr v3 store)
-        convert_result = subprocess.run(
-            ["uv", "run", "cell2zarr", str(h5ad_path), str(zarr_path), "--two-phase"],
-            capture_output=True, text=True,
-        )
-        assert convert_result.returncode == 0
-
-        # Add obsm back with --overwrite (tests the add subcommand end-to-end)
-        result = subprocess.run(
-            ["uv", "run", "cell2zarr", "add", str(h5ad_path), str(zarr_path), "--key", "obsm", "--overwrite"],
-            capture_output=True, text=True,
-        )
-        assert result.returncode == 0
+        runner = CliRunner()
+        result = runner.invoke(cli, ["add", str(h5ad_path), str(zarr_path), "--key", "obsm"])
+        assert result.exit_code == 0, result.output
 
 
 class TestEndToEnd:
