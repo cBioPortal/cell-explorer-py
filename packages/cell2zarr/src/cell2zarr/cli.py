@@ -18,10 +18,10 @@ from .run_log import (
 from .convert import convert_h5ad_to_zarr, convert_h5ad_to_zarr_chunked
 
 
-def _setup_logging(log_file: Path | None = None):
+def _setup_logging(log_file: Path | None = None, level: int = logging.INFO):
     """Configure cell2zarr logger with stdout and file handler."""
     logger = logging.getLogger("cell2zarr")
-    logger.setLevel(logging.INFO)
+    logger.setLevel(level)
 
     formatter = logging.Formatter("[%(asctime)s] %(levelname)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
@@ -145,9 +145,11 @@ def cli():
 @click.option("--run-db", type=click.Path(path_type=Path), help="Path to JSON run history database.")
 @click.option("--encoding-config", type=click.Path(exists=True, path_type=Path), help="Path to JSON encoding config.")
 @click.option("--temp-dir", type=click.Path(path_type=Path), help="Directory for phase 1 temp zarr.")
+@click.option("--log-level", type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False), default="INFO", help="Log level. Default: INFO.")
 def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes,
             keep_raw, sparse_format, dense, force_int32, two_phase, cell_chunk_size,
-            shard_size, dtype, obsm_cell_chunk_size, log_file, run_db, encoding_config, temp_dir):
+            shard_size, dtype, obsm_cell_chunk_size, log_file, run_db, encoding_config, temp_dir,
+            log_level):
     """Convert h5ad file to Zarr store."""
     if output_file is None:
         output_file = input_file.with_suffix('.zarr')
@@ -159,7 +161,7 @@ def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes
     if log_file is None:
         log_file = output_file.with_suffix('.log')
 
-    _setup_logging(log_file)
+    _setup_logging(log_file, getattr(logging, log_level.upper()))
     logger = logging.getLogger("cell2zarr")
 
     if two_phase:
@@ -253,12 +255,13 @@ def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes
 @click.option("--encoding-config", type=click.Path(exists=True, path_type=Path), help="Path to JSON encoding config.")
 @click.option("--dtype", type=click.Choice(["float16", "float32", "float64"]), default="float32", help="Target dtype. Default: float32.")
 @click.option("--log-file", type=click.Path(path_type=Path), help="Log file path. Default: <zarr_store>.add.log.")
+@click.option("--log-level", type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False), default="INFO", help="Log level. Default: INFO.")
 @click.option("--temp-dir", type=click.Path(path_type=Path), help="Temp directory for large keys (X, layers).")
-def add(h5ad_file, zarr_store, key, overwrite, encoding_config, dtype, log_file, temp_dir):
+def add(h5ad_file, zarr_store, key, overwrite, encoding_config, dtype, log_file, log_level, temp_dir):
     """Add a key from h5ad to an existing Zarr store."""
     if log_file is None:
         log_file = Path(str(zarr_store) + ".add.log")
-    _setup_logging(log_file)
+    _setup_logging(log_file, getattr(logging, log_level.upper()))
 
     from .convert import add_key_to_store
     from .encoding import load_encoding_config
