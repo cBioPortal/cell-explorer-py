@@ -1,309 +1,171 @@
 """Tests for add-key functionality."""
 import numpy as np
+import pytest
 import zarr
-import anndata as ad
-import pandas as pd
+from click.testing import CliRunner
 
+from cell2zarr.cli import cli
 from cell2zarr.convert import write_obsm_to_store, add_key_to_store
+from conftest import _write_test_h5ad, _create_zarr_store, open_zarr
 
 
 class TestWriteObsmToStore:
-    def test_writes_single_obsm_key(self, tmp_path):
-        store_path = tmp_path / "test.zarr"
-        store = zarr.storage.LocalStore(str(store_path))
-        root = zarr.open_group(store, mode="w", zarr_format=3)
+    @pytest.fixture
+    def zarr_root(self, tmp_path):
+        store = zarr.storage.LocalStore(str(tmp_path / "test.zarr"))
+        return zarr.open_group(store, mode="w", zarr_format=3)
 
+    def test_writes_single_key(self, zarr_root):
         obsm_data = {"X_umap": np.random.randn(100, 2).astype(np.float32)}
+        write_obsm_to_store(zarr_root, obsm_data, n_obs=100, dtype="float32")
 
-        write_obsm_to_store(root, obsm_data, n_obs=100, dtype="float32")
+        assert "obsm" in zarr_root
+        assert zarr_root["obsm"]["X_umap"].shape == (100, 2)
 
-        assert "obsm" in root
-        assert "X_umap" in root["obsm"]
-        arr = root["obsm"]["X_umap"]
-        assert arr.shape == (100, 2)
-
-    def test_writes_multiple_obsm_keys(self, tmp_path):
-        store_path = tmp_path / "test.zarr"
-        store = zarr.storage.LocalStore(str(store_path))
-        root = zarr.open_group(store, mode="w", zarr_format=3)
-
+    def test_writes_multiple_keys(self, zarr_root):
         obsm_data = {
             "X_umap": np.random.randn(100, 2).astype(np.float32),
             "X_pca": np.random.randn(100, 50).astype(np.float32),
         }
+        write_obsm_to_store(zarr_root, obsm_data, n_obs=100, dtype="float32")
 
-        write_obsm_to_store(root, obsm_data, n_obs=100, dtype="float32")
+        assert "X_umap" in zarr_root["obsm"]
+        assert zarr_root["obsm"]["X_pca"].shape == (100, 50)
 
-        assert "X_umap" in root["obsm"]
-        assert "X_pca" in root["obsm"]
-        assert root["obsm"]["X_pca"].shape == (100, 50)
-
-    def test_respects_dtype(self, tmp_path):
-        store_path = tmp_path / "test.zarr"
-        store = zarr.storage.LocalStore(str(store_path))
-        root = zarr.open_group(store, mode="w", zarr_format=3)
-
+    @pytest.mark.parametrize("dtype", ["float16", "float32", "float64"])
+    def test_respects_dtype(self, zarr_root, dtype):
         obsm_data = {"X_umap": np.random.randn(100, 2).astype(np.float32)}
+        write_obsm_to_store(zarr_root, obsm_data, n_obs=100, dtype=dtype)
 
-        write_obsm_to_store(root, obsm_data, n_obs=100, dtype="float16")
+        assert zarr_root["obsm"]["X_umap"].dtype == np.dtype(dtype)
 
-        assert root["obsm"]["X_umap"].dtype == np.float16
-
-    def test_empty_obsm_is_noop(self, tmp_path):
-        store_path = tmp_path / "test.zarr"
-        store = zarr.storage.LocalStore(str(store_path))
-        root = zarr.open_group(store, mode="w", zarr_format=3)
-
-        write_obsm_to_store(root, {}, n_obs=100, dtype="float32")
-
-        assert "obsm" not in root
+    def test_empty_obsm_is_noop(self, zarr_root):
+        write_obsm_to_store(zarr_root, {}, n_obs=100, dtype="float32")
+        assert "obsm" not in zarr_root
 
 
-def _create_test_h5ad(path, n_obs=100, n_vars=50):
-    """Create a minimal h5ad with obs, var, obsm, uns."""
-    X = np.random.randn(n_obs, n_vars).astype(np.float32)
-    obs = pd.DataFrame({"cell_type": ["A"] * (n_obs // 2) + ["B"] * (n_obs // 2)}, index=[f"cell_{i}" for i in range(n_obs)])
-    var = pd.DataFrame({"gene_name": [f"gene_{i}" for i in range(n_vars)]}, index=[f"gene_{i}" for i in range(n_vars)])
-    adata = ad.AnnData(X=X, obs=obs, var=var)
-    adata.obsm["X_umap"] = np.random.randn(n_obs, 2).astype(np.float32)
-    adata.uns["method"] = "test"
-    adata.write_h5ad(path)
-    return adata
+class TestAddSmallKeys:
+    @pytest.mark.parametrize("key", ["obsm", "obs", "uns"])
+    def test_add_key(self, sample_h5ad, sample_store, key):
+        h5ad_path, _ = sample_h5ad
+        add_key_to_store(h5ad_path, sample_store, key=key, overwrite=False, dtype="float32")
 
+        root = open_zarr(sample_store)
+        assert key in root
 
-def _create_test_store(path):
-    """Create a minimal empty zarr v3 store."""
-    store = zarr.storage.LocalStore(str(path))
-    root = zarr.open_group(store, mode="w", zarr_format=3)
-    root.attrs["encoding-type"] = "anndata"
-    root.attrs["encoding-version"] = "0.1.0"
-    return root
+    def test_add_obsm_has_correct_shape(self, sample_h5ad, sample_store):
+        h5ad_path, _ = sample_h5ad
+        add_key_to_store(h5ad_path, sample_store, key="obsm", overwrite=False, dtype="float32")
 
-
-class TestAddKeyToStore:
-    def test_add_obsm(self, tmp_path):
-        h5ad_path = tmp_path / "test.h5ad"
-        zarr_path = tmp_path / "test.zarr"
-        _create_test_h5ad(h5ad_path)
-        _create_test_store(zarr_path)
-
-        add_key_to_store(h5ad_path, zarr_path, key="obsm", overwrite=False, dtype="float32")
-
-        root = zarr.open_group(zarr.storage.LocalStore(str(zarr_path)), mode="r")
-        assert "obsm" in root
-        assert "X_umap" in root["obsm"]
+        root = open_zarr(sample_store)
         assert root["obsm"]["X_umap"].shape == (100, 2)
 
-    def test_add_obsm_sub_key(self, tmp_path):
-        h5ad_path = tmp_path / "test.h5ad"
-        zarr_path = tmp_path / "test.zarr"
-        adata = _create_test_h5ad(h5ad_path)
+    def test_add_obsm_sub_key(self, h5ad_path, sample_store):
+        path, adata = _write_test_h5ad(h5ad_path)
         adata.obsm["X_pca"] = np.random.randn(100, 50).astype(np.float32)
-        adata.write_h5ad(h5ad_path)
-        _create_test_store(zarr_path)
+        adata.write_h5ad(path)
 
-        add_key_to_store(h5ad_path, zarr_path, key="obsm/X_umap", overwrite=False, dtype="float32")
+        add_key_to_store(path, sample_store, key="obsm/X_umap", overwrite=False, dtype="float32")
 
-        root = zarr.open_group(zarr.storage.LocalStore(str(zarr_path)), mode="r")
+        root = open_zarr(sample_store)
         assert "X_umap" in root["obsm"]
         assert "X_pca" not in root["obsm"]
 
-    def test_add_obs(self, tmp_path):
-        h5ad_path = tmp_path / "test.h5ad"
-        zarr_path = tmp_path / "test.zarr"
-        _create_test_h5ad(h5ad_path)
-        _create_test_store(zarr_path)
-
-        add_key_to_store(h5ad_path, zarr_path, key="obs", overwrite=False, dtype="float32")
-
-        root = zarr.open_group(zarr.storage.LocalStore(str(zarr_path)), mode="r")
-        assert "obs" in root
-
-    def test_add_uns(self, tmp_path):
-        h5ad_path = tmp_path / "test.h5ad"
-        zarr_path = tmp_path / "test.zarr"
-        _create_test_h5ad(h5ad_path)
-        _create_test_store(zarr_path)
-
-        add_key_to_store(h5ad_path, zarr_path, key="uns", overwrite=False, dtype="float32")
-
-        root = zarr.open_group(zarr.storage.LocalStore(str(zarr_path)), mode="r")
-        assert "uns" in root
-
-    def test_overwrite_fails_when_key_exists(self, tmp_path):
-        h5ad_path = tmp_path / "test.h5ad"
-        zarr_path = tmp_path / "test.zarr"
-        _create_test_h5ad(h5ad_path)
-        _create_test_store(zarr_path)
-
-        add_key_to_store(h5ad_path, zarr_path, key="obsm", overwrite=False, dtype="float32")
-
-        import pytest
+    def test_key_not_in_h5ad_fails(self, sample_h5ad, sample_store):
+        h5ad_path, _ = sample_h5ad
         with pytest.raises(SystemExit):
-            add_key_to_store(h5ad_path, zarr_path, key="obsm", overwrite=False, dtype="float32")
+            add_key_to_store(h5ad_path, sample_store, key="obsp", overwrite=False, dtype="float32")
 
-    def test_overwrite_succeeds_with_flag(self, tmp_path):
-        h5ad_path = tmp_path / "test.h5ad"
-        zarr_path = tmp_path / "test.zarr"
-        _create_test_h5ad(h5ad_path)
-        _create_test_store(zarr_path)
 
-        add_key_to_store(h5ad_path, zarr_path, key="obsm", overwrite=False, dtype="float32")
-        add_key_to_store(h5ad_path, zarr_path, key="obsm", overwrite=True, dtype="float32")
+class TestOverwrite:
+    def test_fails_without_flag(self, sample_h5ad, sample_store):
+        h5ad_path, _ = sample_h5ad
+        add_key_to_store(h5ad_path, sample_store, key="obsm", overwrite=False, dtype="float32")
 
-        root = zarr.open_group(zarr.storage.LocalStore(str(zarr_path)), mode="r")
+        with pytest.raises(SystemExit):
+            add_key_to_store(h5ad_path, sample_store, key="obsm", overwrite=False, dtype="float32")
+
+    def test_succeeds_with_flag(self, sample_h5ad, sample_store):
+        h5ad_path, _ = sample_h5ad
+        add_key_to_store(h5ad_path, sample_store, key="obsm", overwrite=False, dtype="float32")
+        add_key_to_store(h5ad_path, sample_store, key="obsm", overwrite=True, dtype="float32")
+
+        root = open_zarr(sample_store)
         assert "X_umap" in root["obsm"]
 
-    def test_key_not_in_h5ad_fails(self, tmp_path):
-        h5ad_path = tmp_path / "test.h5ad"
-        zarr_path = tmp_path / "test.zarr"
-        _create_test_h5ad(h5ad_path)
-        _create_test_store(zarr_path)
+    @pytest.mark.parametrize("key", ["X", "obsm"])
+    def test_overwrite_pattern(self, sample_h5ad, sample_store, tmp_path, key):
+        """Both small and large keys follow same overwrite pattern."""
+        h5ad_path, _ = sample_h5ad
+        add_key_to_store(h5ad_path, sample_store, key=key, overwrite=False, dtype="float32", temp_dir=tmp_path)
 
-        import pytest
         with pytest.raises(SystemExit):
-            add_key_to_store(h5ad_path, zarr_path, key="obsp", overwrite=False, dtype="float32")
+            add_key_to_store(h5ad_path, sample_store, key=key, overwrite=False, dtype="float32", temp_dir=tmp_path)
+
+        add_key_to_store(h5ad_path, sample_store, key=key, overwrite=True, dtype="float32", temp_dir=tmp_path)
 
 
 class TestAddLargeKeys:
-    def test_add_X(self, tmp_path):
-        h5ad_path = tmp_path / "test.h5ad"
-        zarr_path = tmp_path / "test.zarr"
-        adata = _create_test_h5ad(h5ad_path, n_obs=100, n_vars=50)
-        _create_test_store(zarr_path)
+    def test_add_X(self, sample_h5ad, sample_store, tmp_path):
+        h5ad_path, adata = sample_h5ad
+        add_key_to_store(h5ad_path, sample_store, key="X", overwrite=False, dtype="float32", temp_dir=tmp_path)
 
-        add_key_to_store(h5ad_path, zarr_path, key="X", overwrite=False, dtype="float32", temp_dir=tmp_path)
-
-        root = zarr.open_group(zarr.storage.LocalStore(str(zarr_path)), mode="r")
-        assert "X" in root
+        root = open_zarr(sample_store)
         assert root["X"].shape == (100, 50)
         np.testing.assert_array_almost_equal(root["X"][:], adata.X, decimal=5)
 
-    def test_add_X_overwrite_fails(self, tmp_path):
-        h5ad_path = tmp_path / "test.h5ad"
-        zarr_path = tmp_path / "test.zarr"
-        _create_test_h5ad(h5ad_path)
-        _create_test_store(zarr_path)
+    def test_add_single_layer(self, h5ad_path, sample_store, tmp_path):
+        path, adata = _write_test_h5ad(h5ad_path, n_obs=50, n_vars=20)
+        adata.layers["counts"] = np.random.randn(50, 20).astype(np.float32)
+        adata.write_h5ad(path)
 
-        add_key_to_store(h5ad_path, zarr_path, key="X", overwrite=False, dtype="float32", temp_dir=tmp_path)
+        add_key_to_store(path, sample_store, key="layers/counts", overwrite=False, dtype="float32", temp_dir=tmp_path)
 
-        import pytest
-        with pytest.raises(SystemExit):
-            add_key_to_store(h5ad_path, zarr_path, key="X", overwrite=False, dtype="float32", temp_dir=tmp_path)
+        root = open_zarr(sample_store)
+        assert root["layers"]["counts"].shape == (50, 20)
 
-    def test_add_X_overwrite_succeeds(self, tmp_path):
-        h5ad_path = tmp_path / "test.h5ad"
-        zarr_path = tmp_path / "test.zarr"
-        _create_test_h5ad(h5ad_path)
-        _create_test_store(zarr_path)
+    def test_add_all_layers(self, h5ad_path, sample_store, tmp_path):
+        path, adata = _write_test_h5ad(h5ad_path, n_obs=50, n_vars=20)
+        adata.layers["counts"] = np.random.randn(50, 20).astype(np.float32)
+        adata.layers["normalized"] = np.random.randn(50, 20).astype(np.float32)
+        adata.write_h5ad(path)
 
-        add_key_to_store(h5ad_path, zarr_path, key="X", overwrite=False, dtype="float32", temp_dir=tmp_path)
-        add_key_to_store(h5ad_path, zarr_path, key="X", overwrite=True, dtype="float32", temp_dir=tmp_path)
+        add_key_to_store(path, sample_store, key="layers", overwrite=False, dtype="float32", temp_dir=tmp_path)
 
-        root = zarr.open_group(zarr.storage.LocalStore(str(zarr_path)), mode="r")
-        assert root["X"].shape == (100, 50)
-
-    def test_add_layer(self, tmp_path):
-        h5ad_path = tmp_path / "test.h5ad"
-        zarr_path = tmp_path / "test.zarr"
-        n_obs, n_vars = 50, 20
-        adata = _create_test_h5ad(h5ad_path, n_obs=n_obs, n_vars=n_vars)
-        adata.layers["counts"] = np.random.randn(n_obs, n_vars).astype(np.float32)
-        adata.write_h5ad(h5ad_path)
-        _create_test_store(zarr_path)
-
-        add_key_to_store(h5ad_path, zarr_path, key="layers/counts", overwrite=False, dtype="float32", temp_dir=tmp_path)
-
-        root = zarr.open_group(zarr.storage.LocalStore(str(zarr_path)), mode="r")
-        assert "layers" in root
-        assert "counts" in root["layers"]
-        assert root["layers"]["counts"].shape == (n_obs, n_vars)
-
-    def test_add_all_layers(self, tmp_path):
-        h5ad_path = tmp_path / "test.h5ad"
-        zarr_path = tmp_path / "test.zarr"
-        n_obs, n_vars = 50, 20
-        adata = _create_test_h5ad(h5ad_path, n_obs=n_obs, n_vars=n_vars)
-        adata.layers["counts"] = np.random.randn(n_obs, n_vars).astype(np.float32)
-        adata.layers["normalized"] = np.random.randn(n_obs, n_vars).astype(np.float32)
-        adata.write_h5ad(h5ad_path)
-        _create_test_store(zarr_path)
-
-        add_key_to_store(h5ad_path, zarr_path, key="layers", overwrite=False, dtype="float32", temp_dir=tmp_path)
-
-        root = zarr.open_group(zarr.storage.LocalStore(str(zarr_path)), mode="r")
+        root = open_zarr(sample_store)
         assert "counts" in root["layers"]
         assert "normalized" in root["layers"]
 
-    def test_add_raw_not_supported(self, tmp_path):
-        h5ad_path = tmp_path / "test.h5ad"
-        zarr_path = tmp_path / "test.zarr"
-        _create_test_h5ad(h5ad_path)
-        _create_test_store(zarr_path)
-
-        import pytest
+    def test_add_raw_not_supported(self, sample_h5ad, sample_store):
+        h5ad_path, _ = sample_h5ad
         with pytest.raises(SystemExit):
-            add_key_to_store(h5ad_path, zarr_path, key="raw", overwrite=False, dtype="float32")
+            add_key_to_store(h5ad_path, sample_store, key="raw", overwrite=False, dtype="float32")
 
 
-from click.testing import CliRunner
-from cell2zarr.cli import cli
-
-
-class TestCLISubcommands:
-    def test_convert_default_still_works(self, tmp_path):
-        """Invoking without a subcommand should still work (backwards compat)."""
-        h5ad_path = tmp_path / "test.h5ad"
-        _create_test_h5ad(h5ad_path, n_obs=10, n_vars=5)
-        zarr_path = tmp_path / "test.zarr"
-
-        runner = CliRunner()
-        result = runner.invoke(cli, [str(h5ad_path), str(zarr_path)])
+class TestCLI:
+    def test_convert_default(self, sample_h5ad, zarr_path):
+        h5ad_path, _ = sample_h5ad
+        result = CliRunner().invoke(cli, [str(h5ad_path), str(zarr_path)])
         assert result.exit_code == 0, result.output
         assert zarr_path.exists()
 
-    def test_convert_explicit_subcommand(self, tmp_path):
-        """cell2zarr convert should work explicitly."""
-        h5ad_path = tmp_path / "test.h5ad"
-        _create_test_h5ad(h5ad_path, n_obs=10, n_vars=5)
-        zarr_path = tmp_path / "test.zarr"
-
-        runner = CliRunner()
-        result = runner.invoke(cli, ["convert", str(h5ad_path), str(zarr_path)])
+    def test_convert_explicit(self, sample_h5ad, zarr_path):
+        h5ad_path, _ = sample_h5ad
+        result = CliRunner().invoke(cli, ["convert", str(h5ad_path), str(zarr_path)])
         assert result.exit_code == 0, result.output
         assert zarr_path.exists()
 
-    def test_add_subcommand(self, tmp_path):
-        """cell2zarr add should work."""
-        h5ad_path = tmp_path / "test.h5ad"
-        zarr_path = tmp_path / "test.zarr"
-        _create_test_h5ad(h5ad_path, n_obs=10, n_vars=5)
-        _create_test_store(zarr_path)
-
-        runner = CliRunner()
-        result = runner.invoke(cli, ["add", str(h5ad_path), str(zarr_path), "--key", "obsm"])
+    def test_add_subcommand(self, sample_h5ad, sample_store):
+        h5ad_path, _ = sample_h5ad
+        result = CliRunner().invoke(cli, ["add", str(h5ad_path), str(sample_store), "--key", "obsm"])
         assert result.exit_code == 0, result.output
 
 
 class TestEndToEnd:
-    def test_convert_then_add_obsm(self, tmp_path):
-        """Full workflow: create zarr store, then add obsm with add_key_to_store."""
-        h5ad_path = tmp_path / "test.h5ad"
-        zarr_path = tmp_path / "test.zarr"
+    def test_convert_then_add_obsm(self, sample_h5ad, sample_store):
+        h5ad_path, _ = sample_h5ad
+        add_key_to_store(h5ad_path, sample_store, key="obsm", overwrite=False, dtype="float32")
 
-        # Create h5ad with obsm
-        n_obs, n_vars = 50, 20
-        adata = _create_test_h5ad(h5ad_path, n_obs=n_obs, n_vars=n_vars)
-        original_umap = adata.obsm["X_umap"].copy()
-
-        # Create an empty zarr v3 store (simulating convert output)
-        _create_test_store(zarr_path)
-
-        # Add obsm using add_key_to_store
-        add_key_to_store(h5ad_path, zarr_path, key="obsm", overwrite=False, dtype="float32")
-
-        # Verify obsm is there and correct
-        root = zarr.open_group(zarr.storage.LocalStore(str(zarr_path)), mode="r")
+        root = open_zarr(sample_store)
         assert "obsm" in root
-        assert "X_umap" in root["obsm"]
-        assert root["obsm"]["X_umap"].shape == (n_obs, 2)
+        assert root["obsm"]["X_umap"].shape == (100, 2)
