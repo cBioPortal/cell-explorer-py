@@ -1,5 +1,6 @@
 """FastAPI dashboard for zarr conversion runs."""
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from fastapi import FastAPI, Request
@@ -11,10 +12,12 @@ from cell2zarr.models import (
 )
 
 APP_DIR = Path(__file__).resolve().parent
-PACKAGE_ROOT = APP_DIR.parent
-PROJECT_ROOT = PACKAGE_ROOT.parent.parent
-RUNS_FILE = PROJECT_ROOT / "docs" / "conversion-runs.json"
-LOGS_DIR = PROJECT_ROOT / "docs" / "logs"
+
+if "CELL2ZARR_RUN_DB" not in os.environ:
+    raise RuntimeError("CELL2ZARR_RUN_DB environment variable is required. Use 'cell2zarr dashboard --run-db <path>' or set the env var directly.")
+
+RUNS_FILE = Path(os.environ["CELL2ZARR_RUN_DB"])
+LOGS_DIR = RUNS_FILE.parent / "logs"
 
 app = FastAPI(title="Zarr Conversion Dashboard")
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")

@@ -276,3 +276,17 @@ def add(h5ad_file, zarr_store, key, overwrite, encoding_config, dtype, log_file,
         encoding=encoding,
         temp_dir=temp_dir,
     )
+
+
+@cli.command()
+@click.option("--run-db", required=True, type=click.Path(exists=True, path_type=Path), help="Path to JSON run history database.")
+@click.option("--host", default="127.0.0.1", help="Host to bind to. Default: 127.0.0.1.")
+@click.option("--port", default=8000, type=int, help="Port to bind to. Default: 8000.")
+@click.option("--reload", is_flag=True, help="Enable auto-reload on code changes.")
+def dashboard(run_db, host, port, reload):
+    """Start the conversion run dashboard."""
+    import os
+    import uvicorn
+
+    os.environ["CELL2ZARR_RUN_DB"] = str(run_db.resolve())
+    uvicorn.run("cell2zarr.dashboard.main:app", host=host, port=port, reload=reload)

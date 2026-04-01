@@ -105,12 +105,25 @@ cell2zarr convert input.h5ad output.zarr --two-phase --run-db docs/conversion-ru
 View conversion run history, configs, performance metrics, and logs in a web dashboard:
 
 ```bash
-cd packages/cell2zarr && uvicorn app.main:app --reload
+cell2zarr dashboard --run-db /path/to/conversion-runs.json
 ```
 
-Open http://localhost:8000. The dashboard reads from `docs/conversion-runs.json` at the project root.
+Options:
 
-If your run-db is on a remote filesystem (e.g. mounted from a cluster), the dashboard shows real-time status updates as conversions progress.
+| Option | Description |
+|--------|-------------|
+| `--run-db PATH` | Path to JSON run history database. Required. |
+| `--host TEXT` | Host to bind to. Default: 127.0.0.1. |
+| `--port INT` | Port to bind to. Default: 8000. |
+| `--reload` | Enable auto-reload on code changes. |
+
+Open http://localhost:8000. If your run-db is on a remote filesystem (e.g. mounted from a cluster), the dashboard shows real-time status updates as conversions progress.
+
+You can also start the dashboard directly with uvicorn:
+
+```bash
+CELL2ZARR_RUN_DB=/path/to/conversion-runs.json uvicorn cell2zarr.dashboard.main:app
+```
 
 ## Utility scripts
 
