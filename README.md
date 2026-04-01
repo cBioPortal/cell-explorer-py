@@ -9,9 +9,7 @@ This is a [uv workspace](https://docs.astral.sh/uv/concepts/workspaces/) monorep
 | Package | Description |
 |---------|-------------|
 | [`cell2zarr`](packages/cell2zarr/) | h5ad to Zarr conversion pipeline |
-| `cell-explorer-core` | Shared config and settings |
-| `cell-explorer-auth` | Keycloak OAuth2 + CloudFront signed cookies |
-| `cell-explorer-api` | FastAPI API + static file serving |
+| [`cell-explorer-api`](packages/api/) | FastAPI API + static file serving |
 
 ## Setup
 
@@ -37,6 +35,19 @@ cell2zarr add atlas.h5ad atlas.zarr --key obsm/X_umap
 
 ```bash
 uv run pytest packages/cell2zarr/tests/ -v
+```
+
+## Running the API
+
+```bash
+# API only (no static serving)
+uv run uvicorn cell_explorer_api.main:app --reload
+
+# With frontend static serving
+STATIC_DIR=/path/to/frontend/dist uv run uvicorn cell_explorer_api.main:app --reload
+
+# Export OpenAPI spec
+uv run python -m cell_explorer_api.export_openapi > openapi.json
 ```
 
 ## License
