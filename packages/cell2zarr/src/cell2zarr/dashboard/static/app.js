@@ -80,9 +80,9 @@ function toggleBody(header) {
   chevron.classList.toggle('open');
 }
 
-/* ── Live log polling ── */
+/* ── Log viewer ── */
 
-const logPollers = {};
+const logStreams = {};
 
 async function toggleLog(btn, runId) {
   const pre = document.getElementById(`log-${runId}`);
@@ -90,35 +90,50 @@ async function toggleLog(btn, runId) {
   if (pre.classList.contains('open')) {
     pre.classList.remove('open');
     btn.innerHTML = 'Log';
-    if (logPollers[runId]) { clearInterval(logPollers[runId]); delete logPollers[runId]; }
+    if (logStreams[runId]) { logStreams[runId].close(); delete logStreams[runId]; }
     return;
   }
-
-  async function fetchLog() {
-    try {
-      const resp = await fetch(`/api/logs/${runId}`);
-      if (!resp.ok) return;
-      const text = await resp.text();
-      if (text !== pre.textContent) {
-        const wasAtBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
-        pre.textContent = text;
-        if (wasAtBottom) pre.scrollTop = pre.scrollHeight;
-      }
-    } catch {}
-  }
-
-  btn.innerHTML = '…';
-  await fetchLog();
-  pre.classList.add('open');
 
   const runs = window.RUNS_DATA || [];
   const run = runs.find(r => r.run === runId);
   const isLive = run && (run.status === 'running' || run.status === 'phase2');
 
   if (isLive) {
+    // SSE streaming for live runs
+    btn.innerHTML = '…';
+    pre.textContent = '';
+    pre.classList.add('open');
+
+    const source = new EventSource(`/api/logs/${runId}/stream`);
+    logStreams[runId] = source;
+
+    source.onmessage = (e) => {
+      const wasAtBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
+      pre.textContent += e.data + '\n';
+      if (wasAtBottom) pre.scrollTop = pre.scrollHeight;
+    };
+
+    source.addEventListener('done', () => {
+      source.close();
+      delete logStreams[runId];
+      btn.innerHTML = 'Hide';
+    });
+
+    source.onerror = () => {
+      source.close();
+      delete logStreams[runId];
+      btn.innerHTML = 'Hide';
+    };
+
     btn.innerHTML = 'Hide <span class="log-live"><span class="dot"></span>live</span>';
-    logPollers[runId] = setInterval(fetchLog, 3000);
   } else {
+    // Static fetch for completed runs
+    btn.innerHTML = '…';
+    try {
+      const resp = await fetch(`/api/logs/${runId}`);
+      if (resp.ok) pre.textContent = await resp.text();
+    } catch {}
+    pre.classList.add('open');
     btn.innerHTML = 'Hide';
   }
 }

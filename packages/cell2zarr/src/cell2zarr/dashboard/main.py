@@ -168,12 +168,60 @@ async def api_runs():
     return [r.model_dump(exclude_none=True) for r in runs]
 
 
+def _get_log_path(run_id: int) -> Path | None:
+    """Look up the log file path from the run-db entry."""
+    runs = _read_runs()
+    for r in runs:
+        if r.run == run_id:
+            if r.log_file:
+                log_path = Path(r.log_file)
+                if log_path.is_absolute():
+                    return log_path
+                return RUNS_FILE.parent / log_path
+            # Fallback to legacy path
+            return LOGS_DIR / f"run-{run_id}.log"
+    return None
+
+
 @app.get("/api/logs/{run_id}")
 async def api_logs(run_id: int):
-    log_file = LOGS_DIR / f"run-{run_id}.log"
-    if not log_file.exists():
-        return PlainTextResponse(f"Log not found: run-{run_id}.log", status_code=404)
+    log_path = _get_log_path(run_id)
+    if log_path is None or not log_path.exists():
+        return PlainTextResponse(f"Log not found for run {run_id}", status_code=404)
     return PlainTextResponse(
-        log_file.read_text(),
+        log_path.read_text(),
         headers={"Cache-Control": "no-store"},
     )
+
+
+@app.get("/api/logs/{run_id}/stream")
+async def api_logs_stream(run_id: int):
+    """SSE endpoint that tails the log file for a running conversion."""
+    import asyncio
+    from starlette.responses import StreamingResponse
+
+    log_path = _get_log_path(run_id)
+    if log_path is None or not log_path.exists():
+        return PlainTextResponse(f"Log not found for run {run_id}", status_code=404)
+
+    async def stream():
+        with open(log_path) as f:
+            # Send existing content first
+            for line in f:
+                yield f"data: {line.rstrip()}\n\n"
+
+            # Then tail for new lines
+            while True:
+                line = f.readline()
+                if line:
+                    yield f"data: {line.rstrip()}\n\n"
+                else:
+                    # Check if run is still active
+                    runs = _read_runs()
+                    run = next((r for r in runs if r.run == run_id), None)
+                    if run and run.status in ("completed", "failed", "cancelled", "killed"):
+                        yield "event: done\ndata: Run finished\n\n"
+                        break
+                    await asyncio.sleep(1)
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
