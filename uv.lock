@@ -9,8 +9,6 @@ resolution-markers = [
 [manifest]
 members = [
     "cell-explorer-api",
-    "cell-explorer-auth",
-    "cell-explorer-core",
     "cell2zarr",
 ]
 
@@ -216,45 +214,26 @@ name = "cell-explorer-api"
 version = "0.1.0"
 source = { editable = "packages/api" }
 dependencies = [
-    { name = "cell-explorer-auth" },
-    { name = "cell-explorer-core" },
     { name = "fastapi" },
+    { name = "pydantic-settings" },
     { name = "uvicorn" },
 ]
 
+[package.optional-dependencies]
+test = [
+    { name = "httpx" },
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
-    { name = "cell-explorer-auth", editable = "packages/auth" },
-    { name = "cell-explorer-core", editable = "packages/core" },
     { name = "fastapi", specifier = ">=0.134.0" },
+    { name = "httpx", marker = "extra == 'test'", specifier = ">=0.28.0" },
+    { name = "pydantic-settings", specifier = ">=2.8.1" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=9.0.2" },
     { name = "uvicorn", specifier = ">=0.41.0" },
 ]
-
-[[package]]
-name = "cell-explorer-auth"
-version = "0.1.0"
-source = { editable = "packages/auth" }
-dependencies = [
-    { name = "cell-explorer-core" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "cell-explorer-core", editable = "packages/core" }]
-
-[[package]]
-name = "cell-explorer-core"
-version = "0.1.0"
-source = { editable = "packages/core" }
-dependencies = [
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "pydantic-settings", specifier = ">=2.8.1" },
-]
+provides-extras = ["test"]
 
 [[package]]
 name = "cell2zarr"
