@@ -100,6 +100,18 @@ cell2zarr convert input.h5ad output.zarr --two-phase --run-db docs/conversion-ru
 | `--log-level CHOICE` | Log level: DEBUG, INFO, WARNING, ERROR. Default: INFO. |
 | `--temp-dir PATH` | Temp directory for large keys (X, layers). |
 
+## Run dashboard
+
+View conversion run history, configs, performance metrics, and logs in a web dashboard:
+
+```bash
+cd packages/cell2zarr && uvicorn app.main:app --reload
+```
+
+Open http://localhost:8000. The dashboard reads from `docs/conversion-runs.json` at the project root.
+
+If your run-db is on a remote filesystem (e.g. mounted from a cluster), the dashboard shows real-time status updates as conversions progress.
+
 ## Utility scripts
 
 ```bash
