@@ -48,3 +48,34 @@ RUN OPENAPI_SPEC=/tmp/openapi.json pnpm --filter @cbioportal-cell-explorer/api-c
 
 # Build highperformer
 RUN pnpm --filter @cbioportal-cell-explorer/highperformer build
+
+# ============================================================
+# Stage 3: Production runtime
+# ============================================================
+FROM python:3.12-slim AS runtime
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+WORKDIR /app
+
+# Install workspace dependencies
+COPY pyproject.toml .python-version ./
+COPY packages/api/pyproject.toml packages/api/pyproject.toml
+COPY packages/cell2zarr/pyproject.toml packages/cell2zarr/pyproject.toml
+RUN uv sync --no-install-workspace
+
+# Copy source and install workspace packages
+COPY packages/ packages/
+RUN uv sync
+
+# Copy built frontend from stage 2
+COPY --from=frontend /frontend/packages/highperformer/dist /app/static
+
+# Configure environment
+ENV STATIC_DIR=/app/static
+ENV ENVIRONMENT=production
+ARG GIT_SHA=""
+ENV GIT_SHA=${GIT_SHA}
+EXPOSE 8000
+
+CMD ["uv", "run", "uvicorn", "cell_explorer_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
