@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     """
 
     static_dir: Path | None = None
+    environment: str = "development"
+    git_sha: str | None = None
 
 
 def validate_static_dir(path: Path) -> Path | None:
