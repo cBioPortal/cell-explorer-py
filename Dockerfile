@@ -54,6 +54,16 @@ RUN pnpm --filter @cbioportal-cell-explorer/highperformer build
 # ============================================================
 FROM python:3.12-slim AS runtime
 
+ARG GIT_SHA=""
+ARG BUILD_DATE=""
+
+LABEL org.opencontainers.image.source="https://github.com/cBioPortal/cell-explorer-py"
+LABEL org.opencontainers.image.description="Cell Explorer API and frontend"
+LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.authors="Jason Hwee <hweej@users.noreply.github.com>"
+LABEL org.opencontainers.image.revision="${GIT_SHA}"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
@@ -74,7 +84,6 @@ COPY --from=frontend /frontend/packages/highperformer/dist /app/static
 # Configure environment
 ENV STATIC_DIR=/app/static
 ENV ENVIRONMENT=production
-ARG GIT_SHA=""
 ENV GIT_SHA=${GIT_SHA}
 EXPOSE 8000
 
