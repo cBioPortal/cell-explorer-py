@@ -47,6 +47,8 @@ jobs:
           tags: |
             ghcr.io/cbioportal/cell-explorer-py:latest
             ghcr.io/cbioportal/cell-explorer-py:sha-${{ steps.sha.outputs.short }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           build-args: |
             GIT_SHA=${{ steps.sha.outputs.short }}
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
