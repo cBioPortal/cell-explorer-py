@@ -22,6 +22,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings = Settings()
 
     app = FastAPI(title="Cell Explorer API")
+    app.state.settings = settings
 
     # 1. API routes (highest precedence)
     app.include_router(router)
