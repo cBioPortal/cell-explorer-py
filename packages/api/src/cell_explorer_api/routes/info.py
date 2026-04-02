@@ -2,10 +2,8 @@
 
 from importlib.metadata import version
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
-
-from cell_explorer_api.config import Settings
 
 router = APIRouter()
 
@@ -16,13 +14,11 @@ class InfoResponse(BaseModel):
     git_sha: str | None
 
 
-_settings = Settings()
-
-
 @router.get("/info")
-async def info() -> InfoResponse:
+async def info(request: Request) -> InfoResponse:
+    settings = request.app.state.settings
     return InfoResponse(
         version=version("cell-explorer-api"),
-        environment=_settings.environment,
-        git_sha=_settings.git_sha,
+        environment=settings.environment,
+        git_sha=settings.git_sha,
     )
