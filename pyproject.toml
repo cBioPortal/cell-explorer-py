@@ -2,4 +2,8 @@
 members = ["packages/*"]
 
 [dependency-groups]
-dev = ["pytest>=9.0.2", "pytest-watcher>=0.6.3"]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-watcher>=0.6.3",
+    "python-semantic-release>=10.5.3",
+]
