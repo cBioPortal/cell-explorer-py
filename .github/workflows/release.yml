@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_level:
+        description: 'Force bump level (leave empty for auto-detect from commits)'
+        required: false
+        type: choice
+        options:
+          - ''
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Release cell-explorer-api
+        id: release-api
+        uses: python-semantic-release/python-semantic-release@v10.5.3
+        with:
+          directory: packages/api
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          force: ${{ inputs.force_level }}
+
+      - name: Publish cell-explorer-api GitHub Release
+        uses: python-semantic-release/publish-action@v10.5.3
+        if: steps.release-api.outputs.released == 'true'
+        with:
+          directory: packages/api
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ steps.release-api.outputs.tag }}
+
+      - name: Release cell2zarr
+        id: release-cell2zarr
+        uses: python-semantic-release/python-semantic-release@v10.5.3
+        with:
+          directory: packages/cell2zarr
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          force: ${{ inputs.force_level }}
+
+      - name: Publish cell2zarr GitHub Release
+        uses: python-semantic-release/publish-action@v10.5.3
+        if: steps.release-cell2zarr.outputs.released == 'true'
+        with:
+          directory: packages/cell2zarr
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ steps.release-cell2zarr.outputs.tag }}
+
+  docker:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Get API version from pyproject.toml
+        id: version
+        run: |
+          VERSION=$(python3 -c "import tomllib; print(tomllib.load(open('packages/api/pyproject.toml','rb'))['project']['version'])")
+          echo "api_version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/cbioportal/cell-explorer-py:${{ steps.version.outputs.api_version }}
+            ghcr.io/cbioportal/cell-explorer-py:latest
+            ghcr.io/cbioportal/cell-explorer-py:sha-${{ steps.sha.outputs.short }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            GIT_SHA=${{ steps.sha.outputs.short }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
