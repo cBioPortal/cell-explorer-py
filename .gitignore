@@ -23,5 +23,3 @@ notebooks/
 
 # Local agent/AI config
 *.local.md
-
-openapi.json
