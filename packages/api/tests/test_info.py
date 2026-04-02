@@ -12,7 +12,8 @@ def test_info_returns_expected_fields(client: TestClient):
     data = response.json()
     assert data["version"] == version("cell-explorer-api")
     assert data["environment"] == "development"
-    assert data["git_sha"] is None
+    # git_sha is autodetected when running in a git repo
+    assert isinstance(data["git_sha"], str | None)
 
 
 def test_info_reflects_settings():
@@ -24,3 +25,10 @@ def test_info_reflects_settings():
     data = response.json()
     assert data["environment"] == "staging"
     assert data["git_sha"] == "abc1234"
+
+
+def test_git_sha_autodetected_when_not_set():
+    settings = Settings()
+    # In a git repo, git_sha should be autodetected
+    assert settings.git_sha is not None
+    assert len(settings.git_sha) == 7
