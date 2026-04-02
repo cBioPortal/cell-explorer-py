@@ -1,0 +1,26 @@
+name: PR Title Check
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+    branches: [main]
+
+jobs:
+  check-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate conventional commit format
+        run: |
+          TITLE="${{ github.event.pull_request.title }}"
+          PATTERN='^(feat|fix|perf|refactor|docs|style|test|build|ci|chore)(\(.+\))?\!?: .+'
+          if [[ ! "$TITLE" =~ $PATTERN ]]; then
+            echo "::error::PR title must follow conventional commit format: type(scope): description"
+            echo ""
+            echo "Valid types: feat, fix, perf, refactor, docs, style, test, build, ci, chore"
+            echo "Examples:"
+            echo "  feat: add new endpoint"
+            echo "  fix(api-auth): handle expired tokens"
+            echo "  feat!: redesign API response format"
+            exit 1
+          fi
+          echo "PR title is valid: $TITLE"
