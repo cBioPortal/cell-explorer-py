@@ -62,13 +62,18 @@
               }
             ],
             "title": "Git Sha"
+          },
+          "auth_enabled": {
+            "type": "boolean",
+            "title": "Auth Enabled"
           }
         },
         "type": "object",
         "required": [
           "version",
           "environment",
-          "git_sha"
+          "git_sha",
+          "auth_enabled"
         ],
         "title": "InfoResponse"
       }
