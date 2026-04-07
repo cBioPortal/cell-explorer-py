@@ -69,7 +69,8 @@ def test_decode_valid_token(keycloak, rsa_keys):
         "email": "test@example.com",
         "realm_access": {"roles": ["viewer"]},
         "iss": "https://auth.example.com/realms/test-realm",
-        "aud": "test-client",
+        "aud": "account",
+        "azp": "test-client",
         "exp": int(time.time()) + 300,
         "iat": int(time.time()),
     }
@@ -86,7 +87,8 @@ def test_decode_expired_token_raises(keycloak, rsa_keys):
     claims = {
         "sub": "user-123",
         "iss": "https://auth.example.com/realms/test-realm",
-        "aud": "test-client",
+        "aud": "account",
+        "azp": "test-client",
         "exp": int(time.time()) - 10,
         "iat": int(time.time()) - 300,
     }
@@ -100,7 +102,8 @@ def test_decode_invalid_signature_raises(keycloak):
     claims = {
         "sub": "user-123",
         "iss": "https://auth.example.com/realms/test-realm",
-        "aud": "test-client",
+        "aud": "account",
+        "azp": "test-client",
         "exp": int(time.time()) + 300,
         "iat": int(time.time()),
     }

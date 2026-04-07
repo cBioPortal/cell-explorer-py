@@ -97,9 +97,16 @@ class KeycloakClient:
             token,
             public_key,
             algorithms=["RS256"],
-            audience=self._settings.keycloak_client_id,
             issuer=self._settings.oidc_issuer_url,
+            options={"verify_aud": False},
         )
+
+        # Keycloak sets aud="account" by default; verify azp (authorized party) instead
+        azp = claims.get("azp")
+        if azp != self._settings.keycloak_client_id:
+            raise jwt.InvalidTokenError(
+                f"Authorized party mismatch: expected {self._settings.keycloak_client_id}, got {azp}"
+            )
 
         realm_roles = claims.get("realm_access", {}).get("roles", [])
         return User(

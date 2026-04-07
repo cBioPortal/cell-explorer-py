@@ -23,18 +23,21 @@ async def require_auth(request: Request) -> User:
 
     try:
         return keycloak.decode_token(access_token)
-    except Exception:
+    except Exception as e:
+        logger.warning("Access token decode failed: %s", e)
         # Access token invalid/expired — try refresh
         refresh_token = request.cookies.get("cce_refresh")
         if not refresh_token:
+            logger.warning("No refresh token cookie present")
             raise HTTPException(status_code=401, detail="Not authenticated")
 
         try:
+            logger.info("Attempting token refresh")
             tokens = await keycloak.refresh_token(refresh_token)
             user = keycloak.decode_token(tokens["access_token"])
             request.state.new_access_token = tokens["access_token"]
             request.state.new_refresh_token = tokens.get("refresh_token", refresh_token)
             return user
-        except Exception:
-            logger.debug("Token refresh failed", exc_info=True)
+        except Exception as refresh_err:
+            logger.warning("Token refresh failed: %s", refresh_err)
             raise HTTPException(status_code=401, detail="Session expired")
