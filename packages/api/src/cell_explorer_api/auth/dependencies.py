@@ -12,6 +12,9 @@ logger = logging.getLogger(__name__)
 
 async def require_auth(request: Request) -> User:
     """Validate session cookie and return User. Raises 401 if not authenticated."""
+    if not request.app.state.settings.auth_enabled:
+        raise HTTPException(status_code=501, detail="Authentication is not configured")
+
     keycloak: KeycloakClient = request.app.state.keycloak
 
     access_token = request.cookies.get("cce_access")

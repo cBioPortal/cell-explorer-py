@@ -2,7 +2,7 @@
 
 import secrets
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 
 from cell_explorer_api.auth.dependencies import require_auth
@@ -17,6 +17,12 @@ COOKIE_DEFAULTS = {
     "samesite": "lax",
     "path": "/api",
 }
+
+
+def _require_auth_enabled(request: Request) -> None:
+    """Raise 501 if auth is not configured."""
+    if not request.app.state.settings.auth_enabled:
+        raise HTTPException(status_code=501, detail="Authentication is not configured")
 
 
 def _set_token_cookies(response: Response, access_token: str, refresh_token: str) -> None:
@@ -34,6 +40,7 @@ def _clear_token_cookies(response: Response) -> None:
 @router.get("/login")
 async def login(request: Request):
     """Redirect to Keycloak login page."""
+    _require_auth_enabled(request)
     keycloak: KeycloakClient = request.app.state.keycloak
     state = secrets.token_urlsafe(32)
     redirect_uri = str(request.url_for("callback"))
@@ -46,6 +53,7 @@ async def login(request: Request):
 @router.get("/callback")
 async def callback(request: Request, code: str, state: str):
     """Handle Keycloak callback — exchange code for tokens."""
+    _require_auth_enabled(request)
     keycloak: KeycloakClient = request.app.state.keycloak
     expected_state = request.cookies.get("cce_state")
     if not expected_state or state != expected_state:
@@ -65,8 +73,9 @@ async def me(user: User = Depends(require_auth)):
 
 
 @router.post("/logout")
-async def logout():
+async def logout(request: Request):
     """Clear auth cookies."""
+    _require_auth_enabled(request)
     response = Response(status_code=200)
     _clear_token_cookies(response)
     return response
@@ -75,6 +84,7 @@ async def logout():
 @router.post("/token-exchange")
 async def token_exchange(request: Request):
     """Exchange an external access token for session cookies."""
+    _require_auth_enabled(request)
     keycloak: KeycloakClient = request.app.state.keycloak
     body = await request.json()
     access_token = body.get("accessToken")

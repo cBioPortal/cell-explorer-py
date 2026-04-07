@@ -37,10 +37,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_headers=["Content-Type"],
         )
 
-    # Auth (conditional on Keycloak config)
+    # Auth — routes always registered (return 501 when disabled); Keycloak client only when configured
     if settings.auth_enabled:
         from cell_explorer_api.auth.keycloak import KeycloakClient
-        from cell_explorer_api.routes import create_auth_router
 
         keycloak = KeycloakClient(settings)
         app.state.keycloak = keycloak
@@ -52,7 +51,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         app.router.lifespan_context = lifespan
 
-        app.include_router(create_auth_router(), prefix="/api")
+    from cell_explorer_api.routes import create_auth_router
+
+    app.include_router(create_auth_router(), prefix="/api")
 
     # 1. API routes (highest precedence)
     app.include_router(router)
@@ -76,6 +77,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # SPA catch-all: serve index.html for all non-API, non-asset routes
             @app.get("/{path:path}")
             async def spa_catchall(path: str):
+                if path.startswith("api/"):
+                    return JSONResponse(status_code=404, content={"detail": "Not found"})
                 return FileResponse(str(index_html))
         else:
             # STATIC_DIR was set but invalid

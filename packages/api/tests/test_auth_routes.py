@@ -97,11 +97,11 @@ def test_logout_clears_cookies(auth_client, rsa_keys):
     assert response.status_code == 200
 
 
-def test_auth_routes_not_registered_without_keycloak():
-    """When KEYCLOAK_URL is not set, auth routes should not exist."""
+def test_auth_routes_return_501_without_keycloak():
+    """When KEYCLOAK_URL is not set, auth routes return 501."""
     settings = Settings()
     app = create_app(settings)
     client = TestClient(app)
     response = client.get("/api/auth/me")
-    # Should be 404 (route doesn't exist) or 405, not 200 or 401
-    assert response.status_code in (404, 405, 422)
+    assert response.status_code == 501
+    assert response.json()["detail"] == "Authentication is not configured"
