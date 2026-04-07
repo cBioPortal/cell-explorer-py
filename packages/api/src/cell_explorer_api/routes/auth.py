@@ -9,7 +9,7 @@ from cell_explorer_api.auth.dependencies import require_auth
 from cell_explorer_api.auth.keycloak import KeycloakClient
 from cell_explorer_api.auth.models import User
 
-router = APIRouter(prefix="/auth")
+router = APIRouter(prefix="/auth", tags=["auth"])
 
 COOKIE_DEFAULTS = {
     "httponly": True,

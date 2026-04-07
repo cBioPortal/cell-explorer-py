@@ -5,7 +5,7 @@ from importlib.metadata import version
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-router = APIRouter()
+router = APIRouter(tags=["status"])
 
 
 class InfoResponse(BaseModel):
