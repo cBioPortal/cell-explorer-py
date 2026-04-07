@@ -1,6 +1,7 @@
 """FastAPI application factory."""
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -43,6 +44,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         keycloak = KeycloakClient(settings)
         app.state.keycloak = keycloak
+
+        @asynccontextmanager
+        async def lifespan(app):
+            await keycloak.fetch_jwks()
+            yield
+
+        app.router.lifespan_context = lifespan
+
         app.include_router(create_auth_router(), prefix="/api")
 
     # 1. API routes (highest precedence)
