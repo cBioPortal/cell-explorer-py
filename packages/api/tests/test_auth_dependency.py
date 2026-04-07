@@ -64,8 +64,7 @@ def _make_token(private_key, **overrides) -> str:
         "email": "test@example.com",
         "realm_access": {"roles": ["viewer"]},
         "iss": "https://auth.example.com/realms/test-realm",
-        "aud": "account",
-        "azp": "test-client",
+        "aud": "test-client",
         "exp": int(time.time()) + 300,
         "iat": int(time.time()),
     } | overrides
