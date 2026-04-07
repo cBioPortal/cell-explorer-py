@@ -24,6 +24,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Cell Explorer API")
     app.state.settings = settings
 
+    # CORS middleware
+    if settings.cors_origin_list:
+        from starlette.middleware.cors import CORSMiddleware
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origin_list,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["Content-Type"],
+        )
+
+    # Auth (conditional on Keycloak config)
+    if settings.auth_enabled:
+        from cell_explorer_api.auth.keycloak import KeycloakClient
+        from cell_explorer_api.routes import create_auth_router
+
+        keycloak = KeycloakClient(settings)
+        app.state.keycloak = keycloak
+        app.include_router(create_auth_router(), prefix="/api")
+
     # 1. API routes (highest precedence)
     app.include_router(router)
 
