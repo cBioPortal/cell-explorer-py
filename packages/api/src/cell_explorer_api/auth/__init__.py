@@ -1,6 +1,5 @@
-"""Authentication module (Keycloak OAuth2 + CloudFront signed cookies).
+"""Authentication module."""
 
-Not yet implemented. This module will provide:
-- Keycloak OAuth2 login/logout flows
-- CloudFront signed cookie minting for protected Zarr access
-"""
+from cell_explorer_api.auth.models import User
+
+__all__ = ["User"]
