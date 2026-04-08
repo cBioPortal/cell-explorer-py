@@ -1,0 +1,14 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8001:8000"
+    env_file:
+      - .env
+    volumes:
+      # Mount local source for hot-reload
+      - ./packages/api/src:/app/packages/api/src
+      # Mount local frontend build
+      - ../cbioportal-cell-explorer/packages/highperformer/dist:/app/static:ro

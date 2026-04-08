@@ -23,3 +23,6 @@ notebooks/
 
 # Local agent/AI config
 *.local.md
+
+# Environment secrets
+.env
