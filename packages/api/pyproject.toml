@@ -7,11 +7,12 @@ dependencies = [
     "fastapi>=0.134.0",
     "uvicorn>=0.41.0",
     "pydantic-settings>=2.8.1",
+    "pyjwt[crypto]>=2.9.0",
+    "httpx>=0.28.0",
 ]
 
 [project.optional-dependencies]
 test = [
-    "httpx>=0.28.0",
     "pytest>=9.0.2",
 ]
 

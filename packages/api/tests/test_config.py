@@ -36,3 +36,46 @@ def test_settings_validates_static_dir_with_index(static_dir: Path):
 
     result = validate_static_dir(static_dir)
     assert result == static_dir
+
+
+def test_settings_keycloak_defaults():
+    """Auth settings are all None by default (auth disabled)."""
+    from cell_explorer_api.config import Settings
+
+    settings = Settings()
+    assert settings.keycloak_url is None
+    assert settings.keycloak_realm is None
+    assert settings.keycloak_client_id is None
+    assert settings.keycloak_client_secret is None
+    assert settings.cors_origins == ""
+    assert settings.cors_origin_list == []
+
+
+def test_settings_keycloak_from_env(monkeypatch: "pytest.MonkeyPatch"):
+    """Auth settings are populated from environment variables."""
+    monkeypatch.setenv("KEYCLOAK_URL", "https://auth.example.com")
+    monkeypatch.setenv("KEYCLOAK_REALM", "cbioportal")
+    monkeypatch.setenv("KEYCLOAK_CLIENT_ID", "cell-explorer")
+    monkeypatch.setenv("KEYCLOAK_CLIENT_SECRET", "secret123")
+    monkeypatch.setenv("CORS_ORIGINS", "http://localhost:3000,https://portal.example.com")
+    from cell_explorer_api.config import Settings
+
+    settings = Settings()
+    assert settings.keycloak_url == "https://auth.example.com"
+    assert settings.keycloak_realm == "cbioportal"
+    assert settings.keycloak_client_id == "cell-explorer"
+    assert settings.keycloak_client_secret == "secret123"
+    assert settings.cors_origin_list == ["http://localhost:3000", "https://portal.example.com"]
+
+
+def test_settings_auth_enabled_property(monkeypatch: "pytest.MonkeyPatch"):
+    """auth_enabled is True only when all required Keycloak fields are set."""
+    from cell_explorer_api.config import Settings
+
+    assert Settings().auth_enabled is False
+
+    monkeypatch.setenv("KEYCLOAK_URL", "https://auth.example.com")
+    monkeypatch.setenv("KEYCLOAK_REALM", "cbioportal")
+    monkeypatch.setenv("KEYCLOAK_CLIENT_ID", "cell-explorer")
+    monkeypatch.setenv("KEYCLOAK_CLIENT_SECRET", "secret123")
+    assert Settings().auth_enabled is True

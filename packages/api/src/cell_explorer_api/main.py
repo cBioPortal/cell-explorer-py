@@ -1,6 +1,7 @@
 """FastAPI application factory."""
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -24,6 +25,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Cell Explorer API")
     app.state.settings = settings
 
+    # CORS middleware
+    if settings.cors_origin_list:
+        from starlette.middleware.cors import CORSMiddleware
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origin_list,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["Content-Type"],
+        )
+
+    # Auth — routes always registered (return 501 when disabled); Keycloak client only when configured
+    if settings.auth_enabled:
+        from cell_explorer_api.auth.keycloak import KeycloakClient
+
+        keycloak = KeycloakClient(settings)
+        app.state.keycloak = keycloak
+
+        @asynccontextmanager
+        async def lifespan(app):
+            await keycloak.fetch_jwks()
+            yield
+
+        app.router.lifespan_context = lifespan
+
+    from cell_explorer_api.routes import create_auth_router
+
+    app.include_router(create_auth_router(), prefix="/api")
+
     # 1. API routes (highest precedence)
     app.include_router(router)
 
@@ -46,6 +77,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # SPA catch-all: serve index.html for all non-API, non-asset routes
             @app.get("/{path:path}")
             async def spa_catchall(path: str):
+                if path.startswith("api/"):
+                    return JSONResponse(status_code=404, content={"detail": "Not found"})
                 return FileResponse(str(index_html))
         else:
             # STATIC_DIR was set but invalid

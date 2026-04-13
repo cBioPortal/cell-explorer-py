@@ -32,3 +32,22 @@ def test_git_sha_autodetected_when_not_set():
     # In a git repo, git_sha should be autodetected
     assert settings.git_sha is not None
     assert len(settings.git_sha) == 7
+
+
+def test_info_includes_auth_enabled():
+    settings = Settings(
+        keycloak_url="https://auth.example.com",
+        keycloak_realm="test",
+        keycloak_client_id="client",
+        keycloak_client_secret="secret",
+    )
+    app = create_app(settings)
+    client = TestClient(app)
+    response = client.get("/api/info")
+    assert response.status_code == 200
+    assert response.json()["auth_enabled"] is True
+
+
+def test_info_auth_disabled_by_default(client: TestClient):
+    response = client.get("/api/info")
+    assert response.json()["auth_enabled"] is False
