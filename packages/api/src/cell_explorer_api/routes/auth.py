@@ -72,7 +72,7 @@ async def callback(request: Request, code: str, state: str):
     return response
 
 
-@router.get("/me")
+@router.get("/me", response_model=User)
 async def me(user: User = Depends(require_auth)):
     """Return the current user's identity."""
     return user.model_dump()
@@ -87,7 +87,7 @@ async def logout(request: Request):
     return response
 
 
-@router.post("/token-exchange")
+@router.post("/token-exchange", response_model=User)
 async def token_exchange(request: Request):
     """Exchange an external access token for session cookies."""
     _require_auth_enabled(request)
