@@ -12,9 +12,27 @@ from cell_explorer_api.auth.models import User
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def _callback_uri(request: Request) -> str:
+    """Build the OAuth callback URI, respecting proxy headers."""
+    url = request.url_for("callback")
+    forwarded_host = request.headers.get("x-forwarded-host")
+    forwarded_proto = request.headers.get("x-forwarded-proto")
+    if forwarded_host or forwarded_proto:
+        host_parts = forwarded_host.split(":") if forwarded_host else []
+        hostname = host_parts[0] if host_parts else url.hostname
+        port = int(host_parts[1]) if len(host_parts) > 1 else None
+        url = url.replace(
+            hostname=hostname,
+            port=port,
+            scheme=forwarded_proto if forwarded_proto else url.scheme,
+        )
+    return str(url)
+
+
 def _cookie_defaults(request: Request) -> dict:
     """Cookie settings — secure only when not running on localhost."""
-    is_localhost = request.url.hostname in ("localhost", "127.0.0.1")
+    hostname = request.headers.get("x-forwarded-host", request.url.hostname or "").split(":")[0]
+    is_localhost = hostname in ("localhost", "127.0.0.1")
     return {
         "httponly": True,
         "secure": not is_localhost,
@@ -48,7 +66,7 @@ async def login(request: Request):
     _require_auth_enabled(request)
     keycloak: KeycloakClient = request.app.state.keycloak
     state = secrets.token_urlsafe(32)
-    redirect_uri = str(request.url_for("callback"))
+    redirect_uri = _callback_uri(request)
     auth_url = keycloak.authorization_url(redirect_uri=redirect_uri, state=state)
     response = RedirectResponse(url=auth_url, status_code=307)
     defaults = _cookie_defaults(request)
@@ -64,7 +82,7 @@ async def callback(request: Request, code: str, state: str):
     expected_state = request.cookies.get("cce_state")
     if not expected_state or state != expected_state:
         return Response(status_code=400, content="Invalid state parameter")
-    redirect_uri = str(request.url_for("callback"))
+    redirect_uri = _callback_uri(request)
     tokens = await keycloak.exchange_code(code, redirect_uri)
     response = RedirectResponse(url="/", status_code=302)
     _set_token_cookies(request, response, tokens["access_token"], tokens["refresh_token"])
