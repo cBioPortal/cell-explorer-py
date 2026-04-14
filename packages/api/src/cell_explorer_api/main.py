@@ -22,7 +22,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if settings is None:
         settings = Settings()
 
-    app = FastAPI(title="Cell Explorer API")
+    app = FastAPI(
+        title="Cell Explorer API",
+        swagger_ui_parameters={"persistAuthorization": True},
+    )
     app.state.settings = settings
 
     # CORS middleware
