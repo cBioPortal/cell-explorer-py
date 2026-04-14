@@ -9,6 +9,7 @@ from cell_explorer_api.auth.models import User
 from cell_explorer_api.auth.optional import optional_auth
 from cell_explorer_api.db import get_db
 from cell_explorer_api.db.models import Dataset, Datasource
+from cell_explorer_api.services.credentials import CredentialError, mint_credentials
 
 router = APIRouter(tags=["datasets"])
 
@@ -83,9 +84,6 @@ async def get_dataset(
     if not _user_can_access(dataset, user):
         raise HTTPException(status_code=404, detail="Dataset not found")
     return _dataset_to_response(dataset)
-
-
-from cell_explorer_api.services.credentials import CredentialError, mint_credentials
 
 
 @router.post("/datasets/{slug}/access")

@@ -121,7 +121,11 @@ async def update_datasource(
     payload: DatasourceUpdate,
     db: AsyncSession = Depends(get_db),
 ) -> DatasourceResponse:
-    ds = await db.get(Datasource, uuid.UUID(datasource_id))
+    try:
+        ds_uuid = uuid.UUID(datasource_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Datasource not found")
+    ds = await db.get(Datasource, ds_uuid)
     if ds is None:
         raise HTTPException(status_code=404, detail="Datasource not found")
     updates = payload.model_dump(exclude_unset=True)
@@ -149,7 +153,10 @@ async def create_dataset(
     db: AsyncSession = Depends(get_db),
 ) -> DatasetAdminResponse:
     data = payload.model_dump()
-    data["datasource_id"] = uuid.UUID(data["datasource_id"])
+    try:
+        data["datasource_id"] = uuid.UUID(data["datasource_id"])
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid datasource_id format")
     dataset = Dataset(**data)
     db.add(dataset)
     try:

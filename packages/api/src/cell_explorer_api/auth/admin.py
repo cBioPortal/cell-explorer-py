@@ -24,11 +24,8 @@ async def require_admin(
         raise HTTPException(status_code=501, detail="Admin API is not configured")
 
     # Try bearer token from Authorization header (API key)
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        token = auth_header[7:]
-        if token == settings.admin_api_key:
-            return
+    if credentials and credentials.credentials == settings.admin_api_key:
+        return
 
     # Try Keycloak JWT with admin role
     if settings.auth_enabled:

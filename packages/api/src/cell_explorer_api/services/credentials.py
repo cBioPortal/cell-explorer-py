@@ -1,7 +1,6 @@
 """Credential minting service for datasource-specific access tokens."""
 
 import os
-import time
 from datetime import datetime, timezone, timedelta
 
 import jwt
@@ -58,12 +57,13 @@ def _mint_http_token(
             f"Credentials not configured: {env_key} environment variable is not set"
         )
 
+    now = datetime.now(timezone.utc)
     token = jwt.encode(
         {
             "path": path,
             "datasource": str(datasource.id),
-            "exp": int(time.time()) + ttl_seconds,
-            "iat": int(time.time()),
+            "exp": int(expires_at.timestamp()),
+            "iat": int(now.timestamp()),
         },
         secret,
         algorithm="HS256",
