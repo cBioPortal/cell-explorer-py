@@ -59,9 +59,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.router.lifespan_context = lifespan
 
-    from cell_explorer_api.routes import create_auth_router
+    from cell_explorer_api.routes import create_admin_router, create_auth_router
 
     app.include_router(create_auth_router(), prefix="/api")
+    app.include_router(create_admin_router(), prefix="/api")
 
     # 1. API routes (highest precedence)
     app.include_router(router)

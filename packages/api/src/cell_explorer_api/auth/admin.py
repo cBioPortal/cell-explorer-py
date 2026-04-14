@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 logger = logging.getLogger(__name__)
@@ -12,7 +12,7 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 async def require_admin(
     request: Request,
-    credentials: HTTPAuthorizationCredentials | None = None,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> None:
     """Validate admin access via API key or Keycloak admin role.
 

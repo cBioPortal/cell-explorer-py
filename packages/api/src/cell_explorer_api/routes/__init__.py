@@ -16,3 +16,9 @@ def create_auth_router() -> APIRouter:
     """Import and return the auth router. Separated to allow conditional registration."""
     from cell_explorer_api.routes.auth import router as auth_router
     return auth_router
+
+
+def create_admin_router() -> APIRouter:
+    """Import and return the admin router."""
+    from cell_explorer_api.routes.admin import router as admin_router
+    return admin_router
