@@ -67,7 +67,7 @@ async def seed(database_url: str) -> None:
 
 def main():
     settings = Settings()
-    asyncio.run(seed(settings.database_url))
+    asyncio.run(seed(settings.effective_database_url))
 
 
 if __name__ == "__main__":

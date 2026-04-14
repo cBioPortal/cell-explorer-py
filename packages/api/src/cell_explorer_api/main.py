@@ -2,6 +2,7 @@
 
 import logging
 from contextlib import asynccontextmanager
+from logging.handlers import TimedRotatingFileHandler
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -13,6 +14,22 @@ from cell_explorer_api.routes import router
 logger = logging.getLogger(__name__)
 
 
+def _configure_file_logging(settings: Settings) -> None:
+    """Create data directories and configure rotating file log handler."""
+    settings.log_dir.mkdir(parents=True, exist_ok=True)
+
+    handler = TimedRotatingFileHandler(
+        filename=settings.log_dir / settings.log_filename,
+        when=settings.log_rotation_when,
+        backupCount=settings.log_backup_count,
+    )
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(settings.log_level.upper())
+    root_logger.addHandler(handler)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -21,6 +38,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     """
     if settings is None:
         settings = Settings()
+
+    settings.app_data_dir.mkdir(parents=True, exist_ok=True)
+    _configure_file_logging(settings)
 
     app = FastAPI(
         title="Cell Explorer API",
@@ -43,7 +63,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Database engine
     from cell_explorer_api.db import create_engine
 
-    app.state.db_engine = create_engine(settings.database_url)
+    app.state.db_engine = create_engine(settings.effective_database_url)
 
     # Auth — routes always registered (return 501 when disabled); Keycloak client only when configured
     if settings.auth_enabled:

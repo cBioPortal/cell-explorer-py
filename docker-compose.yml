@@ -12,3 +12,5 @@ services:
       - ./packages/api/src:/app/packages/api/src
       # Mount local frontend build
       - ../cbioportal-cell-explorer/packages/highperformer/dist:/app/static:ro
+      # Persistent app data (logs, database)
+      - ./data:/app/data

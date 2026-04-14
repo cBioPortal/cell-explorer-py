@@ -32,6 +32,15 @@ class Settings(BaseSettings):
     environment: str = "development"
     git_sha: str | None = None
 
+    # App data directory
+    app_data_dir: Path = Path("./data")
+
+    # Logging
+    log_level: str = "INFO"
+    log_rotation_interval: str = "daily"
+    log_backup_count: int = 30
+    log_filename: str = "cell-explorer.log"
+
     # Auth (all optional — auth disabled when keycloak_url is not set)
     keycloak_url: str | None = None
     keycloak_realm: str | None = None
@@ -40,10 +49,28 @@ class Settings(BaseSettings):
     cors_origins: str = ""
 
     # Database
-    database_url: str = "sqlite+aiosqlite:///./cell_explorer.db"
+    database_url: str | None = None
 
     # Admin
     admin_api_key: str | None = None
+
+    @property
+    def log_dir(self) -> Path:
+        """Directory for log files."""
+        return self.app_data_dir / "logs"
+
+    @property
+    def log_rotation_when(self) -> str:
+        """Map human-readable interval to TimedRotatingFileHandler 'when' parameter."""
+        mapping = {"daily": "midnight", "hourly": "h", "weekly": "w0"}
+        return mapping.get(self.log_rotation_interval, "midnight")
+
+    @property
+    def effective_database_url(self) -> str:
+        """Database URL, defaulting to SQLite in app_data_dir if not explicitly set."""
+        if self.database_url is not None:
+            return self.database_url
+        return f"sqlite+aiosqlite:///{self.app_data_dir / 'cell_explorer.db'}"
 
     @property
     def auth_enabled(self) -> bool:
