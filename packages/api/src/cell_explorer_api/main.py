@@ -37,6 +37,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_headers=["Content-Type"],
         )
 
+    # Database engine
+    from cell_explorer_api.db import create_engine
+
+    app.state.db_engine = create_engine(settings.database_url)
+
     # Auth — routes always registered (return 501 when disabled); Keycloak client only when configured
     if settings.auth_enabled:
         from cell_explorer_api.auth.keycloak import KeycloakClient
@@ -44,12 +49,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         keycloak = KeycloakClient(settings)
         app.state.keycloak = keycloak
 
-        @asynccontextmanager
-        async def lifespan(app):
-            await keycloak.fetch_jwks()
-            yield
+    # Unified lifespan: always dispose db engine; fetch JWKS only when auth enabled
+    @asynccontextmanager
+    async def lifespan(app):
+        if settings.auth_enabled:
+            await app.state.keycloak.fetch_jwks()
+        yield
+        await app.state.db_engine.dispose()
 
-        app.router.lifespan_context = lifespan
+    app.router.lifespan_context = lifespan
 
     from cell_explorer_api.routes import create_auth_router
 
