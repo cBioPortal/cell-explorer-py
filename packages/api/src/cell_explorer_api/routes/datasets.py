@@ -1,6 +1,6 @@
 """Dataset discovery endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -83,3 +83,42 @@ async def get_dataset(
     if not _user_can_access(dataset, user):
         raise HTTPException(status_code=404, detail="Dataset not found")
     return _dataset_to_response(dataset)
+
+
+from cell_explorer_api.services.credentials import CredentialError, mint_credentials
+
+
+@router.post("/datasets/{slug}/access")
+async def access_dataset(
+    slug: str,
+    request: Request,
+    user: User | None = Depends(optional_auth),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Get access credentials for a dataset."""
+    statement = select(Dataset, Datasource).join(Datasource).where(Dataset.slug == slug)
+    result = await db.exec(statement)
+    row = result.first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    dataset, datasource = row
+    dataset.datasource = datasource
+
+    if dataset.is_public:
+        return {
+            "url": f"{datasource.base_url}/{dataset.path}",
+            "credential_type": "public",
+        }
+
+    # Private dataset — require auth
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    if not set(user.roles) & set(dataset.required_roles):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    try:
+        return mint_credentials(datasource, dataset.path)
+    except CredentialError as e:
+        raise HTTPException(status_code=503, detail=str(e))
