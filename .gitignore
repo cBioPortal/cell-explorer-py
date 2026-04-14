@@ -26,3 +26,6 @@ notebooks/
 
 # Environment secrets
 .env
+
+# SQLite database
+cell_explorer.db
