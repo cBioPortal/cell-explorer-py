@@ -27,5 +27,8 @@ notebooks/
 # Environment secrets
 .env
 
+# Dev RSA key pair (generated locally, never commit)
+dev-keys/
+
 # SQLite database
 cell_explorer.db

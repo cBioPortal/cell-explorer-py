@@ -49,13 +49,23 @@ def _mint_http_token(
     expires_at: datetime,
     ttl_seconds: int,
 ) -> dict:
-    """Mint a signed JWT for HTTP token-based access."""
-    env_key = f"DATASOURCE_{datasource.credential_ref}_SIGNING_SECRET"
-    secret = os.environ.get(env_key)
-    if not secret:
+    """Mint a signed RS256 JWT for HTTP token-based access."""
+    env_key = f"DATASOURCE_{datasource.credential_ref}_PRIVATE_KEY_FILE"
+    key_path = os.environ.get(env_key)
+    if not key_path:
         raise CredentialError(
             f"Credentials not configured: {env_key} environment variable is not set"
         )
+
+    from pathlib import Path
+
+    key_file = Path(key_path)
+    if not key_file.is_file():
+        raise CredentialError(
+            f"Private key file not found: {key_path}"
+        )
+
+    private_key = key_file.read_bytes()
 
     now = datetime.now(timezone.utc)
     token = jwt.encode(
@@ -65,8 +75,8 @@ def _mint_http_token(
             "exp": int(expires_at.timestamp()),
             "iat": int(now.timestamp()),
         },
-        secret,
-        algorithm="HS256",
+        private_key,
+        algorithm="RS256",
     )
 
     return {

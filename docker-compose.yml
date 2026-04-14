@@ -14,3 +14,19 @@ services:
       - ../cbioportal-cell-explorer/packages/highperformer/dist:/app/static:ro
       # Persistent app data (logs, database)
       - ./data:/app/data
+      # Dev keys for datasource signing
+      - ./dev-keys:/keys:ro
+
+  zarr-server:
+    build:
+      context: .
+      dockerfile: packages/zarr-auth-proxy/Dockerfile
+    ports:
+      - "8002:8000"
+    environment:
+      - PUBLIC_KEY_FILE=/keys/public.pem
+      - DATA_DIR=/data
+      - CORS_ORIGINS=http://localhost:8001
+    volumes:
+      - ./data:/data:ro
+      - ./dev-keys:/keys:ro

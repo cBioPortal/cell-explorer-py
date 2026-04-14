@@ -24,9 +24,23 @@ def _generate_rsa_keypair():
 
 
 @pytest_asyncio.fixture()
-async def access_app(monkeypatch):
+async def access_app(monkeypatch, tmp_path):
     """App with auth, database, and a private dataset."""
-    monkeypatch.setenv("DATASOURCE_TEST_CDN_SIGNING_SECRET", "test-signing-secret")
+    # Generate RSA key pair for datasource credential minting
+    from cryptography.hazmat.primitives.serialization import (
+        NoEncryption,
+        PrivateFormat,
+    )
+
+    datasource_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    ds_private_pem = datasource_key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption())
+    ds_public_pem = datasource_key.public_key().public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
+
+    key_dir = tmp_path / "keys"
+    key_dir.mkdir()
+    ds_key_file = key_dir / "test_cdn_private.pem"
+    ds_key_file.write_bytes(ds_private_pem)
+    monkeypatch.setenv("DATASOURCE_TEST_CDN_PRIVATE_KEY_FILE", str(ds_key_file))
 
     private_key, public_key = _generate_rsa_keypair()
 
@@ -79,6 +93,7 @@ async def access_app(monkeypatch):
 
     app.state.db_engine = engine
     app.state.test_rsa_private_key = private_key
+    app.state.test_ds_public_pem = ds_public_pem
     return app
 
 
@@ -134,6 +149,10 @@ def test_access_private_dataset_with_role(access_app):
     assert data["url"] == "https://cdn.example.com/datasets/private.zarr"
     assert "token" in data
     assert "expires_at" in data
+    # Verify the minted token is RS256
+    ds_public_pem = access_app.state.test_ds_public_pem
+    decoded = jwt.decode(data["token"], ds_public_pem, algorithms=["RS256"])
+    assert decoded["path"] == "datasets/private.zarr"
 
 
 def test_access_nonexistent_dataset(access_app):
