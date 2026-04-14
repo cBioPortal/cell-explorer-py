@@ -139,6 +139,274 @@
         }
       }
     },
+    "/api/admin/datasources": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Datasources",
+        "operationId": "list_datasources_api_admin_datasources_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasourceListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create Datasource",
+        "operationId": "create_datasource_api_admin_datasources_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DatasourceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasourceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/admin/datasources/{datasource_id}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update Datasource",
+        "operationId": "update_datasource_api_admin_datasources__datasource_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "datasource_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Datasource Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DatasourceUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasourceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/datasets": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create Dataset",
+        "operationId": "create_dataset_api_admin_datasets_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DatasetCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetAdminResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/admin/datasets/{slug}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update Dataset",
+        "operationId": "update_dataset_api_admin_datasets__slug__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DatasetUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetAdminResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete Dataset",
+        "operationId": "delete_dataset_api_admin_datasets__slug__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/health": {
       "get": {
         "tags": [
@@ -178,10 +446,493 @@
           }
         }
       }
+    },
+    "/api/datasets": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "List Datasets",
+        "description": "List datasets the caller can access.",
+        "operationId": "list_datasets_api_datasets_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/datasets/{slug}": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Get Dataset",
+        "description": "Get a single dataset by slug.",
+        "operationId": "get_dataset_api_datasets__slug__get",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/datasets/{slug}/access": {
+      "post": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Access Dataset",
+        "description": "Get access credentials for a dataset.",
+        "operationId": "access_dataset_api_datasets__slug__access_post",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Access Dataset Api Datasets  Slug  Access Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "DatasetAdminResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "datasource_id": {
+            "type": "string",
+            "title": "Datasource Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "is_public": {
+            "type": "boolean",
+            "title": "Is Public"
+          },
+          "required_roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Required Roles"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "datasource_id",
+          "name",
+          "slug",
+          "path",
+          "description",
+          "is_public",
+          "required_roles"
+        ],
+        "title": "DatasetAdminResponse"
+      },
+      "DatasetCreate": {
+        "properties": {
+          "datasource_id": {
+            "type": "string",
+            "title": "Datasource Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "is_public": {
+            "type": "boolean",
+            "title": "Is Public",
+            "default": false
+          },
+          "required_roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Required Roles",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "datasource_id",
+          "name",
+          "slug",
+          "path"
+        ],
+        "title": "DatasetCreate"
+      },
+      "DatasetListResponse": {
+        "properties": {
+          "datasets": {
+            "items": {
+              "$ref": "#/components/schemas/DatasetResponse"
+            },
+            "type": "array",
+            "title": "Datasets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "datasets"
+        ],
+        "title": "DatasetListResponse"
+      },
+      "DatasetResponse": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "is_public": {
+            "type": "boolean",
+            "title": "Is Public"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "description",
+          "is_public",
+          "url"
+        ],
+        "title": "DatasetResponse"
+      },
+      "DatasetUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "is_public": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Public"
+          },
+          "required_roles": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Roles"
+          }
+        },
+        "type": "object",
+        "title": "DatasetUpdate"
+      },
+      "DatasourceCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "type": {
+            "$ref": "#/components/schemas/DatasourceType"
+          },
+          "base_url": {
+            "type": "string",
+            "title": "Base Url"
+          },
+          "credential_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential Ref"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "type",
+          "base_url"
+        ],
+        "title": "DatasourceCreate"
+      },
+      "DatasourceListResponse": {
+        "properties": {
+          "datasources": {
+            "items": {
+              "$ref": "#/components/schemas/DatasourceResponse"
+            },
+            "type": "array",
+            "title": "Datasources"
+          }
+        },
+        "type": "object",
+        "required": [
+          "datasources"
+        ],
+        "title": "DatasourceListResponse"
+      },
+      "DatasourceResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "type": {
+            "$ref": "#/components/schemas/DatasourceType"
+          },
+          "base_url": {
+            "type": "string",
+            "title": "Base Url"
+          },
+          "credential_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential Ref"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "type",
+          "base_url",
+          "credential_ref"
+        ],
+        "title": "DatasourceResponse"
+      },
+      "DatasourceType": {
+        "type": "string",
+        "enum": [
+          "s3_cloudfront",
+          "http_token"
+        ],
+        "title": "DatasourceType",
+        "description": "Supported datasource types."
+      },
+      "DatasourceUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "credential_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential Ref"
+          }
+        },
+        "type": "object",
+        "title": "DatasourceUpdate"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -313,6 +1064,12 @@
           "type"
         ],
         "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
       }
     }
   }
