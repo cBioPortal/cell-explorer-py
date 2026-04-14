@@ -22,7 +22,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if settings is None:
         settings = Settings()
 
-    app = FastAPI(title="Cell Explorer API")
+    app = FastAPI(
+        title="Cell Explorer API",
+        swagger_ui_parameters={"persistAuthorization": True},
+    )
     app.state.settings = settings
 
     # CORS middleware
@@ -33,9 +36,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             CORSMiddleware,
             allow_origins=settings.cors_origin_list,
             allow_credentials=True,
-            allow_methods=["GET", "POST", "OPTIONS"],
-            allow_headers=["Content-Type"],
+            allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            allow_headers=["Content-Type", "Authorization"],
         )
+
+    # Database engine
+    from cell_explorer_api.db import create_engine
+
+    app.state.db_engine = create_engine(settings.database_url)
 
     # Auth — routes always registered (return 501 when disabled); Keycloak client only when configured
     if settings.auth_enabled:
@@ -44,16 +52,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         keycloak = KeycloakClient(settings)
         app.state.keycloak = keycloak
 
-        @asynccontextmanager
-        async def lifespan(app):
-            await keycloak.fetch_jwks()
-            yield
+    # Unified lifespan: always dispose db engine; fetch JWKS only when auth enabled
+    @asynccontextmanager
+    async def lifespan(app):
+        if settings.auth_enabled:
+            await app.state.keycloak.fetch_jwks()
+        yield
+        await app.state.db_engine.dispose()
 
-        app.router.lifespan_context = lifespan
+    app.router.lifespan_context = lifespan
 
-    from cell_explorer_api.routes import create_auth_router
+    from cell_explorer_api.routes import create_admin_router, create_auth_router
 
     app.include_router(create_auth_router(), prefix="/api")
+    app.include_router(create_admin_router(), prefix="/api")
 
     # 1. API routes (highest precedence)
     app.include_router(router)

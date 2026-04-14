@@ -1,0 +1,56 @@
+"""SQLModel table definitions for the dataset catalog."""
+
+import enum
+import uuid
+from datetime import datetime, timezone
+
+from sqlmodel import Field, JSON, Relationship, SQLModel, Column
+
+
+class DatasourceType(str, enum.Enum):
+    """Supported datasource types."""
+
+    S3_CLOUDFRONT = "s3_cloudfront"
+    HTTP_TOKEN = "http_token"
+
+
+class Datasource(SQLModel, table=True):
+    """A storage backend where zarr datasets are hosted."""
+
+    __tablename__ = "datasources"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    name: str
+    type: DatasourceType
+    base_url: str
+    credential_ref: str | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    datasets: list["Dataset"] = Relationship(back_populates="datasource")
+
+
+class Dataset(SQLModel, table=True):
+    """A single zarr dataset within a datasource."""
+
+    __tablename__ = "datasets"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    datasource_id: uuid.UUID = Field(foreign_key="datasources.id")
+    name: str
+    slug: str = Field(unique=True, index=True)
+    path: str
+    description: str | None = None
+    is_public: bool = Field(default=False)
+    required_roles: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    datasource: Datasource | None = Relationship(back_populates="datasets")
+
+    @property
+    def url(self) -> str | None:
+        """Construct the full dataset URL from datasource base_url + path."""
+        if self.datasource is None:
+            return None
+        return f"{self.datasource.base_url}/{self.path}"

@@ -5,7 +5,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /app
 
 # Install workspace dependencies
-COPY pyproject.toml .python-version ./
+COPY pyproject.toml uv.lock .python-version ./
 COPY packages/api/pyproject.toml packages/api/pyproject.toml
 COPY packages/cell2zarr/pyproject.toml packages/cell2zarr/pyproject.toml
 RUN uv sync --no-install-workspace

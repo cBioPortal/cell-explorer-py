@@ -79,3 +79,48 @@ def test_settings_auth_enabled_property(monkeypatch: "pytest.MonkeyPatch"):
     monkeypatch.setenv("KEYCLOAK_CLIENT_ID", "cell-explorer")
     monkeypatch.setenv("KEYCLOAK_CLIENT_SECRET", "secret123")
     assert Settings().auth_enabled is True
+
+
+def test_database_url_default():
+    from cell_explorer_api.config import Settings
+
+    settings = Settings()
+    assert settings.database_url == "sqlite+aiosqlite:///./cell_explorer.db"
+
+
+def test_database_url_from_env(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///./custom.db")
+    from cell_explorer_api.config import Settings
+
+    settings = Settings()
+    assert settings.database_url == "sqlite+aiosqlite:///./custom.db"
+
+
+def test_admin_api_key_default_none():
+    from cell_explorer_api.config import Settings
+
+    settings = Settings()
+    assert settings.admin_api_key is None
+
+
+def test_admin_api_key_from_env(monkeypatch):
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-123")
+    from cell_explorer_api.config import Settings
+
+    settings = Settings()
+    assert settings.admin_api_key == "test-key-123"
+
+
+def test_admin_enabled_when_key_set(monkeypatch):
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key-123")
+    from cell_explorer_api.config import Settings
+
+    settings = Settings()
+    assert settings.admin_enabled is True
+
+
+def test_admin_disabled_when_no_key():
+    from cell_explorer_api.config import Settings
+
+    settings = Settings()
+    assert settings.admin_enabled is False

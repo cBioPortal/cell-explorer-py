@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     keycloak_client_secret: str | None = None
     cors_origins: str = ""
 
+    # Database
+    database_url: str = "sqlite+aiosqlite:///./cell_explorer.db"
+
+    # Admin
+    admin_api_key: str | None = None
+
     @property
     def auth_enabled(self) -> bool:
         """Auth is enabled when all required Keycloak fields are set."""
@@ -62,6 +68,11 @@ class Settings(BaseSettings):
         if not self.cors_origins:
             return []
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def admin_enabled(self) -> bool:
+        """Admin API is enabled when ADMIN_API_KEY is set."""
+        return self.admin_api_key is not None
 
     @model_validator(mode="after")
     def _autodetect_git_sha(self) -> "Settings":
