@@ -85,7 +85,8 @@ def test_database_url_default():
     from cell_explorer_api.config import Settings
 
     settings = Settings()
-    assert settings.database_url == "sqlite+aiosqlite:///./cell_explorer.db"
+    assert settings.database_url is None
+    assert "cell_explorer.db" in settings.effective_database_url
 
 
 def test_database_url_from_env(monkeypatch):
