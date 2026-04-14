@@ -64,7 +64,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         file_path = (data_dir / path).resolve()
 
         # Prevent directory traversal
-        if not str(file_path).startswith(str(data_dir)):
+        try:
+            file_path.relative_to(data_dir)
+        except ValueError:
             return JSONResponse(status_code=404, content={"detail": "Not found"})
 
         if not file_path.is_file():
@@ -73,9 +75,3 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return FileResponse(file_path)
 
     return app
-
-
-try:
-    app = create_app()
-except Exception:
-    app = None  # Tests create their own app via create_app(settings)
