@@ -91,14 +91,8 @@ async def callback(request: Request, code: str, state: str):
 
 
 @router.get("/me", response_model=User)
-async def me(request: Request, response: Response, user: User = Depends(require_auth)):
+async def me(user: User = Depends(require_auth)):
     """Return the current user's identity."""
-    # If require_auth refreshed the token, set new cookies on the response
-    new_access = getattr(request.state, 'new_access_token', None)
-    if new_access:
-        new_refresh = getattr(request.state, 'new_refresh_token', None)
-        if new_refresh:
-            _set_token_cookies(request, response, new_access, new_refresh)
     return user.model_dump()
 
 

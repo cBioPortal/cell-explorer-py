@@ -60,6 +60,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_headers=["Content-Type", "Authorization"],
         )
 
+    # Token refresh middleware — when require_auth refreshes an expired access token,
+    # it stores new tokens on request.state. This middleware syncs them to response cookies
+    # so the browser receives the updated tokens automatically, regardless of which endpoint
+    # triggered the refresh.
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from cell_explorer_api.routes.auth import _cookie_defaults
+
+    class TokenRefreshMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            response = await call_next(request)
+            new_access = getattr(request.state, "new_access_token", None)
+            new_refresh = getattr(request.state, "new_refresh_token", None)
+            if new_access and new_refresh:
+                defaults = _cookie_defaults(request)
+                response.set_cookie("cce_access", new_access, max_age=300, **defaults)
+                response.set_cookie("cce_refresh", new_refresh, max_age=28800, **defaults)
+            return response
+
+    app.add_middleware(TokenRefreshMiddleware)
+
     # Database engine
     from cell_explorer_api.db import create_engine
 
