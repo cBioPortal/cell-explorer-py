@@ -65,7 +65,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # so the browser receives the updated tokens automatically, regardless of which endpoint
     # triggered the refresh.
     from starlette.middleware.base import BaseHTTPMiddleware
-    from cell_explorer_api.routes.auth import _cookie_defaults
+    from cell_explorer_api.routes.auth import _set_token_cookies
 
     class TokenRefreshMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):
@@ -73,9 +73,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             new_access = getattr(request.state, "new_access_token", None)
             new_refresh = getattr(request.state, "new_refresh_token", None)
             if new_access and new_refresh:
-                defaults = _cookie_defaults(request)
-                response.set_cookie("cce_access", new_access, max_age=300, **defaults)
-                response.set_cookie("cce_refresh", new_refresh, max_age=28800, **defaults)
+                _set_token_cookies(request, response, new_access, new_refresh)
             return response
 
     app.add_middleware(TokenRefreshMiddleware)
