@@ -122,11 +122,17 @@ def test_me_sets_refreshed_cookies(auth_client, rsa_keys):
     assert response.status_code == 200
     assert response.json()["sub"] == "user-123"
 
-    # Verify refreshed cookies are set on the response
+    # Verify refreshed cookies are set with the correct values
     set_cookie_headers = response.headers.get_list("set-cookie")
-    cookie_names = [c.split("=")[0] for c in set_cookie_headers]
-    assert "cce_access" in cookie_names, "Expected cce_access cookie to be set after refresh"
-    assert "cce_refresh" in cookie_names, "Expected cce_refresh cookie to be set after refresh"
+    cookie_map = {}
+    for header in set_cookie_headers:
+        name, _, rest = header.partition("=")
+        value = rest.split(";")[0]
+        cookie_map[name] = value
+    assert "cce_access" in cookie_map, "Expected cce_access cookie to be set after refresh"
+    assert cookie_map["cce_access"] == fresh_token, "cce_access should contain the refreshed token"
+    assert "cce_refresh" in cookie_map, "Expected cce_refresh cookie to be set after refresh"
+    assert cookie_map["cce_refresh"] == "new-refresh-token-value", "cce_refresh should contain the new refresh token"
 
 
 def test_auth_routes_return_501_without_keycloak():
