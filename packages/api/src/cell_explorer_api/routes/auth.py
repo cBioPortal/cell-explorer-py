@@ -30,12 +30,11 @@ def _callback_uri(request: Request) -> str:
 
 
 def _cookie_defaults(request: Request) -> dict:
-    """Cookie settings — secure only when not running on localhost."""
-    hostname = request.headers.get("x-forwarded-host", request.url.hostname or "").split(":")[0]
-    is_localhost = hostname in ("localhost", "127.0.0.1")
+    """Cookie settings — secure when the request arrived over HTTPS."""
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
     return {
         "httponly": True,
-        "secure": not is_localhost,
+        "secure": proto == "https",
         "samesite": "lax",
         "path": "/api",
     }
