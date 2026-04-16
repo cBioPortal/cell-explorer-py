@@ -35,6 +35,7 @@ RUN corepack enable && corepack prepare pnpm@9.12.1 --activate
 
 ARG FRONTEND_REPO=https://github.com/cBioPortal/cbioportal-cell-explorer.git
 ARG FRONTEND_REF=main
+ARG FRONTEND_CACHE_BUST=""
 
 WORKDIR /frontend
 RUN git clone --depth 1 --branch "$FRONTEND_REF" "$FRONTEND_REPO" .

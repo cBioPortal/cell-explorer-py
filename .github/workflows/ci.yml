@@ -54,3 +54,4 @@ jobs:
           build-args: |
             GIT_SHA=${{ steps.sha.outputs.short }}
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            FRONTEND_CACHE_BUST=${{ github.run_id }}
