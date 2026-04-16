@@ -71,6 +71,26 @@ def test_login_sets_state_cookie(auth_client):
     assert "cce_state" in response.cookies
 
 
+def test_cookies_not_secure_on_http(auth_client):
+    """Cookies should not have the secure flag when served over HTTP."""
+    response = auth_client.get("/api/auth/login", follow_redirects=False)
+    set_cookie = response.headers.get_list("set-cookie")
+    state_cookie = [c for c in set_cookie if c.startswith("cce_state")][0]
+    assert "Secure" not in state_cookie
+
+
+def test_cookies_secure_with_forwarded_proto(auth_client):
+    """Cookies should have the secure flag when x-forwarded-proto is https."""
+    response = auth_client.get(
+        "/api/auth/login",
+        headers={"x-forwarded-proto": "https"},
+        follow_redirects=False,
+    )
+    set_cookie = response.headers.get_list("set-cookie")
+    state_cookie = [c for c in set_cookie if c.startswith("cce_state")][0]
+    assert "Secure" in state_cookie
+
+
 def test_me_returns_user_when_authenticated(auth_client, rsa_keys):
     private_key, _ = rsa_keys
     token = _make_token(private_key)
