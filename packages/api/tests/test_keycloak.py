@@ -92,6 +92,27 @@ def test_decode_valid_token(keycloak, rsa_keys):
     assert user.roles == ["viewer"]
 
 
+def test_decode_merges_realm_and_client_roles(keycloak, rsa_keys):
+    private_key, _ = rsa_keys
+    claims = {
+        "sub": "user-123",
+        "realm_access": {"roles": ["realm-role", "shared"]},
+        "resource_access": {
+            "test-client": {"roles": ["client-role", "shared"]},
+            "other-client": {"roles": ["should-not-include"]},
+        },
+        "iss": "https://auth.example.com/realms/test-realm",
+        "aud": "test-client",
+        "exp": int(time.time()) + 300,
+        "iat": int(time.time()),
+    }
+    token = _encode_token(claims, private_key)
+    user = keycloak.decode_token(token)
+    # Merged, deduplicated, sorted
+    assert user.roles == ["client-role", "realm-role", "shared"]
+    assert "should-not-include" not in user.roles
+
+
 def test_decode_expired_token_raises(keycloak, rsa_keys):
     private_key, _ = rsa_keys
     claims = {
