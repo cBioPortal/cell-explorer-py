@@ -104,11 +104,16 @@ class KeycloakClient:
         )
 
         realm_roles = claims.get("realm_access", {}).get("roles", [])
+        client_roles = (
+            claims.get("resource_access", {})
+            .get(self._settings.keycloak_client_id, {})
+            .get("roles", [])
+        )
         return User(
             sub=claims["sub"],
             name=claims.get("name"),
             email=claims.get("email"),
-            roles=realm_roles,
+            roles=sorted(set(realm_roles + client_roles)),
         )
 
     def logout_url(self, redirect_uri: str) -> str:
