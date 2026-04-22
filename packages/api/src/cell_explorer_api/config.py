@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     keycloak_realm: str | None = None
     keycloak_client_id: str | None = None
     keycloak_client_secret: str | None = None
+    keycloak_idp_hint: str | None = None
     cors_origins: str = ""
 
     # Database
