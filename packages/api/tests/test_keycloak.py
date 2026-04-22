@@ -59,6 +59,17 @@ def test_authorization_url():
     assert "redirect_uri=" in url
     assert "state=abc123" in url
     assert "response_type=code" in url
+    assert "kc_idp_hint" not in url
+
+
+def test_authorization_url_with_idp_hint():
+    settings = _make_settings(keycloak_idp_hint="pingId")
+    client = KeycloakClient(settings)
+    url = client.authorization_url(
+        redirect_uri="https://app.example.com/api/auth/callback",
+        state="abc123",
+    )
+    assert "kc_idp_hint=pingId" in url
 
 
 def test_decode_valid_token(keycloak, rsa_keys):

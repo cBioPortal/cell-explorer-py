@@ -35,6 +35,8 @@ class KeycloakClient:
             "state": state,
             "scope": "openid profile email",
         }
+        if self._settings.keycloak_idp_hint:
+            params["kc_idp_hint"] = self._settings.keycloak_idp_hint
         return f"{self._oidc}/auth?{urlencode(params)}"
 
     async def exchange_code(self, code: str, redirect_uri: str) -> dict:
