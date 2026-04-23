@@ -81,3 +81,76 @@ async def test_data_tool_turn(fake_zarr):
     assert events[-1].__class__.__name__ == "Done"
     text = "".join(e.text for e in events if isinstance(e, TextDelta))
     assert "100 cells" in text
+
+
+from cell_explorer_agent.events import UIAction
+from cell_explorer_agent.tools.ui_action.color import set_color_by_gene_tool
+
+
+async def test_ui_action_turn(fake_zarr):
+    llm = FakeLLMClient(
+        scripts=[
+            Script(
+                events=[
+                    LLMToolCall(
+                        id="u1",
+                        name="set_color_by_gene",
+                        args={"gene": "CD8A"},
+                    ),
+                    LLMStop(reason="tool_use", usage=LLMUsage()),
+                ]
+            ),
+            Script(
+                events=[
+                    LLMTextDelta(text="Coloring by CD8A."),
+                    LLMStop(reason="end_turn", usage=LLMUsage(output_tokens=4)),
+                ]
+            ),
+        ]
+    )
+    ctx = await build_dataset_context(fake_zarr, slug="demo", name="Demo", description="")
+    cat = ToolCatalog()
+    cat.register(set_color_by_gene_tool(fake_zarr))
+
+    agent = ChatAgent(llm=llm, catalog=cat, dataset_ctx=ctx, config=AgentConfig())
+    events = [
+        e async for e in agent.run(messages=[UserMessage(content="color by CD8A")])
+    ]
+
+    actions = [e for e in events if isinstance(e, UIAction)]
+    assert len(actions) == 1
+    assert actions[0].payload == {"colorBy": "gene", "gene": "CD8A"}
+    assert events[-1].__class__.__name__ == "Done"
+
+
+async def test_ui_action_validation_failure_never_streams(fake_zarr):
+    llm = FakeLLMClient(
+        scripts=[
+            Script(
+                events=[
+                    LLMToolCall(
+                        id="u1",
+                        name="set_color_by_gene",
+                        args={"gene": "NOT_A_GENE"},
+                    ),
+                    LLMStop(reason="tool_use", usage=LLMUsage()),
+                ]
+            ),
+            Script(
+                events=[
+                    LLMTextDelta(text="That gene isn't in the dataset."),
+                    LLMStop(reason="end_turn", usage=LLMUsage()),
+                ]
+            ),
+        ]
+    )
+    ctx = await build_dataset_context(fake_zarr, slug="demo", name="Demo", description="")
+    cat = ToolCatalog()
+    cat.register(set_color_by_gene_tool(fake_zarr))
+
+    agent = ChatAgent(llm=llm, catalog=cat, dataset_ctx=ctx, config=AgentConfig())
+    events = [
+        e async for e in agent.run(messages=[UserMessage(content="color by NOT_A_GENE")])
+    ]
+
+    assert not any(isinstance(e, UIAction) for e in events)

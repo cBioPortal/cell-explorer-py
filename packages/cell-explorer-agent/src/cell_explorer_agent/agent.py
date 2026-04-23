@@ -10,6 +10,7 @@ from cell_explorer_agent.events import (
     TextDelta,
     TokenUsage,
     ToolProgress,
+    UIAction,
 )
 from cell_explorer_agent.llm.base import (
     LLMClient,
@@ -102,8 +103,29 @@ class ChatAgent:
                     results.append(
                         ToolResult(tool_call_id=call.id, content=result)
                     )
-                else:
-                    # ui-action handled in Task 19.
-                    raise NotImplementedError("ui-action tools handled in Task 19")
+                else:  # tool.kind == "ui_action"
+                    yield ToolProgress(tool=tool.name, status="started")
+                    result = await tool.func(**call.args)
+                    if "error" in result:
+                        # Validation / lookup failed — never emit the action.
+                        yield ToolProgress(
+                            tool=tool.name, status="error", summary=result["error"]
+                        )
+                        results.append(
+                            ToolResult(
+                                tool_call_id=call.id,
+                                content=result,
+                                is_error=True,
+                            )
+                        )
+                    else:
+                        yield UIAction(payload=result["payload"])
+                        yield ToolProgress(tool=tool.name, status="ok")
+                        results.append(
+                            ToolResult(
+                                tool_call_id=call.id,
+                                content={"dispatched": True},
+                            )
+                        )
 
             history.append(ToolResultMessage(results=results))
