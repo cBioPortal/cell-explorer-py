@@ -36,3 +36,20 @@ async def test_get_group_v2(fixture_server):
     store = await ZarrStore.open(f"{fixture_server}/pbmc3k.zarr")
     group = await store.get_group("obs")
     assert group is not None
+
+
+@pytest.mark.asyncio
+async def test_open_with_auth_header(auth_fixture_server):
+    base_url, token = auth_fixture_server
+    store = await ZarrStore.open(
+        f"{base_url}/pbmc3k.zarr",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert store.zarr_version == 2
+
+
+@pytest.mark.asyncio
+async def test_open_without_auth_fails(auth_fixture_server):
+    base_url, _ = auth_fixture_server
+    with pytest.raises(Exception):
+        await ZarrStore.open(f"{base_url}/pbmc3k.zarr")
