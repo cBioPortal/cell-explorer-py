@@ -12,8 +12,8 @@ wheels/
 # Documentation (generated/local)
 docs/
 
-# Data symlink
-data
+# Data symlink (top-level only)
+/data
 
 # Notebooks
 notebooks/
