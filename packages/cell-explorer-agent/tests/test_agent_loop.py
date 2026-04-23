@@ -154,3 +154,122 @@ async def test_ui_action_validation_failure_never_streams(fake_zarr):
     ]
 
     assert not any(isinstance(e, UIAction) for e in events)
+
+
+import asyncio
+
+import pytest
+
+from cell_explorer_agent.events import Error
+from cell_explorer_agent.tools.registry import Tool
+
+
+async def _raising_tool(**_):
+    raise RuntimeError("boom")
+
+
+async def test_tool_exception_becomes_tool_result(fake_zarr):
+    llm = FakeLLMClient(
+        scripts=[
+            Script(
+                events=[
+                    LLMToolCall(id="t1", name="explode", args={}),
+                    LLMStop(reason="tool_use", usage=LLMUsage()),
+                ]
+            ),
+            Script(
+                events=[
+                    LLMTextDelta(text="Sorry, that failed."),
+                    LLMStop(reason="end_turn", usage=LLMUsage()),
+                ]
+            ),
+        ]
+    )
+    ctx = await build_dataset_context(fake_zarr, slug="d", name="D", description="")
+    cat = ToolCatalog()
+    cat.register(
+        Tool(
+            name="explode",
+            kind="data",
+            description="",
+            args_schema={"type": "object", "properties": {}},
+            func=_raising_tool,
+        )
+    )
+    agent = ChatAgent(llm=llm, catalog=cat, dataset_ctx=ctx, config=AgentConfig())
+    events = [e async for e in agent.run(messages=[UserMessage(content="x")])]
+
+    progress_errors = [
+        e for e in events if isinstance(e, ToolProgress) and e.status == "error"
+    ]
+    assert len(progress_errors) == 1
+    assert events[-1].__class__.__name__ == "Done"
+
+
+async def test_max_tool_calls_cap(fake_zarr):
+    # LLM keeps calling a tool forever; cap should kick in.
+    def make_repeater(id_prefix):
+        return Script(
+            events=[
+                LLMToolCall(id=f"{id_prefix}-1", name="get_dataset_schema", args={}),
+                LLMStop(reason="tool_use", usage=LLMUsage()),
+            ]
+        )
+
+    scripts = [make_repeater(f"s{i}") for i in range(20)]
+    llm = FakeLLMClient(scripts=scripts)
+    ctx = await build_dataset_context(fake_zarr, slug="d", name="D", description="")
+    cat = ToolCatalog()
+    cat.register(get_dataset_schema_tool(fake_zarr, limit_bytes=32_768))
+
+    cfg = AgentConfig()
+    # Force the cap
+    cfg = AgentConfig(**{**cfg.model_dump(), "max_tool_calls_per_turn": 3})
+
+    agent = ChatAgent(llm=llm, catalog=cat, dataset_ctx=ctx, config=cfg)
+    events = [e async for e in agent.run(messages=[UserMessage(content="loop")])]
+
+    # Final Error + Done
+    errors = [e for e in events if isinstance(e, Error)]
+    assert len(errors) == 1
+    assert "cap" in errors[0].message.lower() or "limit" in errors[0].message.lower()
+    assert events[-1].__class__.__name__ == "Done"
+
+
+async def test_cancellation_propagates(fake_zarr):
+    async def slow_tool(**_):
+        await asyncio.sleep(1.0)
+        return {"ok": True}
+
+    llm = FakeLLMClient(
+        scripts=[
+            Script(
+                events=[
+                    LLMToolCall(id="t1", name="slow", args={}),
+                    LLMStop(reason="tool_use", usage=LLMUsage()),
+                ]
+            )
+        ]
+    )
+    ctx = await build_dataset_context(fake_zarr, slug="d", name="D", description="")
+    cat = ToolCatalog()
+    cat.register(
+        Tool(
+            name="slow",
+            kind="data",
+            description="",
+            args_schema={"type": "object", "properties": {}},
+            func=slow_tool,
+        )
+    )
+    agent = ChatAgent(llm=llm, catalog=cat, dataset_ctx=ctx, config=AgentConfig())
+
+    async def consume():
+        async for _ in agent.run(messages=[UserMessage(content="x")]):
+            pass
+
+    task = asyncio.create_task(consume())
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task

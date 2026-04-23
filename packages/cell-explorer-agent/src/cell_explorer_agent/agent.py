@@ -1,5 +1,7 @@
 """ChatAgent — turn loop over an LLMClient with data + ui-action tools."""
 
+import logging
+import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
@@ -7,6 +9,7 @@ from cell_explorer_agent.config import AgentConfig
 from cell_explorer_agent.events import (
     ChatEvent,
     Done,
+    Error,
     TextDelta,
     TokenUsage,
     ToolProgress,
@@ -29,6 +32,8 @@ from cell_explorer_agent.prompt.dataset_context import DatasetContext
 from cell_explorer_agent.prompt.system import build_system_prompt
 from cell_explorer_agent.tools.registry import ToolCatalog
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class ChatAgent:
@@ -42,6 +47,8 @@ class ChatAgent:
         tools = self.catalog.all()
         history: list[Message] = list(messages)
         total_usage = TokenUsage()
+        tool_calls_this_turn = 0
+        max_calls = self.config.max_tool_calls_per_turn
 
         while True:
             assistant_text = ""
@@ -82,9 +89,19 @@ class ChatAgent:
                 yield Done(usage=total_usage)
                 return
 
-            # Execute pending tool calls (data kind only for this task).
+            if tool_calls_this_turn + len(pending_calls) > max_calls:
+                yield Error(
+                    message=(
+                        f"Tool-call limit ({max_calls}) reached this turn — stopping."
+                    ),
+                    retryable=False,
+                )
+                yield Done(usage=total_usage)
+                return
+
             results: list[ToolResult] = []
             for call in pending_calls:
+                tool_calls_this_turn += 1
                 tool = self.catalog.get(call.name)
                 if tool is None:
                     results.append(
@@ -96,20 +113,39 @@ class ChatAgent:
                     )
                     continue
 
-                if tool.kind == "data":
+                try:
                     yield ToolProgress(tool=tool.name, status="started")
                     result = await tool.func(**call.args)
+                except Exception as exc:
+                    correlation = uuid.uuid4().hex
+                    logger.exception(
+                        "chat.tool.call failed tool=%s correlation=%s",
+                        tool.name,
+                        correlation,
+                    )
+                    yield ToolProgress(
+                        tool=tool.name, status="error", summary=str(exc)
+                    )
+                    results.append(
+                        ToolResult(
+                            tool_call_id=call.id,
+                            content={"error": str(exc), "correlation_id": correlation},
+                            is_error=True,
+                        )
+                    )
+                    continue
+
+                if tool.kind == "data":
                     yield ToolProgress(tool=tool.name, status="ok")
                     results.append(
                         ToolResult(tool_call_id=call.id, content=result)
                     )
-                else:  # tool.kind == "ui_action"
-                    yield ToolProgress(tool=tool.name, status="started")
-                    result = await tool.func(**call.args)
+                else:  # ui_action
                     if "error" in result:
-                        # Validation / lookup failed — never emit the action.
                         yield ToolProgress(
-                            tool=tool.name, status="error", summary=result["error"]
+                            tool=tool.name,
+                            status="error",
+                            summary=result["error"],
                         )
                         results.append(
                             ToolResult(
