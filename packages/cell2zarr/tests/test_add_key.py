@@ -6,7 +6,7 @@ from click.testing import CliRunner
 
 from cell2zarr.cli import cli
 from cell2zarr.convert import write_obsm_to_store, add_key_to_store
-from conftest import _write_test_h5ad, _create_zarr_store, open_zarr
+from cell2zarr._testing import _write_test_h5ad, _create_zarr_store, open_zarr
 
 
 class TestWriteObsmToStore:
