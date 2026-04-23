@@ -32,3 +32,6 @@ dev-keys/
 
 # SQLite database
 cell_explorer.db
+
+# Git worktrees
+.worktrees/
