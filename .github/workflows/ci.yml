@@ -18,7 +18,13 @@ jobs:
 
       - run: uv sync
 
+      - run: uv run pytest packages/api/tests/ -v
+
       - run: uv run pytest packages/cell2zarr/tests/ -v
+
+      - run: uv run pytest packages/zarr-access/tests/ -v
+
+      - run: uv run pytest packages/zarr-auth-proxy/tests/ -v
 
   docker:
     needs: test
