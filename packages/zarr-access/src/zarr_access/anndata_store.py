@@ -1,5 +1,14 @@
 """High-level AnnData API on top of ZarrStore."""
 
+import numpy as np
+import pandas as pd
+import scipy.sparse
+
+from zarr_access.decoders import (
+    decode_column,
+    decode_dataframe,
+    decode_sparse_matrix,
+)
 from zarr_access.zarr_store import ZarrStore
 
 
@@ -41,6 +50,59 @@ class AnnDataStore:
     @property
     def var_columns(self) -> list[str]:
         return list(self._var_columns)
+
+    async def obs(self) -> pd.DataFrame:
+        """Full obs dataframe."""
+        group = await self._zarr.get_group("obs")
+        return await decode_dataframe(group)
+
+    async def var(self) -> pd.DataFrame:
+        """Full var dataframe."""
+        group = await self._zarr.get_group("var")
+        return await decode_dataframe(group)
+
+    async def obs_column(self, name: str):
+        """Single obs column — efficient for targeted queries."""
+        obs = await self._zarr.get_group("obs")
+        node = await obs.getitem(name)
+        return await decode_column(node)
+
+    async def obsm(self, key: str) -> np.ndarray:
+        """Embedding array (e.g., X_umap)."""
+        obsm = await self._zarr.get_group("obsm")
+        arr = await obsm.getitem(key)
+        data = await arr.getitem(slice(None))
+        return np.asarray(data)
+
+    async def gene_expression(self, gene: str) -> np.ndarray:
+        """Expression values for a single gene across all cells.
+
+        Resolves gene name to column index via var index, then reads that
+        column from X.
+        """
+        var_df = await self.var()
+        if gene not in var_df.index:
+            raise ValueError(f"Gene {gene!r} not found in var index")
+        col_idx = var_df.index.get_loc(gene)
+        x = await self.X()
+        if scipy.sparse.issparse(x):
+            return np.asarray(x[:, col_idx].toarray()).ravel()
+        return np.asarray(x[:, col_idx]).ravel()
+
+    async def X(self):
+        """Full expression matrix (dense or sparse depending on encoding)."""
+        # Try as a group first (sparse case)
+        try:
+            x_group = await self._zarr.get_group("X")
+            attrs = dict(x_group.attrs)
+            if attrs.get("encoding-type") in ("csr_matrix", "csc_matrix"):
+                return await decode_sparse_matrix(x_group)
+        except (KeyError, TypeError, ValueError):
+            pass
+        # Dense array
+        x_arr = await self._zarr.get_array("X")
+        data = await x_arr.getitem((slice(None), slice(None)))
+        return np.asarray(data)
 
     @classmethod
     async def open(cls, zarr_store: ZarrStore) -> "AnnDataStore":
