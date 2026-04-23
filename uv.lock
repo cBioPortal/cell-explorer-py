@@ -17,6 +17,7 @@ members = [
 [manifest.dependency-groups]
 dev = [
     { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-asyncio", specifier = ">=0.25.0" },
     { name = "pytest-watcher", specifier = ">=0.6.3" },
     { name = "python-semantic-release", specifier = ">=10.5.3" },
 ]
