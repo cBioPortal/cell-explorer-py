@@ -7,3 +7,8 @@ dev = [
     "pytest-watcher>=0.6.3",
     "python-semantic-release>=10.5.3",
 ]
+
+[tool.pytest.ini_options]
+# Recommended for monorepos: allows duplicate test module names across packages
+# See: https://docs.pytest.org/en/stable/explanation/pythonpath.html#which-import-mode
+addopts = "--import-mode=importlib"
