@@ -11,4 +11,7 @@ dev = [
 [tool.pytest.ini_options]
 # Recommended for monorepos: allows duplicate test module names across packages
 # See: https://docs.pytest.org/en/stable/explanation/pythonpath.html#which-import-mode
-addopts = "--import-mode=importlib"
+# --ignore: zarr-access uses aiohttp session-scoped fixtures that deadlock when
+# collected together with other packages from the monorepo root (works fine when
+# run via `pytest packages/zarr-access/tests/`).
+addopts = "--import-mode=importlib --ignore=packages/zarr-access"
