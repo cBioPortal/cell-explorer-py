@@ -119,3 +119,27 @@ async def test_top_expressed_genes(fake_zarr):
     # CD8A should rank highly in T cells
     symbols = [g["symbol"] for g in result["genes"]]
     assert "CD8A" in symbols
+
+
+from cell_explorer_agent.tools.data.compare import compare_groups_tool
+
+
+async def test_compare_groups_returns_top_lfc(fake_zarr):
+    tool = compare_groups_tool(fake_zarr, limit_bytes=32_768)
+    result = await tool.func(
+        obs_column="cell_type", group_a="T cell", group_b="B cell", n=5
+    )
+    assert len(result["genes"]) == 5
+    symbols = [g["symbol"] for g in result["genes"]]
+    assert "CD8A" in symbols  # T cell boost makes it a top marker
+    # positive lfc means higher in group_a
+    cd8a = next(g for g in result["genes"] if g["symbol"] == "CD8A")
+    assert cd8a["log2_fold_change"] > 0
+
+
+async def test_compare_groups_unknown_group(fake_zarr):
+    tool = compare_groups_tool(fake_zarr, limit_bytes=32_768)
+    result = await tool.func(
+        obs_column="cell_type", group_a="T cell", group_b="Nope", n=5
+    )
+    assert "error" in result
