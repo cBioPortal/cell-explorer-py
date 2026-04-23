@@ -42,7 +42,7 @@ LLMEvent = LLMTextDelta | LLMToolCall | LLMStop
 
 
 class LLMClient(Protocol):
-    async def stream(
+    def stream(
         self,
         *,
         system: str,
