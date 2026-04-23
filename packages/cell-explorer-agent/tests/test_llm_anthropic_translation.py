@@ -59,3 +59,34 @@ def test_tool_result_translation():
     assert tr["type"] == "tool_result"
     assert tr["tool_use_id"] == "c1"
     assert "ok" in tr["content"]
+
+
+from unittest.mock import patch
+
+from cell_explorer_agent.llm.anthropic import AnthropicLLMClient
+
+
+def test_construct_anthropic_transport(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "dummy")
+    with patch("anthropic.AsyncAnthropic") as MockA:
+        AnthropicLLMClient(transport="anthropic")
+        MockA.assert_called_once()
+
+
+def test_construct_bedrock_transport():
+    with patch("anthropic.AsyncAnthropicBedrock") as MockB:
+        AnthropicLLMClient(transport="bedrock")
+        MockB.assert_called_once()
+
+
+def test_construct_vertex_transport():
+    with patch("anthropic.AsyncAnthropicVertex") as MockV:
+        AnthropicLLMClient(transport="vertex")
+        MockV.assert_called_once()
+
+
+def test_unknown_transport_raises():
+    import pytest
+
+    with pytest.raises(ValueError, match="unknown transport"):
+        AnthropicLLMClient(transport="nope")  # type: ignore[arg-type]
