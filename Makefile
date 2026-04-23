@@ -1,4 +1,4 @@
-.PHONY: help install dev dev-docker test test-cell2zarr test-zarr-auth-proxy test-all db-migrate db-revision db-seed openapi dev-keys
+.PHONY: help install dev dev-docker test test-cell2zarr test-zarr-auth-proxy test-zarr-access test-all db-migrate db-revision db-seed openapi dev-keys
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -33,10 +33,14 @@ openapi: ## Regenerate OpenAPI spec
 test-zarr-auth-proxy: ## Run zarr-auth-proxy tests
 	uv run --project packages/zarr-auth-proxy pytest packages/zarr-auth-proxy/tests/ -v
 
+test-zarr-access: ## Run zarr-access tests
+	uv run --project packages/zarr-access pytest packages/zarr-access/tests/ -v
+
 test-all: ## Run all tests across all packages
 	uv run --project packages/api pytest packages/api/tests/ -v
 	uv run --project packages/cell2zarr pytest packages/cell2zarr/tests/ -v
 	uv run --project packages/zarr-auth-proxy pytest packages/zarr-auth-proxy/tests/ -v
+	uv run --project packages/zarr-access pytest packages/zarr-access/tests/ -v
 
 dev-keys: ## Generate RSA key pair for local dev
 	mkdir -p dev-keys

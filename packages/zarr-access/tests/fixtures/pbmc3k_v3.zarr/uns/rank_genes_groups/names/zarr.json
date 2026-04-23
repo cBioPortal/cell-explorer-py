@@ -1,0 +1,118 @@
+{
+  "shape": [
+    100
+  ],
+  "data_type": {
+    "name": "structured",
+    "configuration": {
+      "fields": [
+        [
+          "0",
+          {
+            "name": "fixed_length_utf32",
+            "configuration": {
+              "length_bytes": 36
+            }
+          }
+        ],
+        [
+          "1",
+          {
+            "name": "fixed_length_utf32",
+            "configuration": {
+              "length_bytes": 36
+            }
+          }
+        ],
+        [
+          "2",
+          {
+            "name": "fixed_length_utf32",
+            "configuration": {
+              "length_bytes": 52
+            }
+          }
+        ],
+        [
+          "3",
+          {
+            "name": "fixed_length_utf32",
+            "configuration": {
+              "length_bytes": 52
+            }
+          }
+        ],
+        [
+          "4",
+          {
+            "name": "fixed_length_utf32",
+            "configuration": {
+              "length_bytes": 32
+            }
+          }
+        ],
+        [
+          "5",
+          {
+            "name": "fixed_length_utf32",
+            "configuration": {
+              "length_bytes": 52
+            }
+          }
+        ],
+        [
+          "6",
+          {
+            "name": "fixed_length_utf32",
+            "configuration": {
+              "length_bytes": 32
+            }
+          }
+        ],
+        [
+          "7",
+          {
+            "name": "fixed_length_utf32",
+            "configuration": {
+              "length_bytes": 48
+            }
+          }
+        ]
+      ]
+    }
+  },
+  "chunk_grid": {
+    "name": "regular",
+    "configuration": {
+      "chunk_shape": [
+        100
+      ]
+    }
+  },
+  "chunk_key_encoding": {
+    "name": "default",
+    "configuration": {
+      "separator": "/"
+    }
+  },
+  "fill_value": "MAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+  "codecs": [
+    {
+      "name": "bytes"
+    },
+    {
+      "name": "zstd",
+      "configuration": {
+        "level": 0,
+        "checksum": false
+      }
+    }
+  ],
+  "attributes": {
+    "encoding-type": "rec-array",
+    "encoding-version": "0.2.0"
+  },
+  "zarr_format": 3,
+  "node_type": "array",
+  "storage_transformers": []
+}

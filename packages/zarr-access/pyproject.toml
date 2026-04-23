@@ -1,0 +1,32 @@
+[project]
+name = "zarr-access"
+version = "0.1.0"
+description = "Async zarr store access with optional bearer token auth"
+requires-python = ">=3.12"
+dependencies = [
+    "zarr>=3.1",
+    "fsspec>=2024.0",
+    "aiohttp>=3.9",
+    "anndata>=0.11",
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "scipy>=1.11",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=0.25.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/zarr_access"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
