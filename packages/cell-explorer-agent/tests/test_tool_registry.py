@@ -50,3 +50,10 @@ def test_catalog_filters_by_kind():
     cat.register(Tool(name="u", kind="ui_action", description="", args_schema={}, func=_noop))
     assert [t.name for t in cat.by_kind("data")] == ["d"]
     assert [t.name for t in cat.by_kind("ui_action")] == ["u"]
+
+
+def test_fake_zarr_satisfies_protocol():
+    from cell_explorer_agent.tools.zarr_protocol import ZarrAccess
+    from tests.fakes.fake_zarr import FakeZarrAccess
+
+    assert isinstance(FakeZarrAccess.default(), ZarrAccess)
