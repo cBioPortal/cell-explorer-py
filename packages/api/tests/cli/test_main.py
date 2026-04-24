@@ -1,7 +1,9 @@
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
+from cell_explorer_api.cli.config import AuthConfig, auth_config_path, save_auth_config
 from cell_explorer_api.cli.main import app
 
 
@@ -56,3 +58,31 @@ def test_login_timeout_reports_clearly(monkeypatch, tmp_path):
 
     assert result.exit_code != 0
     assert "timed out" in result.stdout.lower() or "no callback" in result.stdout.lower()
+
+
+def test_logout_when_logged_in(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg = AuthConfig(
+        api_url="http://localhost:8000",
+        access_token="A", refresh_token="R",
+        access_expires_at=datetime.now(timezone.utc),
+        refresh_expires_at=datetime.now(timezone.utc),
+        username="x",
+    )
+    save_auth_config(cfg)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["logout"])
+
+    assert result.exit_code == 0
+    assert "logged out" in result.stdout.lower()
+    assert not auth_config_path().exists()
+
+
+def test_logout_when_not_logged_in(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    runner = CliRunner()
+    result = runner.invoke(app, ["logout"])
+
+    assert result.exit_code == 0
+    assert not auth_config_path().exists()

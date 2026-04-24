@@ -11,6 +11,7 @@ import typer
 from cell_explorer_api.cli.callback_server import CallbackTimeout, start_callback_server
 from cell_explorer_api.cli.config import (
     AuthConfig,
+    delete_auth_config,
     save_auth_config,
 )
 
@@ -79,6 +80,13 @@ def login() -> None:
     )
     save_auth_config(cfg)
     typer.echo(f"✓ Logged in as {cfg.username}")
+
+
+@app.command()
+def logout() -> None:
+    """Delete local auth.json (idempotent)."""
+    delete_auth_config()
+    typer.echo("✓ Logged out.")
 
 
 if __name__ == "__main__":
