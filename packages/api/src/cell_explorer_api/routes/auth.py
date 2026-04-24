@@ -1,7 +1,10 @@
 """Authentication endpoints."""
 
+import re
 import secrets
+import time
 
+import jwt as _jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 
@@ -10,6 +13,9 @@ from cell_explorer_api.auth.keycloak import KeycloakClient
 from cell_explorer_api.auth.models import User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+_LOCALHOST_REDIRECT_RE = re.compile(r"^http://(localhost|127\.0\.0\.1):\d{1,5}(/.*)?$")
+_CLI_STATE_EXP_SECONDS = 600  # 10 minutes
 
 
 def _callback_uri(request: Request) -> str:
@@ -46,6 +52,31 @@ def _require_auth_enabled(request: Request) -> None:
         raise HTTPException(status_code=501, detail="Authentication is not configured")
 
 
+def _require_cli_state_secret(request: Request) -> str:
+    secret = request.app.state.settings.cli_state_secret
+    if not secret:
+        raise HTTPException(
+            status_code=501,
+            detail="CLI_STATE_SECRET is not configured; CLI login is disabled",
+        )
+    return secret
+
+
+def _sign_cli_state(secret: str, redirect_uri: str) -> str:
+    now = int(time.time())
+    return _jwt.encode(
+        {
+            "cli_flow": True,
+            "redirect_uri": redirect_uri,
+            "nonce": secrets.token_urlsafe(16),
+            "iat": now,
+            "exp": now + _CLI_STATE_EXP_SECONDS,
+        },
+        secret,
+        algorithm="HS256",
+    )
+
+
 def _set_token_cookies(request: Request, response: Response, access_token: str, refresh_token: str) -> None:
     """Set access and refresh token cookies on a response."""
     defaults = _cookie_defaults(request)
@@ -71,6 +102,31 @@ async def login(request: Request):
     defaults = _cookie_defaults(request)
     response.set_cookie("cce_state", state, max_age=600, httponly=True, secure=defaults["secure"], samesite="lax", path="/api/auth")
     return response
+
+
+@router.get("/cli-login")
+async def cli_login(request: Request, redirect_uri: str):
+    """Browser OAuth flow for the CLI.
+
+    The CLI passes its localhost callback URL. We validate it, sign it into a
+    state JWT, and redirect to Keycloak. The existing /callback endpoint will
+    detect the CLI flow on the way back.
+    """
+    _require_auth_enabled(request)
+    secret = _require_cli_state_secret(request)
+
+    if not _LOCALHOST_REDIRECT_RE.match(redirect_uri):
+        raise HTTPException(
+            status_code=400,
+            detail="redirect_uri must be a localhost HTTP URL "
+                   "(http://localhost:<port>/... or http://127.0.0.1:<port>/...)",
+        )
+
+    signed_state = _sign_cli_state(secret, redirect_uri)
+    keycloak: KeycloakClient = request.app.state.keycloak
+    api_callback_uri = _callback_uri(request)
+    auth_url = keycloak.authorization_url(redirect_uri=api_callback_uri, state=signed_state)
+    return RedirectResponse(url=auth_url, status_code=307)
 
 
 @router.get("/callback")
