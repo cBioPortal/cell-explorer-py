@@ -210,10 +210,22 @@ def test_repl_single_turn_then_exit(monkeypatch, tmp_path):
 
     fake_agent.run = _run
 
+    # repl uses a single asyncio.Runner across turns (not _build_agent_sync),
+    # so patch make_chat_agent directly. Also stub the DB engine so we don't
+    # actually hit a database.
+    async def _fake_factory(**_):
+        return fake_agent
+
+    async def _fake_dispose():
+        return None
+
+    stub_engine = MagicMock()
+    stub_engine.dispose = _fake_dispose
+
     with patch("cell_explorer_api.cli.main._load_user_sync") as mock_user, \
-         patch("cell_explorer_api.cli.main._build_agent_sync") as mock_build:
+         patch("cell_explorer_api.cli.main.make_chat_agent", side_effect=_fake_factory), \
+         patch("cell_explorer_api.cli.main.create_async_engine", return_value=stub_engine):
         mock_user.return_value = MagicMock(roles=[], username="u")
-        mock_build.return_value = fake_agent
 
         runner = CliRunner()
         # Simulate stdin: one question, then /exit.

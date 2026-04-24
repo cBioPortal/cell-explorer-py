@@ -301,7 +301,13 @@ def repl(
     dataset: str = typer.Argument(..., help="Dataset slug."),
     verbose: bool = typer.Option(False, "-v", "--verbose"),
 ) -> None:
-    """Interactive multi-turn chat REPL for one dataset."""
+    """Interactive multi-turn chat REPL for one dataset.
+
+    Uses a single asyncio.Runner for the whole session so the zarr store's
+    aiohttp session (bound to the loop at construction time) remains usable
+    across all turns. Using asyncio.run() per turn would close the loop after
+    the first turn and break subsequent tool calls.
+    """
     try:
         user = _load_user_sync()
     except NotLoggedInError:
@@ -311,78 +317,96 @@ def repl(
         typer.echo("error: session expired. Run 'cell-explorer-chat login' again.")
         raise typer.Exit(code=ERR_SESSION_EXPIRED)
 
-    try:
-        agent = _build_agent_sync(user, dataset)
-    except ChatSessionError as exc:
-        _exit_for_chat_session_error(exc)
-
     from cell_explorer_agent.messages import AssistantMessage
 
-    ctx = agent.dataset_ctx
-    typer.echo(
-        f"Dataset {ctx.slug} — {ctx.n_obs} cells × {ctx.n_var} genes "
-        f"— as {getattr(user, 'username', 'unknown')}"
-    )
-    typer.echo("(type /help for commands, /exit to quit)")
-    typer.echo("")
-
-    history: list = []
-
-    while True:
+    async def _build_agent_async():
+        settings = Settings()
+        engine = create_async_engine(settings.effective_database_url, echo=False)
         try:
-            line = input("> ").strip()
-        except EOFError:
-            typer.echo("")
-            return
-        except KeyboardInterrupt:
-            typer.echo("^C")
-            continue
+            from sqlalchemy.orm import sessionmaker
+            from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
+            session_factory = sessionmaker(
+                bind=engine,
+                class_=SQLModelAsyncSession,
+                expire_on_commit=False,
+            )
+            async with session_factory() as session:
+                return await make_chat_agent(
+                    user=user, dataset_slug=dataset, db=session, settings=settings,
+                )
+        finally:
+            # Drop the DB engine; the zarr store has its own aiohttp session
+            # bound to this loop and that must stay alive for subsequent turns.
+            await engine.dispose()
 
-        if not line:
-            continue
-
-        if line.startswith("/"):
-            cmd = line[1:].lower()
-            if cmd in ("exit", "quit", "q"):
-                return
-            if cmd == "clear":
-                history = []
-                typer.echo("(history cleared)")
-                continue
-            if cmd == "help":
-                typer.echo("Commands: /help  /clear  /exit (aliases: /quit /q)")
-                continue
-            typer.echo(f"unknown command: /{cmd}")
-            continue
-
-        history.append(UserMessage(content=line))
-
-        # Run one turn, accumulating assistant text for history.
+    async def _run_turn(agent, history: list) -> str:
         assistant_text_parts: list[str] = []
-
-        async def _one_turn():
-            async for event in agent.run(messages=history):
-                s = render_event_line(event, verbose=verbose)
-                if s:
-                    if isinstance(event, TextDelta):
-                        sys.stdout.write(s)
-                        sys.stdout.flush()
-                    else:
-                        sys.stdout.write("\n")
-                        sys.stdout.write(s)
-                        sys.stdout.write("\n")
+        async for event in agent.run(messages=history):
+            s = render_event_line(event, verbose=verbose)
+            if s:
                 if isinstance(event, TextDelta):
-                    assistant_text_parts.append(event.text)
-            sys.stdout.write("\n\n")
-            sys.stdout.flush()
+                    sys.stdout.write(s)
+                    sys.stdout.flush()
+                else:
+                    sys.stdout.write("\n")
+                    sys.stdout.write(s)
+                    sys.stdout.write("\n")
+            if isinstance(event, TextDelta):
+                assistant_text_parts.append(event.text)
+        sys.stdout.write("\n\n")
+        sys.stdout.flush()
+        return "".join(assistant_text_parts)
 
+    with asyncio.Runner() as runner:
         try:
-            asyncio.run(_one_turn())
-        except KeyboardInterrupt:
-            typer.echo("\n^C")
-            continue
+            agent = runner.run(_build_agent_async())
+        except ChatSessionError as exc:
+            _exit_for_chat_session_error(exc)
 
-        history.append(AssistantMessage(text="".join(assistant_text_parts)))
+        ctx = agent.dataset_ctx
+        typer.echo(
+            f"Dataset {ctx.slug} — {ctx.n_obs} cells × {ctx.n_var} genes "
+            f"— as {getattr(user, 'username', 'unknown')}"
+        )
+        typer.echo("(type /help for commands, /exit to quit)")
+        typer.echo("")
+
+        history: list = []
+
+        while True:
+            try:
+                line = input("> ").strip()
+            except EOFError:
+                typer.echo("")
+                return
+            except KeyboardInterrupt:
+                typer.echo("^C")
+                continue
+
+            if not line:
+                continue
+
+            if line.startswith("/"):
+                cmd = line[1:].lower()
+                if cmd in ("exit", "quit", "q"):
+                    return
+                if cmd == "clear":
+                    history = []
+                    typer.echo("(history cleared)")
+                    continue
+                if cmd == "help":
+                    typer.echo("Commands: /help  /clear  /exit (aliases: /quit /q)")
+                    continue
+                typer.echo(f"unknown command: /{cmd}")
+                continue
+
+            history.append(UserMessage(content=line))
+            try:
+                assistant_text = runner.run(_run_turn(agent, history))
+            except KeyboardInterrupt:
+                typer.echo("\n^C")
+                continue
+            history.append(AssistantMessage(text=assistant_text))
 
 
 if __name__ == "__main__":
