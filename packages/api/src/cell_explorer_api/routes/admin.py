@@ -76,6 +76,10 @@ class DatasetAdminResponse(BaseModel):
     required_roles: list[str]
 
 
+class DatasetAdminListResponse(BaseModel):
+    datasets: list[DatasetAdminResponse]
+
+
 # --- Datasource routes ---
 
 
@@ -145,6 +149,27 @@ async def update_datasource(
 
 
 # --- Dataset routes ---
+
+
+@router.get("/datasets")
+async def list_datasets_admin(
+    db: AsyncSession = Depends(get_db),
+) -> DatasetAdminListResponse:
+    result = await db.exec(select(Dataset))
+    datasets = [
+        DatasetAdminResponse(
+            id=str(dataset.id),
+            datasource_id=str(dataset.datasource_id),
+            name=dataset.name,
+            slug=dataset.slug,
+            path=dataset.path,
+            description=dataset.description,
+            is_public=dataset.is_public,
+            required_roles=dataset.required_roles,
+        )
+        for dataset in result.all()
+    ]
+    return DatasetAdminListResponse(datasets=datasets)
 
 
 @router.post("/datasets", status_code=201)
