@@ -13,6 +13,7 @@ dependencies = [
     "alembic>=1.15.0",
     "aiosqlite>=0.21.0",
     "greenlet>=3.4.0",
+    "typer>=0.15",
 ]
 
 [project.optional-dependencies]

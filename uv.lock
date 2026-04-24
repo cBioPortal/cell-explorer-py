@@ -382,7 +382,6 @@ dependencies = [
     { name = "numpy" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
-    { name = "typer" },
 ]
 
 [package.optional-dependencies]
@@ -405,7 +404,6 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.8" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.25.0" },
-    { name = "typer", specifier = ">=0.15" },
 ]
 provides-extras = ["test"]
 
@@ -425,6 +423,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pyjwt", extra = ["crypto"] },
     { name = "sqlmodel" },
+    { name = "typer" },
     { name = "uvicorn" },
 ]
 
@@ -446,6 +445,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'test'", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.25.0" },
     { name = "sqlmodel", specifier = ">=0.0.24" },
+    { name = "typer", specifier = ">=0.15" },
     { name = "uvicorn", specifier = ">=0.41.0" },
 ]
 provides-extras = ["test"]
