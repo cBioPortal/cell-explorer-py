@@ -17,6 +17,25 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 _LOCALHOST_REDIRECT_RE = re.compile(r"^http://(localhost|127\.0\.0\.1):\d{1,5}(/.*)?$")
 _CLI_STATE_EXP_SECONDS = 600  # 10 minutes
 
+_CLI_SUCCESS_HTML = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Logged in</title>
+<style>body{{font-family:system-ui,sans-serif;text-align:center;padding:4em;color:#333}}</style>
+</head><body>
+<h2>Successfully logged in</h2>
+<p>You can close this tab and return to your terminal.</p>
+<script>
+  fetch({redirect_uri!r}, {{
+    method: "POST",
+    headers: {{"Content-Type": "application/json"}},
+    body: JSON.stringify({tokens_json})
+  }}).then(() => {{
+    document.body.innerHTML += "<p style='color:#080'>Terminal ready.</p>";
+  }}).catch(() => {{
+    document.body.innerHTML += "<p style='color:#c00'>Could not reach the CLI. Is it still running?</p>";
+  }});
+</script>
+</body></html>"""
+
 
 def _callback_uri(request: Request) -> str:
     """Build the OAuth callback URI, respecting proxy headers."""
@@ -77,6 +96,22 @@ def _sign_cli_state(secret: str, redirect_uri: str) -> str:
     )
 
 
+def _decode_cli_state(state: str, secret: str) -> dict | None:
+    """Return decoded state dict if this is a valid CLI-flow state; else None.
+
+    Raises HTTPException(400) if the state decodes but is expired.
+    """
+    try:
+        decoded = _jwt.decode(state, secret, algorithms=["HS256"])
+    except _jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=400, detail="CLI login state expired")
+    except _jwt.InvalidTokenError:
+        return None
+    if decoded.get("cli_flow") is not True:
+        return None
+    return decoded
+
+
 def _set_token_cookies(request: Request, response: Response, access_token: str, refresh_token: str) -> None:
     """Set access and refresh token cookies on a response."""
     defaults = _cookie_defaults(request)
@@ -134,6 +169,27 @@ async def callback(request: Request, code: str, state: str):
     """Handle Keycloak callback — exchange code for tokens."""
     _require_auth_enabled(request)
     keycloak: KeycloakClient = request.app.state.keycloak
+
+    # Try CLI flow first (state is a signed JWT).
+    settings = request.app.state.settings
+    if settings.cli_state_secret:
+        cli_state = _decode_cli_state(state, settings.cli_state_secret)
+        if cli_state is not None:
+            redirect_uri = cli_state["redirect_uri"]
+            tokens = await keycloak.exchange_code(code, _callback_uri(request))
+            import json as _json
+            tokens_payload = {
+                "access_token": tokens["access_token"],
+                "refresh_token": tokens["refresh_token"],
+                "expires_in": tokens.get("expires_in", 300),
+            }
+            html = _CLI_SUCCESS_HTML.format(
+                redirect_uri=redirect_uri,
+                tokens_json=_json.dumps(tokens_payload),
+            )
+            return Response(content=html, media_type="text/html", status_code=200)
+
+    # Browser flow (existing path, unchanged semantics).
     expected_state = request.cookies.get("cce_state")
     if not expected_state or state != expected_state:
         return Response(status_code=400, content="Invalid state parameter")

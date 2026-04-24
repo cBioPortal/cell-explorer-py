@@ -114,3 +114,59 @@ def test_cli_login_requires_cli_state_secret():
     )
     assert resp.status_code == 501
     assert "CLI_STATE_SECRET" in resp.text
+
+
+def test_callback_cli_flow_returns_html_with_tokens():
+    client, fake_kc, settings = _make_client()
+    fake_kc.exchange_code = AsyncMock(return_value={
+        "access_token": "ACC123",
+        "refresh_token": "REF456",
+        "expires_in": 300,
+    })
+
+    # Mint a valid state as the /cli-login endpoint would
+    state = _sign_state_for_test(settings.cli_state_secret, "http://localhost:53412/callback")
+
+    resp = client.get(
+        "/api/auth/callback",
+        params={"code": "code123", "state": state},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers["content-type"]
+    # Tokens are embedded in the page for the JS fetch
+    assert "ACC123" in resp.text
+    assert "REF456" in resp.text
+    assert "http://localhost:53412/callback" in resp.text
+    fake_kc.exchange_code.assert_awaited_once()
+
+
+def test_callback_expired_cli_state_rejected():
+    client, fake_kc, settings = _make_client()
+    expired = _sign_state_for_test(
+        settings.cli_state_secret, "http://localhost:53412/callback", exp_offset=-60
+    )
+    resp = client.get(
+        "/api/auth/callback",
+        params={"code": "c", "state": expired},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 400
+    assert "expired" in resp.text.lower() or "invalid" in resp.text.lower()
+    fake_kc.exchange_code.assert_not_called()
+
+
+def _sign_state_for_test(secret: str, redirect_uri: str, *, exp_offset: int = 600) -> str:
+    import time as _time
+    now = int(_time.time())
+    return jwt.encode(
+        {
+            "cli_flow": True,
+            "redirect_uri": redirect_uri,
+            "nonce": "test-nonce",
+            "iat": now,
+            "exp": now + exp_offset,
+        },
+        secret,
+        algorithm="HS256",
+    )
