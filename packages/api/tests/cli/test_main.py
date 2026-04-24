@@ -187,3 +187,37 @@ def test_ask_dataset_not_found(monkeypatch, tmp_path):
 
     assert result.exit_code == 2
     assert "nope" in result.stdout.lower()
+
+
+def test_repl_single_turn_then_exit(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg = AuthConfig(
+        api_url="http://localhost:8000",
+        access_token="A", refresh_token="R",
+        access_expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+        refresh_expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+        username="u",
+    )
+    save_auth_config(cfg)
+
+    fake_agent = MagicMock()
+    fake_agent.dataset_ctx = MagicMock(slug="pbmc3k", n_obs=100, n_var=50)
+
+    async def _run(**_):
+        from cell_explorer_agent.events import Done, TextDelta, TokenUsage
+        yield TextDelta(text="answer 1")
+        yield Done(usage=TokenUsage(input_tokens=1, output_tokens=1))
+
+    fake_agent.run = _run
+
+    with patch("cell_explorer_api.cli.main._load_user_sync") as mock_user, \
+         patch("cell_explorer_api.cli.main._build_agent_sync") as mock_build:
+        mock_user.return_value = MagicMock(roles=[], username="u")
+        mock_build.return_value = fake_agent
+
+        runner = CliRunner()
+        # Simulate stdin: one question, then /exit.
+        result = runner.invoke(app, ["repl", "pbmc3k"], input="what?\n/exit\n")
+
+    assert result.exit_code == 0, result.stdout
+    assert "answer 1" in result.stdout

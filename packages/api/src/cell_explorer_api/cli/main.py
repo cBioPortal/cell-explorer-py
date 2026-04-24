@@ -293,5 +293,94 @@ def ask(
     raise typer.Exit(code=exit_code)
 
 
+@app.command()
+def repl(
+    dataset: str = typer.Argument(..., help="Dataset slug."),
+    verbose: bool = typer.Option(False, "-v", "--verbose"),
+) -> None:
+    """Interactive multi-turn chat REPL for one dataset."""
+    try:
+        user = _load_user_sync()
+    except NotLoggedInError:
+        typer.echo("error: not logged in. Run 'cell-explorer-chat login'.")
+        raise typer.Exit(code=ERR_NOT_LOGGED_IN)
+    except SessionExpiredError:
+        typer.echo("error: session expired. Run 'cell-explorer-chat login' again.")
+        raise typer.Exit(code=ERR_SESSION_EXPIRED)
+
+    try:
+        agent = _build_agent_sync(user, dataset)
+    except ChatSessionError as exc:
+        _exit_for_chat_session_error(exc)
+
+    from cell_explorer_agent.messages import AssistantMessage
+
+    ctx = agent.dataset_ctx
+    typer.echo(
+        f"Dataset {ctx.slug} — {ctx.n_obs} cells × {ctx.n_var} genes "
+        f"— as {getattr(user, 'username', 'unknown')}"
+    )
+    typer.echo("(type /help for commands, /exit to quit)")
+    typer.echo("")
+
+    history: list = []
+
+    while True:
+        try:
+            line = input("> ").strip()
+        except EOFError:
+            typer.echo("")
+            return
+        except KeyboardInterrupt:
+            typer.echo("^C")
+            continue
+
+        if not line:
+            continue
+
+        if line.startswith("/"):
+            cmd = line[1:].lower()
+            if cmd in ("exit", "quit", "q"):
+                return
+            if cmd == "clear":
+                history = []
+                typer.echo("(history cleared)")
+                continue
+            if cmd == "help":
+                typer.echo("Commands: /help  /clear  /exit (aliases: /quit /q)")
+                continue
+            typer.echo(f"unknown command: /{cmd}")
+            continue
+
+        history.append(UserMessage(content=line))
+
+        # Run one turn, accumulating assistant text for history.
+        assistant_text_parts: list[str] = []
+
+        async def _one_turn():
+            async for event in agent.run(messages=history):
+                s = render_event_line(event, verbose=verbose)
+                if s:
+                    if isinstance(event, TextDelta):
+                        sys.stdout.write(s)
+                        sys.stdout.flush()
+                    else:
+                        sys.stdout.write("\n")
+                        sys.stdout.write(s)
+                        sys.stdout.write("\n")
+                if isinstance(event, TextDelta):
+                    assistant_text_parts.append(event.text)
+            sys.stdout.write("\n\n")
+            sys.stdout.flush()
+
+        try:
+            asyncio.run(_one_turn())
+        except KeyboardInterrupt:
+            typer.echo("\n^C")
+            continue
+
+        history.append(AssistantMessage(text="".join(assistant_text_parts)))
+
+
 if __name__ == "__main__":
     app()
