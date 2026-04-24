@@ -37,8 +37,8 @@ class AnnDataZarrAccess:
         return list(self._var_names_cache)
 
     async def obs_column(self, name: str) -> ObsColumn:
-        series = await self.store.obs_column(name)
-        return _series_to_obs_column(name, series)
+        raw = await self.store.obs_column(name)
+        return _decode_col_to_obs_column(name, raw)
 
     async def gene_index(self, gene: str) -> int:
         var_df = await self.store.var()
@@ -60,8 +60,8 @@ class AnnDataZarrAccess:
         if self._obs_columns_cache is None:
             specs: list[ObsColumnSpec] = []
             for name in self.store.obs_columns:
-                series = await self.store.obs_column(name)
-                col = _series_to_obs_column(name, series)
+                raw = await self.store.obs_column(name)
+                col = _decode_col_to_obs_column(name, raw)
                 specs.append(ObsColumnSpec(
                     name=col.name,
                     dtype=col.dtype,
@@ -71,28 +71,32 @@ class AnnDataZarrAccess:
         return list(self._obs_columns_cache)
 
 
-def _series_to_obs_column(name: str, series: pd.Series) -> ObsColumn:
-    """Translate a pandas Series (or Categorical-backed Series) into ObsColumn."""
-    if isinstance(series.dtype, pd.CategoricalDtype):
-        cat = series.values
-        # pandas Categorical has .codes (int) and .categories (Index)
+def _decode_col_to_obs_column(name: str, data) -> ObsColumn:
+    """Translate zarr_access.decode_column output into ObsColumn.
+
+    decode_column returns `np.ndarray | pd.Categorical`:
+    - `pd.Categorical` → categorical, with integer codes + string category labels.
+    - numeric `np.ndarray` → numeric.
+    - anything else `np.ndarray` (object/string) → string.
+    """
+    if isinstance(data, pd.Categorical):
         return ObsColumn(
             name=name,
             dtype="categorical",
-            values=np.asarray(cat.codes),
-            categories=[str(c) for c in cat.categories],
+            values=np.asarray(data.codes),
+            categories=[str(c) for c in data.categories],
         )
-    if pd.api.types.is_numeric_dtype(series.dtype):
+    arr = np.asarray(data)
+    if np.issubdtype(arr.dtype, np.number):
         return ObsColumn(
             name=name,
             dtype="numeric",
-            values=np.asarray(series.values, dtype="float64"),
+            values=arr.astype("float64"),
             categories=None,
         )
-    # Everything else — treat as string
     return ObsColumn(
         name=name,
         dtype="string",
-        values=np.asarray(series.values, dtype=object),
+        values=arr.astype(object),
         categories=None,
     )

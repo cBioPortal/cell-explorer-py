@@ -57,12 +57,13 @@ import numpy as np
 
 @pytest.mark.asyncio
 async def test_obs_column_categorical():
+    # zarr_access.decode_column returns a raw pd.Categorical (not wrapped in Series).
     store = _make_fake_anndata_store(n_obs=5)
-    series = pd.Series(
-        pd.Categorical(["T cell", "B cell", "T cell", "Monocyte", "B cell"],
-                       categories=["T cell", "B cell", "Monocyte"])
+    cat = pd.Categorical(
+        ["T cell", "B cell", "T cell", "Monocyte", "B cell"],
+        categories=["T cell", "B cell", "Monocyte"],
     )
-    store.obs_column = AsyncMock(return_value=series)
+    store.obs_column = AsyncMock(return_value=cat)
 
     adapter = AnnDataZarrAccess(store)
     col = await adapter.obs_column("cell_type")
@@ -74,9 +75,10 @@ async def test_obs_column_categorical():
 
 @pytest.mark.asyncio
 async def test_obs_column_numeric():
+    # zarr_access.decode_column returns np.ndarray for non-categorical cols.
     store = _make_fake_anndata_store(n_obs=3)
-    series = pd.Series([1.5, 2.5, 3.5], dtype="float32")
-    store.obs_column = AsyncMock(return_value=series)
+    arr = np.array([1.5, 2.5, 3.5], dtype="float32")
+    store.obs_column = AsyncMock(return_value=arr)
 
     adapter = AnnDataZarrAccess(store)
     col = await adapter.obs_column("n_counts")
@@ -89,8 +91,8 @@ async def test_obs_column_numeric():
 @pytest.mark.asyncio
 async def test_obs_column_string():
     store = _make_fake_anndata_store(n_obs=3)
-    series = pd.Series(["alpha", "beta", "gamma"], dtype="object")
-    store.obs_column = AsyncMock(return_value=series)
+    arr = np.array(["alpha", "beta", "gamma"], dtype=object)
+    store.obs_column = AsyncMock(return_value=arr)
 
     adapter = AnnDataZarrAccess(store)
     col = await adapter.obs_column("sample_id")
@@ -105,9 +107,9 @@ async def test_obs_columns_caches_across_calls():
     store = _make_fake_anndata_store()
     # obs_columns on the real AnnDataStore is a property (list[str]).
     store.obs_columns = ["cell_type", "n_counts"]
-    # And obs_column returns a Series per column.
-    categorical = pd.Series(pd.Categorical(["A", "B"], categories=["A", "B"]))
-    numeric = pd.Series([1.0, 2.0], dtype="float32")
+    # decode_column returns pd.Categorical or np.ndarray directly.
+    categorical = pd.Categorical(["A", "B"], categories=["A", "B"])
+    numeric = np.array([1.0, 2.0], dtype="float32")
     store.obs_column = AsyncMock(side_effect=[categorical, numeric, categorical, numeric])
 
     adapter = AnnDataZarrAccess(store)
@@ -155,11 +157,11 @@ async def test_gene_column_delegates_to_gene_expression():
 @pytest.mark.asyncio
 async def test_obs_mask_categorical():
     store = _make_fake_anndata_store(n_obs=5)
-    series = pd.Series(
-        pd.Categorical(["T cell", "B cell", "T cell", "Monocyte", "B cell"],
-                       categories=["T cell", "B cell", "Monocyte"])
+    cat = pd.Categorical(
+        ["T cell", "B cell", "T cell", "Monocyte", "B cell"],
+        categories=["T cell", "B cell", "Monocyte"],
     )
-    store.obs_column = AsyncMock(return_value=series)
+    store.obs_column = AsyncMock(return_value=cat)
     adapter = AnnDataZarrAccess(store)
 
     mask = await adapter.obs_mask("cell_type", "T cell")
@@ -169,7 +171,7 @@ async def test_obs_mask_categorical():
 @pytest.mark.asyncio
 async def test_obs_mask_rejects_numeric():
     store = _make_fake_anndata_store(n_obs=3)
-    store.obs_column = AsyncMock(return_value=pd.Series([1.0, 2.0, 3.0]))
+    store.obs_column = AsyncMock(return_value=np.array([1.0, 2.0, 3.0]))
     adapter = AnnDataZarrAccess(store)
 
     with pytest.raises(ValueError, match="categorical"):

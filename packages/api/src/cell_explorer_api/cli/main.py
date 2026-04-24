@@ -122,7 +122,10 @@ async def _load_user_from_auth(settings: Settings) -> _User:
     await keycloak.fetch_jwks()
     cfg = await ensure_fresh_access_token(cfg, keycloak)
     user_obj = keycloak.decode_token(cfg.access_token)
-    return _User(username=user_obj.username, roles=list(user_obj.roles))
+    # The auth.models.User has sub/name/email/roles but no `username` field.
+    # Compute a display value from whichever fields are populated.
+    display = user_obj.email or user_obj.name or user_obj.sub
+    return _User(username=display, roles=list(user_obj.roles))
 
 
 def _list_datasets_sync() -> list[dict]:
