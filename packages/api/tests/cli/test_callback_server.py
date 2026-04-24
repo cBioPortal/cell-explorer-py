@@ -47,3 +47,47 @@ def test_callback_server_ignores_wrong_path():
 
     with pytest.raises(CallbackTimeout):
         wait()
+
+
+def test_callback_server_handles_cors_preflight():
+    """Browser sends OPTIONS preflight before cross-origin POST."""
+    import urllib.request
+
+    port, wait = start_callback_server(path="/callback", timeout_s=1)
+    req = urllib.request.Request(
+        f"http://localhost:{port}/callback",
+        method="OPTIONS",
+        headers={
+            "Origin": "http://localhost:8001",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "Content-Type",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=2) as resp:
+        assert resp.status == 204
+        assert resp.headers.get("Access-Control-Allow-Origin") == "*"
+        assert "POST" in (resp.headers.get("Access-Control-Allow-Methods") or "")
+
+    # Must still time out — preflight isn't a real callback
+    with pytest.raises(CallbackTimeout):
+        wait()
+
+
+def test_callback_server_post_response_includes_cors():
+    """The successful POST response must also carry CORS headers."""
+    import urllib.request
+
+    port, wait = start_callback_server(path="/callback", timeout_s=2)
+    body = json.dumps({"access_token": "A", "refresh_token": "R", "expires_in": 300}).encode()
+    req = urllib.request.Request(
+        f"http://localhost:{port}/callback",
+        data=body,
+        headers={"Content-Type": "application/json", "Origin": "http://localhost:8001"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=2) as resp:
+        assert resp.status == 204
+        assert resp.headers.get("Access-Control-Allow-Origin") == "*"
+
+    tokens = wait()
+    assert tokens["access_token"] == "A"

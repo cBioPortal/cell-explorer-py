@@ -27,10 +27,23 @@ def start_callback_server(
     result: dict = {}
     result_event = threading.Event()
 
+    def _send_cors_headers(handler: BaseHTTPRequestHandler) -> None:
+        handler.send_header("Access-Control-Allow-Origin", "*")
+        handler.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        handler.send_header("Access-Control-Allow-Headers", "Content-Type")
+
     class _Handler(BaseHTTPRequestHandler):
+        def do_OPTIONS(self):  # noqa: N802
+            # CORS preflight — browser sends this before the cross-origin POST
+            # from the API's localhost:8001 success page to our localhost:<port>.
+            self.send_response(204)
+            _send_cors_headers(self)
+            self.end_headers()
+
         def do_POST(self):  # noqa: N802
             if self.path != path:
                 self.send_response(404)
+                _send_cors_headers(self)
                 self.end_headers()
                 return
             try:
@@ -39,10 +52,12 @@ def start_callback_server(
                 data = json.loads(body)
             except Exception:
                 self.send_response(400)
+                _send_cors_headers(self)
                 self.end_headers()
                 return
             result.update(data)
             self.send_response(204)
+            _send_cors_headers(self)
             self.end_headers()
             result_event.set()
 
