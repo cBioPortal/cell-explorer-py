@@ -123,3 +123,54 @@ async def test_obs_columns_caches_across_calls():
     assert specs_first[0].cardinality == 2
     assert specs_first[1].dtype == "numeric"
     assert specs_first[1].cardinality is None
+
+
+@pytest.mark.asyncio
+async def test_gene_index():
+    store = _make_fake_anndata_store(var_names=["CD8A", "CD4", "MS4A1"])
+    adapter = AnnDataZarrAccess(store)
+    assert await adapter.gene_index("CD4") == 1
+
+
+@pytest.mark.asyncio
+async def test_gene_index_unknown_gene_raises_keyerror():
+    store = _make_fake_anndata_store(var_names=["CD8A"])
+    adapter = AnnDataZarrAccess(store)
+    with pytest.raises(KeyError):
+        await adapter.gene_index("NOT_A_GENE")
+
+
+@pytest.mark.asyncio
+async def test_gene_column_delegates_to_gene_expression():
+    store = _make_fake_anndata_store()
+    store.gene_expression = AsyncMock(return_value=np.array([0.1, 0.2, 0.3]))
+    adapter = AnnDataZarrAccess(store)
+
+    values = await adapter.gene_column("CD8A")
+
+    store.gene_expression.assert_awaited_once_with("CD8A")
+    np.testing.assert_allclose(values, [0.1, 0.2, 0.3])
+
+
+@pytest.mark.asyncio
+async def test_obs_mask_categorical():
+    store = _make_fake_anndata_store(n_obs=5)
+    series = pd.Series(
+        pd.Categorical(["T cell", "B cell", "T cell", "Monocyte", "B cell"],
+                       categories=["T cell", "B cell", "Monocyte"])
+    )
+    store.obs_column = AsyncMock(return_value=series)
+    adapter = AnnDataZarrAccess(store)
+
+    mask = await adapter.obs_mask("cell_type", "T cell")
+    np.testing.assert_array_equal(mask, np.array([True, False, True, False, False]))
+
+
+@pytest.mark.asyncio
+async def test_obs_mask_rejects_numeric():
+    store = _make_fake_anndata_store(n_obs=3)
+    store.obs_column = AsyncMock(return_value=pd.Series([1.0, 2.0, 3.0]))
+    adapter = AnnDataZarrAccess(store)
+
+    with pytest.raises(ValueError, match="categorical"):
+        await adapter.obs_mask("n_counts", "1.0")

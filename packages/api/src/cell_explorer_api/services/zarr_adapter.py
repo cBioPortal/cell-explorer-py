@@ -40,6 +40,22 @@ class AnnDataZarrAccess:
         series = await self.store.obs_column(name)
         return _series_to_obs_column(name, series)
 
+    async def gene_index(self, gene: str) -> int:
+        var_df = await self.store.var()
+        return var_df.index.get_loc(gene)
+
+    async def gene_column(self, gene: str) -> np.ndarray:
+        return await self.store.gene_expression(gene)
+
+    async def obs_mask(self, obs_col: str, value: str) -> np.ndarray:
+        col = await self.obs_column(obs_col)
+        if col.dtype != "categorical" or col.categories is None:
+            raise ValueError(
+                f"obs_mask requires a categorical column; {obs_col!r} is {col.dtype}"
+            )
+        code = col.categories.index(value)
+        return col.values == code
+
     async def obs_columns(self) -> list[ObsColumnSpec]:
         if self._obs_columns_cache is None:
             specs: list[ObsColumnSpec] = []
