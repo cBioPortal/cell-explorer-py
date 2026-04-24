@@ -188,5 +188,110 @@ def datasets() -> None:
         typer.echo(f"{row['slug']:<12} {row['name']:<30} {access}")
 
 
+import sys
+
+from cell_explorer_agent.events import Done, Error, TextDelta
+from cell_explorer_agent.messages import UserMessage
+
+from cell_explorer_api.services.chat_session import (
+    AccessDeniedError,
+    ChatSessionError,
+    CredentialMintError,
+    DatasetNotFoundError,
+    ZarrUnreachableError,
+    make_chat_agent,
+)
+from cell_explorer_api.cli.render import render_event_line
+
+ERR_DATASET_NOT_FOUND = 2
+ERR_ACCESS_DENIED = 3
+ERR_CREDENTIAL_MINT = 4
+ERR_ZARR_UNREACHABLE = 5
+
+
+def _build_agent_sync(user: "_User", slug: str):
+    """Construct a ChatAgent synchronously. Wraps the async factory."""
+    settings = Settings()
+    engine = create_async_engine(settings.effective_database_url, echo=False)
+
+    from sqlalchemy.orm import sessionmaker
+
+    async def _run():
+        session_factory = sessionmaker(bind=engine, class_=SQLModelAsyncSession, expire_on_commit=False)
+        async with session_factory() as session:
+            return await make_chat_agent(
+                user=user, dataset_slug=slug, db=session, settings=settings,
+            )
+
+    try:
+        return asyncio.run(_run())
+    finally:
+        asyncio.run(engine.dispose())
+
+
+def _exit_for_chat_session_error(exc: ChatSessionError) -> None:
+    if isinstance(exc, DatasetNotFoundError):
+        typer.echo(f"error: {exc}. Run 'cell-explorer-chat datasets'.")
+        raise typer.Exit(code=ERR_DATASET_NOT_FOUND)
+    if isinstance(exc, AccessDeniedError):
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(code=ERR_ACCESS_DENIED)
+    if isinstance(exc, CredentialMintError):
+        typer.echo(f"error: could not mint credentials: {exc}")
+        raise typer.Exit(code=ERR_CREDENTIAL_MINT)
+    if isinstance(exc, ZarrUnreachableError):
+        typer.echo(f"error: could not reach zarr store: {exc}")
+        raise typer.Exit(code=ERR_ZARR_UNREACHABLE)
+    typer.echo(f"error: {exc}")
+    raise typer.Exit(code=1)
+
+
+async def _run_agent_turn(agent, messages, *, verbose: bool) -> int:
+    """Iterate agent events, render each, return exit code (0 normal, 1 on Error)."""
+    exit_code = 0
+    async for event in agent.run(messages=messages):
+        line = render_event_line(event, verbose=verbose)
+        if line:
+            if isinstance(event, TextDelta):
+                sys.stdout.write(line)
+                sys.stdout.flush()
+            else:
+                sys.stdout.write("\n")
+                sys.stdout.write(line)
+                sys.stdout.write("\n")
+        if isinstance(event, Error):
+            exit_code = 1
+    # Ensure newline after final text stream
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+    return exit_code
+
+
+@app.command()
+def ask(
+    dataset: str = typer.Argument(..., help="Dataset slug."),
+    question: str = typer.Argument(..., help="Question to ask."),
+    verbose: bool = typer.Option(False, "-v", "--verbose"),
+) -> None:
+    """Stream a single answer for one question about one dataset, then exit."""
+    try:
+        user = _load_user_sync()
+    except NotLoggedInError:
+        typer.echo("error: not logged in. Run 'cell-explorer-chat login'.")
+        raise typer.Exit(code=ERR_NOT_LOGGED_IN)
+    except SessionExpiredError:
+        typer.echo("error: session expired. Run 'cell-explorer-chat login' again.")
+        raise typer.Exit(code=ERR_SESSION_EXPIRED)
+
+    try:
+        agent = _build_agent_sync(user, dataset)
+    except ChatSessionError as exc:
+        _exit_for_chat_session_error(exc)
+
+    messages = [UserMessage(content=question)]
+    exit_code = asyncio.run(_run_agent_turn(agent, messages, verbose=verbose))
+    raise typer.Exit(code=exit_code)
+
+
 if __name__ == "__main__":
     app()

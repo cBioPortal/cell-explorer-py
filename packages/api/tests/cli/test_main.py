@@ -132,3 +132,58 @@ def test_datasets_not_logged_in(monkeypatch, tmp_path):
 
     assert result.exit_code == 6
     assert "not logged in" in result.stdout.lower()
+
+
+def test_ask_streams_text_and_exits_zero(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg = AuthConfig(
+        api_url="http://localhost:8000",
+        access_token="A", refresh_token="R",
+        access_expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+        refresh_expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+        username="u",
+    )
+    save_auth_config(cfg)
+
+    fake_agent = MagicMock()
+    async def _run(**_):
+        from cell_explorer_agent.events import Done, TextDelta, TokenUsage
+        yield TextDelta(text="the dataset has 100 cells")
+        yield Done(usage=TokenUsage(input_tokens=10, output_tokens=5))
+    fake_agent.run = _run
+
+    with patch("cell_explorer_api.cli.main._load_user_sync") as mock_user, \
+         patch("cell_explorer_api.cli.main._build_agent_sync") as mock_build:
+        mock_user.return_value = MagicMock(roles=["researcher"])
+        mock_build.return_value = fake_agent
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["ask", "pbmc3k", "how big?"])
+
+    assert result.exit_code == 0, result.stdout
+    assert "100 cells" in result.stdout
+
+
+def test_ask_dataset_not_found(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg = AuthConfig(
+        api_url="http://localhost:8000",
+        access_token="A", refresh_token="R",
+        access_expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+        refresh_expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+        username="u",
+    )
+    save_auth_config(cfg)
+
+    from cell_explorer_api.services.chat_session import DatasetNotFoundError
+
+    with patch("cell_explorer_api.cli.main._load_user_sync") as mock_user, \
+         patch("cell_explorer_api.cli.main._build_agent_sync") as mock_build:
+        mock_user.return_value = MagicMock(roles=[])
+        mock_build.side_effect = DatasetNotFoundError("dataset 'nope' not found")
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["ask", "nope", "hi"])
+
+    assert result.exit_code == 2
+    assert "nope" in result.stdout.lower()
