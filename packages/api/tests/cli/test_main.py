@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
@@ -86,3 +86,49 @@ def test_logout_when_not_logged_in(monkeypatch, tmp_path):
 
     assert result.exit_code == 0
     assert not auth_config_path().exists()
+
+
+def test_datasets_lists_accessible(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg = AuthConfig(
+        api_url="http://localhost:8000",
+        access_token="A", refresh_token="R",
+        access_expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+        refresh_expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+        username="researcher@example.com",
+    )
+    save_auth_config(cfg)
+
+    # Patch the in-process dataset loader to return a known list.
+    fake_rows = [
+        {"slug": "pbmc3k", "name": "PBMC 3k", "is_public": True,
+         "required_roles": []},
+        {"slug": "brca", "name": "BRCA", "is_public": False,
+         "required_roles": ["researcher"]},
+    ]
+    with patch("cell_explorer_api.cli.main._list_datasets_sync") as mock_list, \
+         patch("cell_explorer_api.cli.main._load_user_sync") as mock_user:
+        mock_list.return_value = fake_rows
+        mock_user.return_value = MagicMock(roles=["researcher"], username="researcher@example.com")
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["datasets"])
+
+    assert result.exit_code == 0, result.stdout
+    assert "pbmc3k" in result.stdout
+    assert "brca" in result.stdout
+
+
+def test_datasets_not_logged_in(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    from cell_explorer_api.cli.errors import NotLoggedInError
+
+    with patch("cell_explorer_api.cli.main._load_user_sync") as mock_user:
+        mock_user.side_effect = NotLoggedInError("no auth.json")
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["datasets"])
+
+    assert result.exit_code == 6
+    assert "not logged in" in result.stdout.lower()
