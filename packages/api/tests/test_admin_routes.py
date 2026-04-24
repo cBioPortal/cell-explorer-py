@@ -121,6 +121,29 @@ def test_create_dataset(seeded_app):
     assert data["slug"] == "test-atlas"
 
 
+def test_list_datasets_includes_private(seeded_app):
+    ds_id = seeded_app.state.test_datasource_id
+    client = TestClient(seeded_app)
+    client.post(
+        "/api/admin/datasets",
+        json={
+            "datasource_id": ds_id,
+            "name": "Private Atlas",
+            "slug": "private-atlas",
+            "path": "datasets/private.zarr",
+            "is_public": False,
+            "required_roles": ["lab-smith"],
+        },
+        headers=AUTH_HEADER,
+    )
+    response = client.get("/api/admin/datasets", headers=AUTH_HEADER)
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["datasets"]) == 1
+    assert data["datasets"][0]["slug"] == "private-atlas"
+    assert data["datasets"][0]["required_roles"] == ["lab-smith"]
+
+
 def test_create_dataset_duplicate_slug(seeded_app):
     ds_id = seeded_app.state.test_datasource_id
     client = TestClient(seeded_app)
