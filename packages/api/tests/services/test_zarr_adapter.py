@@ -50,3 +50,76 @@ async def test_var_names_from_var_dataframe():
     store = _make_fake_anndata_store(var_names=["CD8A", "CD4", "MS4A1"])
     adapter = AnnDataZarrAccess(store)
     assert await adapter.var_names() == ["CD8A", "CD4", "MS4A1"]
+
+
+import numpy as np
+
+
+@pytest.mark.asyncio
+async def test_obs_column_categorical():
+    store = _make_fake_anndata_store(n_obs=5)
+    series = pd.Series(
+        pd.Categorical(["T cell", "B cell", "T cell", "Monocyte", "B cell"],
+                       categories=["T cell", "B cell", "Monocyte"])
+    )
+    store.obs_column = AsyncMock(return_value=series)
+
+    adapter = AnnDataZarrAccess(store)
+    col = await adapter.obs_column("cell_type")
+
+    assert col.dtype == "categorical"
+    assert col.categories == ["T cell", "B cell", "Monocyte"]
+    np.testing.assert_array_equal(col.values, np.array([0, 1, 0, 2, 1]))
+
+
+@pytest.mark.asyncio
+async def test_obs_column_numeric():
+    store = _make_fake_anndata_store(n_obs=3)
+    series = pd.Series([1.5, 2.5, 3.5], dtype="float32")
+    store.obs_column = AsyncMock(return_value=series)
+
+    adapter = AnnDataZarrAccess(store)
+    col = await adapter.obs_column("n_counts")
+
+    assert col.dtype == "numeric"
+    assert col.categories is None
+    np.testing.assert_allclose(col.values, [1.5, 2.5, 3.5])
+
+
+@pytest.mark.asyncio
+async def test_obs_column_string():
+    store = _make_fake_anndata_store(n_obs=3)
+    series = pd.Series(["alpha", "beta", "gamma"], dtype="object")
+    store.obs_column = AsyncMock(return_value=series)
+
+    adapter = AnnDataZarrAccess(store)
+    col = await adapter.obs_column("sample_id")
+
+    assert col.dtype == "string"
+    assert col.categories is None
+    assert list(col.values) == ["alpha", "beta", "gamma"]
+
+
+@pytest.mark.asyncio
+async def test_obs_columns_caches_across_calls():
+    store = _make_fake_anndata_store()
+    # obs_columns on the real AnnDataStore is a property (list[str]).
+    store.obs_columns = ["cell_type", "n_counts"]
+    # And obs_column returns a Series per column.
+    categorical = pd.Series(pd.Categorical(["A", "B"], categories=["A", "B"]))
+    numeric = pd.Series([1.0, 2.0], dtype="float32")
+    store.obs_column = AsyncMock(side_effect=[categorical, numeric, categorical, numeric])
+
+    adapter = AnnDataZarrAccess(store)
+    specs_first = await adapter.obs_columns()
+    specs_second = await adapter.obs_columns()
+
+    assert specs_first == specs_second
+    # obs_column should have been invoked exactly twice (once per column),
+    # not four times: second call hits the cache.
+    assert store.obs_column.await_count == 2
+    assert [s.name for s in specs_first] == ["cell_type", "n_counts"]
+    assert specs_first[0].dtype == "categorical"
+    assert specs_first[0].cardinality == 2
+    assert specs_first[1].dtype == "numeric"
+    assert specs_first[1].cardinality is None

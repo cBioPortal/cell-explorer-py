@@ -35,3 +35,48 @@ class AnnDataZarrAccess:
             var_df = await self.store.var()
             self._var_names_cache = list(var_df.index)
         return list(self._var_names_cache)
+
+    async def obs_column(self, name: str) -> ObsColumn:
+        series = await self.store.obs_column(name)
+        return _series_to_obs_column(name, series)
+
+    async def obs_columns(self) -> list[ObsColumnSpec]:
+        if self._obs_columns_cache is None:
+            specs: list[ObsColumnSpec] = []
+            for name in self.store.obs_columns:
+                series = await self.store.obs_column(name)
+                col = _series_to_obs_column(name, series)
+                specs.append(ObsColumnSpec(
+                    name=col.name,
+                    dtype=col.dtype,
+                    cardinality=len(col.categories) if col.categories else None,
+                ))
+            self._obs_columns_cache = specs
+        return list(self._obs_columns_cache)
+
+
+def _series_to_obs_column(name: str, series: pd.Series) -> ObsColumn:
+    """Translate a pandas Series (or Categorical-backed Series) into ObsColumn."""
+    if isinstance(series.dtype, pd.CategoricalDtype):
+        cat = series.values
+        # pandas Categorical has .codes (int) and .categories (Index)
+        return ObsColumn(
+            name=name,
+            dtype="categorical",
+            values=np.asarray(cat.codes),
+            categories=[str(c) for c in cat.categories],
+        )
+    if pd.api.types.is_numeric_dtype(series.dtype):
+        return ObsColumn(
+            name=name,
+            dtype="numeric",
+            values=np.asarray(series.values, dtype="float64"),
+            categories=None,
+        )
+    # Everything else — treat as string
+    return ObsColumn(
+        name=name,
+        dtype="string",
+        values=np.asarray(series.values, dtype=object),
+        categories=None,
+    )
