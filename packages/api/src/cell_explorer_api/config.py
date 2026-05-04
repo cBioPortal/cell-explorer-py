@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     # Admin
     admin_api_key: str | None = None
 
+    # CLI integration
+    cli_state_secret: str | None = None
+
     @property
     def log_dir(self) -> Path:
         """Directory for log files."""

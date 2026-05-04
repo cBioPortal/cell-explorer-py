@@ -9,6 +9,7 @@ from cell_explorer_api.auth.models import User
 from cell_explorer_api.auth.optional import optional_auth
 from cell_explorer_api.db import get_db
 from cell_explorer_api.db.models import Dataset, Datasource
+from cell_explorer_api.services.access import user_can_access
 from cell_explorer_api.services.credentials import CredentialError, mint_credentials
 
 router = APIRouter(tags=["datasets"])
@@ -24,17 +25,6 @@ class DatasetResponse(BaseModel):
 
 class DatasetListResponse(BaseModel):
     datasets: list[DatasetResponse]
-
-
-def _user_can_access(dataset: Dataset, user: User | None) -> bool:
-    """Check if user can access a dataset."""
-    if dataset.is_public:
-        return True
-    if user is None:
-        return False
-    if not dataset.required_roles:
-        return False
-    return bool(set(user.roles) & set(dataset.required_roles))
 
 
 def _dataset_to_response(dataset: Dataset) -> DatasetResponse:
@@ -62,7 +52,7 @@ async def list_datasets(
     datasets = []
     for dataset, datasource in result.all():
         dataset.datasource = datasource
-        if _user_can_access(dataset, user):
+        if user_can_access(dataset, user=user):
             datasets.append(_dataset_to_response(dataset))
     return DatasetListResponse(datasets=datasets)
 
@@ -81,7 +71,7 @@ async def get_dataset(
         raise HTTPException(status_code=404, detail="Dataset not found")
     dataset, datasource = row
     dataset.datasource = datasource
-    if not _user_can_access(dataset, user):
+    if not user_can_access(dataset, user=user):
         raise HTTPException(status_code=404, detail="Dataset not found")
     return _dataset_to_response(dataset)
 
