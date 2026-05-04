@@ -16,3 +16,11 @@ dev = [
 # collected together with other packages from the monorepo root (works fine when
 # run via `pytest packages/zarr-access/tests/`).
 addopts = "--import-mode=importlib --ignore=packages/zarr-access"
+# cell-explorer-agent's tests are written without @pytest.mark.asyncio decorators
+# and rely on its package-local asyncio_mode=auto config. When pytest runs from
+# the root, only the root config is read — set auto here too so cross-package
+# runs work. Tests with explicit @pytest.mark.asyncio (e.g. in packages/api)
+# remain valid under auto mode.
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+asyncio_default_test_loop_scope = "function"
