@@ -1,4 +1,4 @@
-.PHONY: help install dev dev-docker test test-cell2zarr test-zarr-auth-proxy test-zarr-access test-all db-migrate db-revision db-seed openapi dev-keys
+.PHONY: help install dev dev-docker test test-cell2zarr test-zarr-auth-proxy test-zarr-access test-all db-migrate db-revision db-seed seed-spectrum openapi dev-keys
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -26,6 +26,9 @@ db-revision: ## Generate a new Alembic migration (usage: make db-revision msg="d
 
 db-seed: ## Seed the database with sample dev data
 	uv run --project packages/api python -m cell_explorer_api.db.seed
+
+seed-spectrum: ## Register the public MSK SPECTRUM TME 2022 dataset (idempotent)
+	uv run --project packages/api python scripts/seed_spectrum.py
 
 openapi: ## Regenerate OpenAPI spec
 	uv run --project packages/api python -m cell_explorer_api.export_openapi > openapi.json
