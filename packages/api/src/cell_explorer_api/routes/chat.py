@@ -57,6 +57,7 @@ class ObsColumnInfo(BaseModel):
     name: str
     dtype: Literal["categorical", "numeric", "string"]
     cardinality: int | None = None
+    values: list[str] | None = None
 
 
 class ContextResponse(BaseModel):
@@ -133,7 +134,12 @@ async def get_chat_context(
         n_obs=ctx.n_obs,
         n_var=ctx.n_var,
         obs_columns=[
-            ObsColumnInfo(name=c.name, dtype=c.dtype, cardinality=c.cardinality)
+            ObsColumnInfo(
+                name=c.name,
+                dtype=c.dtype,
+                cardinality=c.cardinality,
+                values=c.values,
+            )
             for c in ctx.obs_columns
         ],
         embedding_keys=list(ctx.embedding_keys),

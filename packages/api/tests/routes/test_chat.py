@@ -106,6 +106,7 @@ class _FakeObsCol:
     name: str
     dtype: str = "categorical"
     cardinality: int | None = 5
+    values: list[str] | None = None
 
 
 @dataclass
@@ -120,7 +121,9 @@ class _FakeDatasetCtx:
 
     def __post_init__(self):
         if self.obs_columns is None:
-            self.obs_columns = [_FakeObsCol(name="cell_type")]
+            self.obs_columns = [
+                _FakeObsCol(name="cell_type", values=["T", "B", "M", "NK", "Mono"]),
+            ]
         if self.embedding_keys is None:
             self.embedding_keys = ["X_umap"]
 
@@ -177,7 +180,10 @@ def test_get_context_happy_path(seeded_app):
     assert data["description"] == "A public test atlas"
     assert data["n_obs"] == 100
     assert data["n_var"] == 50
-    assert data["obs_columns"] == [{"name": "cell_type", "dtype": "categorical", "cardinality": 5}]
+    assert data["obs_columns"] == [
+        {"name": "cell_type", "dtype": "categorical", "cardinality": 5,
+         "values": ["T", "B", "M", "NK", "Mono"]},
+    ]
     assert data["embedding_keys"] == ["X_umap"]
     assert data["available_tools"] == ["get_dataset_schema"]
 
