@@ -180,3 +180,74 @@ def test_get_context_happy_path(seeded_app):
     assert data["obs_columns"] == [{"name": "cell_type", "dtype": "categorical", "cardinality": 5}]
     assert data["embedding_keys"] == ["X_umap"]
     assert data["available_tools"] == ["get_dataset_schema"]
+
+
+def test_get_context_unauthenticated_returns_401(seeded_app):
+    client = TestClient(seeded_app)
+    # No cookie set.
+    response = client.get("/api/chat/public-atlas/context")
+    assert response.status_code == 401
+
+
+def test_get_context_dataset_not_found_returns_404(seeded_app):
+    from cell_explorer_api.services.chat_session import DatasetNotFoundError
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app)
+
+    async def _make_agent(**_):
+        raise DatasetNotFoundError("dataset 'nope' not found")
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.get("/api/chat/nope/context")
+
+    assert response.status_code == 404
+    assert "nope" in response.json()["detail"]
+
+
+def test_get_context_access_denied_returns_403(seeded_app):
+    from cell_explorer_api.services.chat_session import AccessDeniedError
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app)
+
+    async def _make_agent(**_):
+        raise AccessDeniedError("access denied; required roles: ['admin']")
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.get("/api/chat/public-atlas/context")
+
+    assert response.status_code == 403
+    assert "admin" in response.json()["detail"]
+
+
+def test_get_context_credential_mint_error_returns_502(seeded_app):
+    from cell_explorer_api.services.chat_session import CredentialMintError
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app)
+
+    async def _make_agent(**_):
+        raise CredentialMintError("signing key missing")
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.get("/api/chat/public-atlas/context")
+
+    assert response.status_code == 502
+    assert "credentials" in response.json()["detail"].lower()
+
+
+def test_get_context_zarr_unreachable_returns_502(seeded_app):
+    from cell_explorer_api.services.chat_session import ZarrUnreachableError
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app)
+
+    async def _make_agent(**_):
+        raise ZarrUnreachableError("connection refused")
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.get("/api/chat/public-atlas/context")
+
+    assert response.status_code == 502
+    assert "zarr" in response.json()["detail"].lower()

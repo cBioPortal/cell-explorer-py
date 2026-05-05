@@ -11,7 +11,11 @@ from cell_explorer_api.auth.models import User
 from cell_explorer_api.config import Settings
 from cell_explorer_api.db import get_db
 from cell_explorer_api.services.chat_session import (
+    AccessDeniedError,
     ChatSessionError,
+    CredentialMintError,
+    DatasetNotFoundError,
+    ZarrUnreachableError,
     make_chat_agent,
 )
 
@@ -39,6 +43,21 @@ class ContextResponse(BaseModel):
     available_tools: list[str]
 
 
+def _http_for_chat_session_error(exc: ChatSessionError) -> HTTPException:
+    if isinstance(exc, DatasetNotFoundError):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, AccessDeniedError):
+        return HTTPException(status_code=403, detail=str(exc))
+    if isinstance(exc, CredentialMintError):
+        return HTTPException(
+            status_code=502,
+            detail=f"could not mint datasource credentials: {exc}",
+        )
+    if isinstance(exc, ZarrUnreachableError):
+        return HTTPException(status_code=502, detail=f"could not reach zarr store: {exc}")
+    return HTTPException(status_code=500, detail="internal error")
+
+
 @router.get("/chat/{slug}/context", response_model=ContextResponse)
 async def get_chat_context(
     slug: str,
@@ -50,8 +69,7 @@ async def get_chat_context(
     try:
         agent = await make_chat_agent(user=user, dataset_slug=slug, db=db, settings=settings)
     except ChatSessionError as exc:
-        # Error mapping is fleshed out in Task 3; for now any setup failure is 500.
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise _http_for_chat_session_error(exc) from exc
 
     ctx = agent.dataset_ctx
     return ContextResponse(

@@ -155,11 +155,11 @@ def test_me_sets_refreshed_cookies(auth_client, rsa_keys):
     assert cookie_map["cce_refresh"] == "new-refresh-token-value", "cce_refresh should contain the new refresh token"
 
 
-def test_auth_routes_return_501_without_keycloak():
-    """When KEYCLOAK_URL is not set, auth routes return 501."""
+def test_auth_routes_return_401_without_credentials():
+    """When no credentials are presented, auth routes return 401 regardless of keycloak config."""
     settings = Settings()
     app = create_app(settings)
     client = TestClient(app)
     response = client.get("/api/auth/me")
-    assert response.status_code == 501
-    assert response.json()["detail"] == "Authentication is not configured"
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Not authenticated"
