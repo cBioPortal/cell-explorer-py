@@ -16,6 +16,7 @@ class AgentConfig(BaseSettings):
 
     tool_result_max_bytes: int = Field(default=32_768, ge=1)
     filter_ids_max: int = Field(default=100_000, ge=1)
+    gene_scan_concurrency: int = Field(default=32, ge=1, le=200)
     max_tool_calls_per_turn: int = Field(default=8, ge=1)
 
     daily_msg_budget: int = Field(default=100, ge=1)
