@@ -78,6 +78,7 @@ class FakeZarrAccess:
                 name=c.name,
                 dtype=c.dtype,
                 cardinality=(len(c.categories) if c.categories else None),
+                categories=list(c.categories) if c.categories else None,
             )
             for c in self.obs.values()
         ]
