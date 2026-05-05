@@ -1,11 +1,16 @@
 """HTTP routes for the chat agent (Plan 2a)."""
 
+import asyncio
+from collections.abc import AsyncIterator
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from cell_explorer_agent.events import Error
+from cell_explorer_agent.messages import AssistantMessage, UserMessage
 from cell_explorer_api.auth.dependencies import require_auth
 from cell_explorer_api.auth.models import User
 from cell_explorer_api.config import Settings
@@ -65,6 +70,22 @@ class ContextResponse(BaseModel):
     available_tools: list[str]
 
 
+def _to_agent_messages(messages: list[ChatMessage]):
+    out = []
+    for m in messages:
+        if m.role == "user":
+            out.append(UserMessage(content=m.content))
+        else:
+            out.append(AssistantMessage(text=m.content))
+    return out
+
+
+async def _ndjson_event_stream(agent, messages) -> AsyncIterator[bytes]:
+    """Serialize agent events as NDJSON, one event per \n-terminated line."""
+    async for event in agent.run(messages=messages):
+        yield (event.model_dump_json() + "\n").encode()
+
+
 def _http_for_chat_session_error(exc: ChatSessionError) -> HTTPException:
     if isinstance(exc, DatasetNotFoundError):
         return HTTPException(status_code=404, detail=str(exc))
@@ -117,6 +138,13 @@ async def post_chat_turn(
     user: User = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    # Stub: validation has succeeded by the time we get here. Task 5
-    # replaces this with the streaming agent run.
-    return {"stub": True}
+    settings: Settings = request.app.state.settings
+    try:
+        agent = await make_chat_agent(user=user, dataset_slug=slug, db=db, settings=settings)
+    except ChatSessionError as exc:
+        raise _http_for_chat_session_error(exc) from exc
+
+    return StreamingResponse(
+        _ndjson_event_stream(agent, _to_agent_messages(body.messages)),
+        media_type="application/x-ndjson",
+    )

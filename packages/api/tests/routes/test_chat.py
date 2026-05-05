@@ -323,19 +323,59 @@ def test_post_turn_validation_empty_content(seeded_app):
     assert response.status_code == 422
 
 
-def test_post_turn_stub_accepts_valid_body(seeded_app):
-    """Sanity: a valid body returns the stub's 200 sentinel until Task 5 replaces it."""
+def test_post_turn_streams_ndjson_events(seeded_app):
+    """Fake agent yields a TextDelta + Done; response is parseable NDJSON."""
+    import json as _json
+
+    from cell_explorer_agent.events import Done, TextDelta, TokenUsage
+
     client = TestClient(seeded_app)
     _set_auth_cookie(client, seeded_app)
-    fake = _FakeChatAgent()
+
+    fake = _FakeChatAgent(run_events=[
+        TextDelta(text="hello "),
+        TextDelta(text="world"),
+        Done(usage=TokenUsage(input_tokens=10, output_tokens=2)),
+    ])
 
     async def _make_agent(**_):
         return fake
 
     with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
-        response = client.post("/api/chat/public-atlas/turns", json={
-            "messages": [{"role": "user", "content": "hello"}],
+        with client.stream("POST", "/api/chat/public-atlas/turns", json={
+            "messages": [{"role": "user", "content": "hi"}],
+        }) as r:
+            assert r.status_code == 200
+            assert r.headers["content-type"].startswith("application/x-ndjson")
+            lines = [_json.loads(line) for line in r.iter_lines() if line]
+
+    assert [l["type"] for l in lines] == ["text_delta", "text_delta", "done"]
+    assert lines[0]["text"] == "hello "
+    assert lines[1]["text"] == "world"
+    assert lines[2]["usage"]["input_tokens"] == 10
+
+
+def test_post_turn_dataset_not_found_returns_404(seeded_app):
+    from cell_explorer_api.services.chat_session import DatasetNotFoundError
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app)
+
+    async def _make_agent(**_):
+        raise DatasetNotFoundError("dataset 'nope' not found")
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.post("/api/chat/nope/turns", json={
+            "messages": [{"role": "user", "content": "hi"}],
         })
 
-    assert response.status_code == 200
-    assert response.json() == {"stub": True}
+    assert response.status_code == 404
+    assert "nope" in response.json()["detail"]
+
+
+def test_post_turn_unauthenticated_returns_401(seeded_app):
+    client = TestClient(seeded_app)
+    response = client.post("/api/chat/public-atlas/turns", json={
+        "messages": [{"role": "user", "content": "hi"}],
+    })
+    assert response.status_code == 401
