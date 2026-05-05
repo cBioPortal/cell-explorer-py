@@ -212,24 +212,33 @@ ERR_CREDENTIAL_MINT = 4
 ERR_ZARR_UNREACHABLE = 5
 
 
-def _build_agent_sync(user: "_User", slug: str):
-    """Construct a ChatAgent synchronously. Wraps the async factory."""
-    settings = Settings()
-    engine = create_async_engine(settings.effective_database_url, echo=False)
+async def _build_agent_async(user: "_User", slug: str):
+    """Construct a ChatAgent inside the caller's event loop.
 
+    Both ``ask`` and ``repl`` call this from a single ``asyncio.Runner`` so
+    the zarr store's aiohttp session — created here at agent construction —
+    stays usable for subsequent tool calls in the same loop. Using
+    ``asyncio.run`` here would close the loop on return and break every
+    later HTTPS read.
+    """
     from sqlalchemy.orm import sessionmaker
 
-    async def _run():
-        session_factory = sessionmaker(bind=engine, class_=SQLModelAsyncSession, expire_on_commit=False)
+    settings = Settings()
+    engine = create_async_engine(settings.effective_database_url, echo=False)
+    try:
+        session_factory = sessionmaker(
+            bind=engine,
+            class_=SQLModelAsyncSession,
+            expire_on_commit=False,
+        )
         async with session_factory() as session:
             return await make_chat_agent(
                 user=user, dataset_slug=slug, db=session, settings=settings,
             )
-
-    try:
-        return asyncio.run(_run())
     finally:
-        asyncio.run(engine.dispose())
+        # Drop the DB engine; the agent's zarr store has its own aiohttp
+        # session that must stay alive for subsequent tool calls.
+        await engine.dispose()
 
 
 def _exit_for_chat_session_error(exc: ChatSessionError) -> None:
@@ -286,14 +295,18 @@ def ask(
         typer.echo("error: session expired. Run 'cell-explorer-chat login' again.")
         raise typer.Exit(code=ERR_SESSION_EXPIRED)
 
-    try:
-        agent = _build_agent_sync(user, dataset)
-    except ChatSessionError as exc:
-        _exit_for_chat_session_error(exc)
+    # Single Runner keeps one event loop alive for both agent construction
+    # and the agent's tool calls. asyncio.run() per step would close the loop
+    # between them and break the zarr store's aiohttp session.
+    with asyncio.Runner() as runner:
+        try:
+            agent = runner.run(_build_agent_async(user, dataset))
+        except ChatSessionError as exc:
+            _exit_for_chat_session_error(exc)
 
-    messages = [UserMessage(content=question)]
-    exit_code = asyncio.run(_run_agent_turn(agent, messages, verbose=verbose))
-    raise typer.Exit(code=exit_code)
+        messages = [UserMessage(content=question)]
+        exit_code = runner.run(_run_agent_turn(agent, messages, verbose=verbose))
+        raise typer.Exit(code=exit_code)
 
 
 @app.command()
@@ -319,26 +332,6 @@ def repl(
 
     from cell_explorer_agent.messages import AssistantMessage
 
-    async def _build_agent_async():
-        settings = Settings()
-        engine = create_async_engine(settings.effective_database_url, echo=False)
-        try:
-            from sqlalchemy.orm import sessionmaker
-            from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
-            session_factory = sessionmaker(
-                bind=engine,
-                class_=SQLModelAsyncSession,
-                expire_on_commit=False,
-            )
-            async with session_factory() as session:
-                return await make_chat_agent(
-                    user=user, dataset_slug=dataset, db=session, settings=settings,
-                )
-        finally:
-            # Drop the DB engine; the zarr store has its own aiohttp session
-            # bound to this loop and that must stay alive for subsequent turns.
-            await engine.dispose()
-
     async def _run_turn(agent, history: list) -> str:
         assistant_text_parts: list[str] = []
         async for event in agent.run(messages=history):
@@ -359,7 +352,7 @@ def repl(
 
     with asyncio.Runner() as runner:
         try:
-            agent = runner.run(_build_agent_async())
+            agent = runner.run(_build_agent_async(user, dataset))
         except ChatSessionError as exc:
             _exit_for_chat_session_error(exc)
 

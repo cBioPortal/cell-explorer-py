@@ -152,10 +152,20 @@ def test_ask_streams_text_and_exits_zero(monkeypatch, tmp_path):
         yield Done(usage=TokenUsage(input_tokens=10, output_tokens=5))
     fake_agent.run = _run
 
+    # ask now uses asyncio.Runner with make_chat_agent inline (no _build_agent_sync).
+    async def _fake_factory(**_):
+        return fake_agent
+
+    async def _fake_dispose():
+        return None
+
+    stub_engine = MagicMock()
+    stub_engine.dispose = _fake_dispose
+
     with patch("cell_explorer_api.cli.main._load_user_sync") as mock_user, \
-         patch("cell_explorer_api.cli.main._build_agent_sync") as mock_build:
+         patch("cell_explorer_api.cli.main.make_chat_agent", side_effect=_fake_factory), \
+         patch("cell_explorer_api.cli.main.create_async_engine", return_value=stub_engine):
         mock_user.return_value = MagicMock(roles=["researcher"])
-        mock_build.return_value = fake_agent
 
         runner = CliRunner()
         result = runner.invoke(app, ["ask", "pbmc3k", "how big?"])
@@ -177,10 +187,19 @@ def test_ask_dataset_not_found(monkeypatch, tmp_path):
 
     from cell_explorer_api.services.chat_session import DatasetNotFoundError
 
+    async def _fake_factory_raises(**_):
+        raise DatasetNotFoundError("dataset 'nope' not found")
+
+    async def _fake_dispose():
+        return None
+
+    stub_engine = MagicMock()
+    stub_engine.dispose = _fake_dispose
+
     with patch("cell_explorer_api.cli.main._load_user_sync") as mock_user, \
-         patch("cell_explorer_api.cli.main._build_agent_sync") as mock_build:
+         patch("cell_explorer_api.cli.main.make_chat_agent", side_effect=_fake_factory_raises), \
+         patch("cell_explorer_api.cli.main.create_async_engine", return_value=stub_engine):
         mock_user.return_value = MagicMock(roles=[])
-        mock_build.side_effect = DatasetNotFoundError("dataset 'nope' not found")
 
         runner = CliRunner()
         result = runner.invoke(app, ["ask", "nope", "hi"])
