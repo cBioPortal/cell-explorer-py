@@ -1,4 +1,4 @@
-.PHONY: help install dev dev-docker test test-cell2zarr test-zarr-auth-proxy test-zarr-access test-all db-migrate db-revision db-seed seed-spectrum openapi dev-keys chat-login chat-logout chat-datasets chat-ask chat-repl
+.PHONY: help install dev dev-docker test test-cell2zarr test-zarr-auth-proxy test-zarr-access test-all db-migrate db-revision db-seed seed-spectrum openapi dev-keys chat-login chat-logout chat-datasets chat-ask chat-ask-traced chat-repl
 
 # chat-* targets auto-source .env so the CLI picks up KEYCLOAK_*, CELL_EXPLORER_API_URL, etc.
 WITH_ENV = set -a; [ -f .env ] && . ./.env; set +a;
@@ -65,6 +65,11 @@ chat-datasets: ## List datasets the authenticated user can access
 
 chat-ask: ## Ask one question (usage: make chat-ask SLUG=spectrum Q="how many cells?")
 	@$(WITH_ENV) uv run cell-explorer-chat ask $(SLUG) "$(Q)"
+
+chat-ask-traced: ## Ask + write a zarr HTTP trace (usage: make chat-ask-traced SLUG=... Q="..." [TRACE=path.jsonl])
+	@trace="$(or $(TRACE),trace-$$(date +%Y%m%d-%H%M%S).jsonl)"; \
+	echo "tracing to $$trace"; \
+	$(WITH_ENV) ZARR_ACCESS_TRACE=1 ZARR_ACCESS_TRACE_FILE="$$trace" /usr/bin/time -p uv run cell-explorer-chat ask $(SLUG) "$(Q)"
 
 chat-repl: ## Multi-turn chat REPL (usage: make chat-repl SLUG=spectrum)
 	@$(WITH_ENV) uv run cell-explorer-chat repl $(SLUG)
