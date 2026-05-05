@@ -113,7 +113,7 @@ async def test_gene_expression_summary_unknown_gene(fake_zarr):
 
 
 async def test_top_expressed_genes(fake_zarr):
-    tool = top_expressed_genes_tool(fake_zarr, limit_bytes=32_768)
+    tool = top_expressed_genes_tool(fake_zarr, limit_bytes=32_768, concurrency=4)
     result = await tool.func(obs_column="cell_type", group_value="T cell", n=5)
     assert len(result["genes"]) == 5
     # CD8A should rank highly in T cells
@@ -125,7 +125,7 @@ from cell_explorer_agent.tools.data.compare import compare_groups_tool
 
 
 async def test_compare_groups_returns_top_lfc(fake_zarr):
-    tool = compare_groups_tool(fake_zarr, limit_bytes=32_768)
+    tool = compare_groups_tool(fake_zarr, limit_bytes=32_768, concurrency=4)
     result = await tool.func(
         obs_column="cell_type", group_a="T cell", group_b="B cell", n=5
     )
@@ -138,7 +138,7 @@ async def test_compare_groups_returns_top_lfc(fake_zarr):
 
 
 async def test_compare_groups_unknown_group(fake_zarr):
-    tool = compare_groups_tool(fake_zarr, limit_bytes=32_768)
+    tool = compare_groups_tool(fake_zarr, limit_bytes=32_768, concurrency=4)
     result = await tool.func(
         obs_column="cell_type", group_a="T cell", group_b="Nope", n=5
     )

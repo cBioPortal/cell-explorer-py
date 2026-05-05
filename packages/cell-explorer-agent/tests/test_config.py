@@ -1,3 +1,6 @@
+import pytest
+from pydantic import ValidationError
+
 from cell_explorer_agent.config import AgentConfig
 
 
@@ -20,3 +23,29 @@ def test_overrides_from_env(monkeypatch):
     cfg = AgentConfig()
     assert cfg.llm_model == "claude-haiku-4-5-20251001"
     assert cfg.tool_result_max_bytes == 4096
+
+
+def test_gene_scan_concurrency_default():
+    cfg = AgentConfig()
+    assert cfg.gene_scan_concurrency == 32
+
+
+def test_gene_scan_concurrency_from_env(monkeypatch):
+    monkeypatch.setenv("CHAT_GENE_SCAN_CONCURRENCY", "64")
+    cfg = AgentConfig()
+    assert cfg.gene_scan_concurrency == 64
+
+
+def test_gene_scan_concurrency_rejects_zero():
+    with pytest.raises(ValidationError):
+        AgentConfig(gene_scan_concurrency=0)
+
+
+def test_gene_scan_concurrency_rejects_too_large():
+    with pytest.raises(ValidationError):
+        AgentConfig(gene_scan_concurrency=201)
+
+
+def test_gene_scan_concurrency_accepts_max():
+    cfg = AgentConfig(gene_scan_concurrency=200)
+    assert cfg.gene_scan_concurrency == 200

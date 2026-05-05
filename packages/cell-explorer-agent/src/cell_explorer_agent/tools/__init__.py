@@ -39,8 +39,8 @@ def build_v1_catalog(z: ZarrAccess, *, config: AgentConfig) -> ToolCatalog:
     cat.register(cluster_stats_tool(z, limit_bytes=lim))
     cat.register(search_genes_tool(z, limit_bytes=lim))
     cat.register(gene_expression_summary_tool(z, limit_bytes=lim))
-    cat.register(top_expressed_genes_tool(z, limit_bytes=lim))
-    cat.register(compare_groups_tool(z, limit_bytes=lim))
+    cat.register(top_expressed_genes_tool(z, limit_bytes=lim, concurrency=config.gene_scan_concurrency))
+    cat.register(compare_groups_tool(z, limit_bytes=lim, concurrency=config.gene_scan_concurrency))
 
     # ui_action
     cat.register(set_embedding_tool(z))
