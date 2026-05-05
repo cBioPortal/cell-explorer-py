@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 
 from cell_explorer_agent.tools.caps import cap_json_bytes
+from cell_explorer_agent.tools.parallel import reduce_gene_columns
 from cell_explorer_agent.tools.registry import Tool
 from cell_explorer_agent.tools.zarr_protocol import ZarrAccess
 
@@ -16,7 +17,9 @@ HARD_LIMIT = 50
 PSEUDO = 1e-3  # pseudo-count for log ratio
 
 
-def compare_groups_tool(z: ZarrAccess, *, limit_bytes: int) -> Tool:
+def compare_groups_tool(
+    z: ZarrAccess, *, limit_bytes: int, concurrency: int,
+) -> Tool:
     async def run(
         obs_column: str,
         group_a: str,
@@ -41,13 +44,21 @@ def compare_groups_tool(z: ZarrAccess, *, limit_bytes: int) -> Tool:
             return {"error": "at least one group is empty"}
 
         names = await z.var_names()
-        results: list[tuple[str, float, float, float]] = []
-        for gene in names:
-            expr = await z.gene_column(gene)
+
+        def _reduce(gene: str, expr: np.ndarray) -> tuple[str, float, float, float]:
             a_mean = float(expr[a_mask].mean())
             b_mean = float(expr[b_mask].mean())
             lfc = float(np.log2((a_mean + PSEUDO) / (b_mean + PSEUDO)))
-            results.append((gene, lfc, a_mean, b_mean))
+            return (gene, lfc, a_mean, b_mean)
+
+        try:
+            results = await reduce_gene_columns(
+                z, names, _reduce, max_concurrency=concurrency,
+            )
+        except KeyError as exc:
+            return {"error": f"gene {exc!s} not found"}
+        except Exception as exc:
+            return {"error": f"failed to read expression data: {exc}"}
 
         results.sort(key=lambda r: -abs(r[1]))
         top = results[:n]
