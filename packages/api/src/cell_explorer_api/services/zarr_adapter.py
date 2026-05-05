@@ -134,6 +134,7 @@ class AnnDataZarrAccess:
                     name=col.name,
                     dtype=col.dtype,
                     cardinality=len(col.categories) if col.categories else None,
+                    categories=list(col.categories) if col.categories else None,
                 ))
             self._obs_columns_cache = specs
         return list(self._obs_columns_cache)

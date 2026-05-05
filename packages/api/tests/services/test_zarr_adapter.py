@@ -123,8 +123,10 @@ async def test_obs_columns_caches_across_calls():
     assert [s.name for s in specs_first] == ["cell_type", "n_counts"]
     assert specs_first[0].dtype == "categorical"
     assert specs_first[0].cardinality == 2
+    assert specs_first[0].categories == ["A", "B"]
     assert specs_first[1].dtype == "numeric"
     assert specs_first[1].cardinality is None
+    assert specs_first[1].categories is None
 
 
 @pytest.mark.asyncio
@@ -176,3 +178,25 @@ async def test_obs_mask_rejects_numeric():
 
     with pytest.raises(ValueError, match="categorical"):
         await adapter.obs_mask("n_counts", "1.0")
+
+
+@pytest.mark.asyncio
+async def test_obs_columns_exposes_categories():
+    """obs_columns() propagates category lists for categorical columns, None for numeric."""
+    store = _make_fake_anndata_store()
+    store.obs_columns = ["cell_type", "n_counts"]
+    categorical = pd.Categorical(
+        ["T cell", "B cell", "T cell"],
+        categories=["T cell", "B cell", "Monocyte"],
+    )
+    numeric = np.array([1.0, 2.0, 3.0], dtype="float32")
+    store.obs_column = AsyncMock(side_effect=[categorical, numeric])
+
+    adapter = AnnDataZarrAccess(store)
+    specs = await adapter.obs_columns()
+
+    cat_spec = next(s for s in specs if s.name == "cell_type")
+    num_spec = next(s for s in specs if s.name == "n_counts")
+
+    assert cat_spec.categories == ["T cell", "B cell", "Monocyte"]
+    assert num_spec.categories is None

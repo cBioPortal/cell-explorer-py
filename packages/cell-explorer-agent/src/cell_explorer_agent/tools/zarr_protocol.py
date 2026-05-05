@@ -11,6 +11,7 @@ class ObsColumnSpec:
     name: str
     dtype: Literal["categorical", "numeric", "string"]
     cardinality: int | None = None  # for categorical
+    categories: list[str] | None = None  # populated for low-cardinality categoricals
 
 
 @dataclass

@@ -11,6 +11,7 @@ class ObsColumnInfo:
     name: str
     dtype: Literal["categorical", "numeric", "string"]
     cardinality: int | None
+    values: list[str] | None = None  # populated only when dtype=="categorical" AND cardinality <= 50
 
 
 @dataclass
@@ -37,7 +38,12 @@ async def build_dataset_context(
         n_obs=n_obs,
         n_var=n_var,
         obs_columns=[
-            ObsColumnInfo(name=c.name, dtype=c.dtype, cardinality=c.cardinality)
+            ObsColumnInfo(
+                name=c.name,
+                dtype=c.dtype,
+                cardinality=c.cardinality,
+                values=c.categories if (c.dtype == "categorical" and c.cardinality is not None and c.cardinality <= 50) else None,
+            )
             for c in obs
         ],
         embedding_keys=list(emb),
