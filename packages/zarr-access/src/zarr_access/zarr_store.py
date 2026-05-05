@@ -53,10 +53,20 @@ class ZarrStore:
         # Detect version and read consolidated metadata via aiohttp probe
         zarr_version, consolidated = await cls._probe_version(url, headers)
 
-        # Build fsspec store via from_url, passing headers as client_kwargs
-        storage_options: dict = {}
+        # Build fsspec store via from_url, passing headers + optional trace
+        # configs as client_kwargs. Tracing is opt-in via ZARR_ACCESS_TRACE=1.
+        from zarr_access.tracing import build_trace_configs
+
+        client_kwargs: dict = {}
         if headers:
-            storage_options["client_kwargs"] = {"headers": headers}
+            client_kwargs["headers"] = headers
+        trace_configs = build_trace_configs()
+        if trace_configs is not None:
+            client_kwargs["trace_configs"] = trace_configs
+
+        storage_options: dict = (
+            {"client_kwargs": client_kwargs} if client_kwargs else {}
+        )
 
         store = FsspecStore.from_url(url, storage_options=storage_options, read_only=True)
 
