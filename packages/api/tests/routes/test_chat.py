@@ -379,3 +379,32 @@ def test_post_turn_unauthenticated_returns_401(seeded_app):
         "messages": [{"role": "user", "content": "hi"}],
     })
     assert response.status_code == 401
+
+
+def test_post_turn_midstream_error_emits_error_event(seeded_app):
+    import json as _json
+
+    from cell_explorer_agent.events import TextDelta
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app)
+
+    fake = _FakeChatAgent(
+        run_events=[TextDelta(text="part 1 ")],
+        run_raises=lambda i: RuntimeError("boom") if i == 0 else None,
+    )
+
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        with client.stream("POST", "/api/chat/public-atlas/turns", json={
+            "messages": [{"role": "user", "content": "hi"}],
+        }) as r:
+            assert r.status_code == 200  # already 200 by the time the agent raised
+            lines = [_json.loads(line) for line in r.iter_lines() if line]
+
+    types = [l["type"] for l in lines]
+    assert types == ["text_delta", "error"]
+    assert lines[1]["message"] == "chat failed: boom"
+    assert lines[1]["retryable"] is False

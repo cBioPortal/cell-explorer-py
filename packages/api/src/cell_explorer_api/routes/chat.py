@@ -81,9 +81,20 @@ def _to_agent_messages(messages: list[ChatMessage]):
 
 
 async def _ndjson_event_stream(agent, messages) -> AsyncIterator[bytes]:
-    """Serialize agent events as NDJSON, one event per \n-terminated line."""
-    async for event in agent.run(messages=messages):
-        yield (event.model_dump_json() + "\n").encode()
+    """Serialize agent events as NDJSON, one event per \\n-terminated line.
+
+    Catches any unexpected exception, wraps it in an Error event, emits it,
+    then returns. asyncio.CancelledError (client disconnect, ASGI shutdown)
+    is re-raised so the framework can clean up.
+    """
+    try:
+        async for event in agent.run(messages=messages):
+            yield (event.model_dump_json() + "\n").encode()
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — by design: any leak becomes an event
+        err = Error(message=f"chat failed: {exc}", retryable=False)
+        yield (err.model_dump_json() + "\n").encode()
 
 
 def _http_for_chat_session_error(exc: ChatSessionError) -> HTTPException:
