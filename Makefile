@@ -1,4 +1,7 @@
-.PHONY: help install dev dev-docker test test-cell2zarr test-zarr-auth-proxy test-zarr-access test-all db-migrate db-revision db-seed seed-spectrum openapi dev-keys
+.PHONY: help install dev dev-docker test test-cell2zarr test-zarr-auth-proxy test-zarr-access test-all db-migrate db-revision db-seed seed-spectrum openapi dev-keys chat-login chat-logout chat-datasets chat-ask chat-repl
+
+# chat-* targets auto-source .env so the CLI picks up KEYCLOAK_*, CELL_EXPLORER_API_URL, etc.
+WITH_ENV = set -a; [ -f .env ] && . ./.env; set +a;
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -50,3 +53,18 @@ dev-keys: ## Generate RSA key pair for local dev
 	openssl genrsa -out dev-keys/private.pem 2048
 	openssl rsa -in dev-keys/private.pem -pubout -out dev-keys/public.pem
 	@echo "Keys generated in dev-keys/. Add DATASOURCE_LOCAL_PRIVATE_KEY_FILE=/keys/private.pem to .env"
+
+chat-login: ## Open browser-OAuth login flow (auto-loads .env)
+	@$(WITH_ENV) uv run cell-explorer-chat login
+
+chat-logout: ## Delete local CLI auth.json
+	@$(WITH_ENV) uv run cell-explorer-chat logout
+
+chat-datasets: ## List datasets the authenticated user can access
+	@$(WITH_ENV) uv run cell-explorer-chat datasets
+
+chat-ask: ## Ask one question (usage: make chat-ask SLUG=spectrum Q="how many cells?")
+	@$(WITH_ENV) uv run cell-explorer-chat ask $(SLUG) "$(Q)"
+
+chat-repl: ## Multi-turn chat REPL (usage: make chat-repl SLUG=spectrum)
+	@$(WITH_ENV) uv run cell-explorer-chat repl $(SLUG)
