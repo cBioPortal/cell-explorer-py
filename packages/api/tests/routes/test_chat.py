@@ -251,3 +251,91 @@ def test_get_context_zarr_unreachable_returns_502(seeded_app):
 
     assert response.status_code == 502
     assert "zarr" in response.json()["detail"].lower()
+
+
+# ---------- POST /turns tests ----------
+
+def test_post_turn_validation_empty_messages(seeded_app):
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app)
+    fake = _FakeChatAgent()
+
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.post("/api/chat/public-atlas/turns", json={"messages": []})
+
+    assert response.status_code == 422
+
+
+def test_post_turn_validation_last_must_be_user(seeded_app):
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app)
+    fake = _FakeChatAgent()
+
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.post("/api/chat/public-atlas/turns", json={
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": "hello"},
+            ],
+        })
+
+    assert response.status_code == 422
+
+
+def test_post_turn_validation_non_alternating(seeded_app):
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app)
+    fake = _FakeChatAgent()
+
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.post("/api/chat/public-atlas/turns", json={
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {"role": "user", "content": "again"},
+            ],
+        })
+
+    assert response.status_code == 422
+
+
+def test_post_turn_validation_empty_content(seeded_app):
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app)
+    fake = _FakeChatAgent()
+
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.post("/api/chat/public-atlas/turns", json={
+            "messages": [{"role": "user", "content": ""}],
+        })
+
+    assert response.status_code == 422
+
+
+def test_post_turn_stub_accepts_valid_body(seeded_app):
+    """Sanity: a valid body returns the stub's 200 sentinel until Task 5 replaces it."""
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app)
+    fake = _FakeChatAgent()
+
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.post("/api/chat/public-atlas/turns", json={
+            "messages": [{"role": "user", "content": "hello"}],
+        })
+
+    assert response.status_code == 200
+    assert response.json() == {"stub": True}

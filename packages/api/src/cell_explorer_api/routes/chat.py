@@ -3,7 +3,7 @@
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from cell_explorer_api.auth.dependencies import require_auth
@@ -24,6 +24,28 @@ router = APIRouter(tags=["chat"])
 # Note: this router is included by routes/__init__.py whose own router has
 # prefix="/api". Routes inside use absolute paths ("/chat/{slug}/context"),
 # matching the convention in datasets.py.
+
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1)
+
+
+class TurnRequest(BaseModel):
+    messages: list[ChatMessage] = Field(min_length=1)
+
+    @field_validator("messages")
+    @classmethod
+    def _validate_alternating_ending_user(cls, v: list[ChatMessage]) -> list[ChatMessage]:
+        if v[-1].role != "user":
+            raise ValueError("last message must have role='user'")
+        for i, m in enumerate(v):
+            expected = "user" if i % 2 == 0 else "assistant"
+            if m.role != expected:
+                raise ValueError(
+                    f"messages[{i}].role must be {expected!r} (alternating from user)"
+                )
+        return v
 
 
 class ObsColumnInfo(BaseModel):
@@ -85,3 +107,16 @@ async def get_chat_context(
         embedding_keys=list(ctx.embedding_keys),
         available_tools=[t.name for t in agent.catalog.all()],
     )
+
+
+@router.post("/chat/{slug}/turns")
+async def post_chat_turn(
+    slug: str,
+    body: TurnRequest,
+    request: Request,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    # Stub: validation has succeeded by the time we get here. Task 5
+    # replaces this with the streaming agent run.
+    return {"stub": True}
