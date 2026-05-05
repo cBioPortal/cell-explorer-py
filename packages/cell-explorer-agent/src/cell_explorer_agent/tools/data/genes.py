@@ -5,6 +5,7 @@ from typing import Any
 import numpy as np
 
 from cell_explorer_agent.tools.caps import cap_json_bytes
+from cell_explorer_agent.tools.parallel import reduce_gene_columns
 from cell_explorer_agent.tools.registry import Tool
 from cell_explorer_agent.tools.zarr_protocol import ZarrAccess
 
@@ -112,7 +113,9 @@ def gene_expression_summary_tool(z: ZarrAccess, *, limit_bytes: int) -> Tool:
     )
 
 
-def top_expressed_genes_tool(z: ZarrAccess, *, limit_bytes: int) -> Tool:
+def top_expressed_genes_tool(
+    z: ZarrAccess, *, limit_bytes: int, concurrency: int,
+) -> Tool:
     async def run(obs_column: str, group_value: str, n: int = 20) -> dict[str, Any]:
         n = min(max(n, 1), HARD_LIMIT)
         try:
@@ -130,10 +133,19 @@ def top_expressed_genes_tool(z: ZarrAccess, *, limit_bytes: int) -> Tool:
             return {"error": f"group {group_value!r} is empty"}
 
         names = await z.var_names()
-        means: list[tuple[str, float]] = []
-        for gene in names:
-            expr = await z.gene_column(gene)
-            means.append((gene, float(expr[mask].mean())))
+
+        def _reduce(gene: str, expr: np.ndarray) -> tuple[str, float]:
+            return (gene, float(expr[mask].mean()))
+
+        try:
+            means = await reduce_gene_columns(
+                z, names, _reduce, max_concurrency=concurrency,
+            )
+        except KeyError as exc:
+            return {"error": f"gene {exc!s} not found"}
+        except Exception as exc:
+            return {"error": f"failed to read expression data: {exc}"}
+
         means.sort(key=lambda x: -x[1])
         top = means[:n]
 
