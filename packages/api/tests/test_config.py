@@ -38,6 +38,25 @@ def test_settings_validates_static_dir_with_index(static_dir: Path):
     assert result == static_dir
 
 
+def test_cookie_max_age_defaults():
+    """Cookie lifetimes default to 5 min access, 24h refresh."""
+    from cell_explorer_api.config import Settings
+
+    settings = Settings()
+    assert settings.access_cookie_max_age == 300
+    assert settings.refresh_cookie_max_age == 86400
+
+
+def test_cookie_max_age_from_env(monkeypatch: "pytest.MonkeyPatch"):
+    monkeypatch.setenv("ACCESS_COOKIE_MAX_AGE", "120")
+    monkeypatch.setenv("REFRESH_COOKIE_MAX_AGE", "604800")
+    from cell_explorer_api.config import Settings
+
+    settings = Settings()
+    assert settings.access_cookie_max_age == 120
+    assert settings.refresh_cookie_max_age == 604800
+
+
 def test_settings_keycloak_defaults():
     """Auth settings are all None by default (auth disabled)."""
     from cell_explorer_api.config import Settings
