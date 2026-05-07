@@ -121,6 +121,8 @@ async def get_chat_context(
     db: AsyncSession = Depends(get_db),
 ) -> ContextResponse:
     settings: Settings = request.app.state.settings
+    if not settings.chat_enabled:
+        raise HTTPException(status_code=404, detail="Chat is not available")
     try:
         agent = await make_chat_agent(user=user, dataset_slug=slug, db=db, settings=settings)
     except ChatSessionError as exc:
@@ -156,6 +158,8 @@ async def post_chat_turn(
     db: AsyncSession = Depends(get_db),
 ):
     settings: Settings = request.app.state.settings
+    if not settings.chat_enabled:
+        raise HTTPException(status_code=404, detail="Chat is not available")
     try:
         agent = await make_chat_agent(user=user, dataset_slug=slug, db=db, settings=settings)
     except ChatSessionError as exc:

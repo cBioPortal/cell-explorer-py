@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     # Admin
     admin_api_key: str | None = None
 
+    # Chat (LLM)
+    anthropic_api_key: str | None = None
+
     # CLI integration
     cli_state_secret: str | None = None
 
@@ -111,6 +114,11 @@ class Settings(BaseSettings):
     def admin_enabled(self) -> bool:
         """Admin API is enabled when ADMIN_API_KEY is set."""
         return self.admin_api_key is not None
+
+    @property
+    def chat_enabled(self) -> bool:
+        """Chat is enabled when ANTHROPIC_API_KEY is set."""
+        return self.anthropic_api_key is not None
 
     @model_validator(mode="after")
     def _autodetect_git_sha(self) -> "Settings":
