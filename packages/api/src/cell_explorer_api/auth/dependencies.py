@@ -13,7 +13,10 @@ logger = logging.getLogger(__name__)
 async def require_auth(request: Request) -> User:
     """Validate session cookie and return User. Raises 401 if not authenticated."""
     access_token = request.cookies.get("cce_access")
-    if not access_token:
+    refresh_token = request.cookies.get("cce_refresh")
+
+    # No credentials at all — short-circuit before hitting Keycloak config.
+    if not access_token and not refresh_token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     if not request.app.state.settings.auth_enabled:
@@ -21,23 +24,25 @@ async def require_auth(request: Request) -> User:
 
     keycloak: KeycloakClient = request.app.state.keycloak
 
-    try:
-        return keycloak.decode_token(access_token)
-    except Exception as e:
-        logger.warning("Access token decode failed: %s", e)
-        # Access token invalid/expired — try refresh
-        refresh_token = request.cookies.get("cce_refresh")
-        if not refresh_token:
-            logger.warning("No refresh token cookie present")
-            raise HTTPException(status_code=401, detail="Not authenticated")
-
+    # Happy path: try to decode the access token if we have one.
+    if access_token:
         try:
-            logger.info("Attempting token refresh")
-            tokens = await keycloak.refresh_token(refresh_token)
-            user = keycloak.decode_token(tokens["access_token"])
-            request.state.new_access_token = tokens["access_token"]
-            request.state.new_refresh_token = tokens.get("refresh_token", refresh_token)
-            return user
-        except Exception as refresh_err:
-            logger.warning("Token refresh failed: %s", refresh_err)
-            raise HTTPException(status_code=401, detail="Session expired")
+            return keycloak.decode_token(access_token)
+        except Exception as e:
+            logger.warning("Access token decode failed: %s", e)
+
+    # Access token missing or invalid — fall back to refresh.
+    if not refresh_token:
+        # Access cookie was present but invalid, and no refresh cookie — user must log in.
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        logger.info("Attempting token refresh")
+        tokens = await keycloak.refresh_token(refresh_token)
+        user = keycloak.decode_token(tokens["access_token"])
+        request.state.new_access_token = tokens["access_token"]
+        request.state.new_refresh_token = tokens.get("refresh_token", refresh_token)
+        return user
+    except Exception as refresh_err:
+        logger.warning("Token refresh failed: %s", refresh_err)
+        raise HTTPException(status_code=401, detail="Session expired")

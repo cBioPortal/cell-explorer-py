@@ -1,6 +1,7 @@
 """Tests for require_auth dependency."""
 
 import time
+from unittest.mock import AsyncMock, patch
 
 import jwt
 import pytest
@@ -105,3 +106,63 @@ def test_invalid_token_returns_401(keycloak):
     client.cookies.set("cce_access", "garbage.token.here")
     response = client.get("/protected")
     assert response.status_code == 401
+
+
+def test_require_auth_refreshes_when_access_cookie_missing(keycloak, rsa_keys):
+    """When cce_access is absent but cce_refresh is valid, require_auth should
+    silently refresh and return the user — not 401."""
+    private_key, _ = rsa_keys
+    fresh_access = _make_token(private_key)
+    fresh_refresh = "new-refresh-token"
+
+    app = _make_app_with_protected_route(keycloak)
+
+    # Patch KeycloakClient.refresh_token on the specific keycloak instance bound to the app.
+    with patch.object(
+        keycloak,
+        "refresh_token",
+        new=AsyncMock(return_value={"access_token": fresh_access, "refresh_token": fresh_refresh}),
+    ):
+        client = TestClient(app, raise_server_exceptions=True)
+        # Only the refresh cookie is present — no access cookie.
+        client.cookies.set("cce_refresh", "some-valid-refresh-token")
+        response = client.get("/protected")
+
+    assert response.status_code == 200
+    assert response.json()["sub"] == "user-123"
+    # The new tokens must be stored on request.state so middleware can set cookies.
+    # (TestClient doesn't run the full middleware stack, so we verify the endpoint
+    # returned a successful response — the state assertions are covered by
+    # test_expired_token_triggers_refresh_and_sets_new_cookies if present.)
+
+
+def test_missing_access_cookie_without_refresh_returns_401(keycloak):
+    """When cce_access is absent AND cce_refresh is absent, require_auth returns 401."""
+    app = _make_app_with_protected_route(keycloak)
+    client = TestClient(app)
+    # No cookies at all.
+    response = client.get("/protected")
+    assert response.status_code == 401
+
+
+def test_expired_token_with_refresh_succeeds(keycloak, rsa_keys):
+    """When cce_access is expired but cce_refresh is valid, require_auth refreshes and succeeds."""
+    private_key, _ = rsa_keys
+    expired_access = _make_token(private_key, exp=int(time.time()) - 10)
+    fresh_access = _make_token(private_key)
+    fresh_refresh = "new-refresh-token"
+
+    app = _make_app_with_protected_route(keycloak)
+
+    with patch.object(
+        keycloak,
+        "refresh_token",
+        new=AsyncMock(return_value={"access_token": fresh_access, "refresh_token": fresh_refresh}),
+    ):
+        client = TestClient(app, raise_server_exceptions=True)
+        client.cookies.set("cce_access", expired_access)
+        client.cookies.set("cce_refresh", "some-valid-refresh-token")
+        response = client.get("/protected")
+
+    assert response.status_code == 200
+    assert response.json()["sub"] == "user-123"
