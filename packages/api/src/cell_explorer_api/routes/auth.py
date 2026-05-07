@@ -115,8 +115,9 @@ def _decode_cli_state(state: str, secret: str) -> dict | None:
 def _set_token_cookies(request: Request, response: Response, access_token: str, refresh_token: str) -> None:
     """Set access and refresh token cookies on a response."""
     defaults = _cookie_defaults(request)
-    response.set_cookie("cce_access", access_token, max_age=300, **defaults)
-    response.set_cookie("cce_refresh", refresh_token, max_age=28800, **defaults)
+    settings = request.app.state.settings
+    response.set_cookie("cce_access", access_token, max_age=settings.access_cookie_max_age, **defaults)
+    response.set_cookie("cce_refresh", refresh_token, max_age=settings.refresh_cookie_max_age, **defaults)
 
 
 def _clear_token_cookies(response: Response) -> None:
@@ -231,7 +232,8 @@ async def token_exchange(request: Request):
         return Response(status_code=401, content="Invalid token")
     response = Response(status_code=200)
     defaults = _cookie_defaults(request)
-    response.set_cookie("cce_access", access_token, max_age=300, **defaults)
+    settings = request.app.state.settings
+    response.set_cookie("cce_access", access_token, max_age=settings.access_cookie_max_age, **defaults)
     response.body = user.model_dump_json().encode()
     response.media_type = "application/json"
     return response

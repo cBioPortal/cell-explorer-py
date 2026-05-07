@@ -49,6 +49,13 @@ class Settings(BaseSettings):
     keycloak_idp_hint: str | None = None
     cors_origins: str = ""
 
+    # Session cookie lifetimes (seconds). Defaults match a typical Keycloak
+    # cell-explorer realm: 5m access, 24h refresh. Set ACCESS_COOKIE_MAX_AGE
+    # / REFRESH_COOKIE_MAX_AGE in env to override; tune the refresh value to
+    # be <= the realm's ssoSessionMaxLifespan or refresh will fail early.
+    access_cookie_max_age: int = 300
+    refresh_cookie_max_age: int = 86400
+
     # Database
     database_url: str | None = None
 
