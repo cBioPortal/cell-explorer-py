@@ -13,6 +13,7 @@ class InfoResponse(BaseModel):
     environment: str
     git_sha: str | None
     auth_enabled: bool
+    chat_enabled: bool
 
 
 @router.get("/info")
@@ -23,4 +24,5 @@ async def info(request: Request) -> InfoResponse:
         environment=settings.environment,
         git_sha=settings.git_sha,
         auth_enabled=settings.auth_enabled,
+        chat_enabled=settings.chat_enabled,
     )

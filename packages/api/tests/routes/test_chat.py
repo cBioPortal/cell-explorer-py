@@ -33,7 +33,7 @@ def db_url():
 
 @pytest.fixture()
 def settings(db_url):
-    return Settings(database_url=db_url)
+    return Settings(database_url=db_url, anthropic_api_key="sk-ant-test")
 
 
 @pytest.fixture()
@@ -385,6 +385,28 @@ def test_post_turn_unauthenticated_returns_401(seeded_app):
         "messages": [{"role": "user", "content": "hi"}],
     })
     assert response.status_code == 401
+
+
+# ---------- chat_enabled gate tests ----------
+
+def test_get_context_returns_404_when_chat_disabled(seeded_app):
+    seeded_app.state.settings.anthropic_api_key = None
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app)
+    response = client.get("/api/chat/public-atlas/context")
+    assert response.status_code == 404
+    assert "not available" in response.json()["detail"].lower()
+
+
+def test_post_turn_returns_404_when_chat_disabled(seeded_app):
+    seeded_app.state.settings.anthropic_api_key = None
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app)
+    response = client.post("/api/chat/public-atlas/turns", json={
+        "messages": [{"role": "user", "content": "hi"}],
+    })
+    assert response.status_code == 404
+    assert "not available" in response.json()["detail"].lower()
 
 
 def test_post_turn_midstream_error_emits_error_event(seeded_app):

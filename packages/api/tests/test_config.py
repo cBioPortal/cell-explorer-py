@@ -144,3 +144,17 @@ def test_admin_disabled_when_no_key():
 
     settings = Settings()
     assert settings.admin_enabled is False
+
+
+def test_chat_enabled_when_key_set():
+    from cell_explorer_api.config import Settings
+
+    settings = Settings(anthropic_api_key="sk-ant-test")
+    assert settings.chat_enabled is True
+
+
+def test_chat_disabled_when_no_key():
+    from cell_explorer_api.config import Settings
+
+    settings = Settings()
+    assert settings.chat_enabled is False

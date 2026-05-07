@@ -51,3 +51,17 @@ def test_info_includes_auth_enabled():
 def test_info_auth_disabled_by_default(client: TestClient):
     response = client.get("/api/info")
     assert response.json()["auth_enabled"] is False
+
+
+def test_info_includes_chat_enabled_true():
+    settings = Settings(anthropic_api_key="sk-ant-test")
+    app = create_app(settings)
+    client = TestClient(app)
+    response = client.get("/api/info")
+    assert response.status_code == 200
+    assert response.json()["chat_enabled"] is True
+
+
+def test_info_chat_disabled_by_default(client: TestClient):
+    response = client.get("/api/info")
+    assert response.json()["chat_enabled"] is False
