@@ -417,6 +417,7 @@ source = { editable = "packages/api" }
 dependencies = [
     { name = "aiosqlite" },
     { name = "alembic" },
+    { name = "cell-explorer-agent" },
     { name = "fastapi" },
     { name = "greenlet" },
     { name = "httpx" },
@@ -425,6 +426,7 @@ dependencies = [
     { name = "sqlmodel" },
     { name = "typer" },
     { name = "uvicorn" },
+    { name = "zarr-access" },
 ]
 
 [package.optional-dependencies]
@@ -437,6 +439,7 @@ test = [
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.21.0" },
     { name = "alembic", specifier = ">=1.15.0" },
+    { name = "cell-explorer-agent", editable = "packages/cell-explorer-agent" },
     { name = "fastapi", specifier = ">=0.134.0" },
     { name = "greenlet", specifier = ">=3.4.0" },
     { name = "httpx", specifier = ">=0.28.0" },
@@ -447,6 +450,7 @@ requires-dist = [
     { name = "sqlmodel", specifier = ">=0.0.24" },
     { name = "typer", specifier = ">=0.15" },
     { name = "uvicorn", specifier = ">=0.41.0" },
+    { name = "zarr-access", editable = "packages/zarr-access" },
 ]
 provides-extras = ["test"]
 

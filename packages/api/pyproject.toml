@@ -14,7 +14,13 @@ dependencies = [
     "aiosqlite>=0.21.0",
     "greenlet>=3.4.0",
     "typer>=0.15",
+    "cell-explorer-agent",
+    "zarr-access",
 ]
+
+[tool.uv.sources]
+cell-explorer-agent = { workspace = true }
+zarr-access = { workspace = true }
 
 [project.optional-dependencies]
 test = [
