@@ -11,6 +11,7 @@ from cell_explorer_agent.tools.ui_action.summary import (
     add_summary_obs_column_tool,
     add_summary_gene_tool,
 )
+from cell_explorer_agent.tools.ui_action.viewport import set_viewport_tool
 
 
 async def test_set_embedding_valid(fake_zarr):
@@ -98,3 +99,17 @@ async def test_add_summary_gene_unknown(fake_zarr):
     tool = add_summary_gene_tool(fake_zarr)
     r = await tool.func(gene="NO_SUCH_GENE")
     assert "error" in r
+
+
+async def test_set_viewport_valid():
+    tool = set_viewport_tool()
+    r = await tool.func(target_x=100.0, target_y=50.0, zoom=3.5)
+    assert r == {"payload": {"viewport": {"target": [100.0, 50.0], "zoom": 3.5}}}
+    assert tool.kind == "ui_action"
+
+
+async def test_set_viewport_negative_zoom_ok():
+    """Zoom can be negative (zoomed out beyond default fit-to-view)."""
+    tool = set_viewport_tool()
+    r = await tool.func(target_x=0.0, target_y=0.0, zoom=-1.0)
+    assert r["payload"]["viewport"]["zoom"] == -1.0
