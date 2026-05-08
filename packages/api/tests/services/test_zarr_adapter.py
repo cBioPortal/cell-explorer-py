@@ -181,6 +181,15 @@ async def test_obs_mask_rejects_numeric():
 
 
 @pytest.mark.asyncio
+async def test_var_columns_from_anndata_store_property():
+    store = _make_fake_anndata_store()
+    store.var_columns = ["feature_name", "ensembl_id"]
+    adapter = AnnDataZarrAccess(store)
+    cols = await adapter.var_columns()
+    assert cols == ["feature_name", "ensembl_id"]
+
+
+@pytest.mark.asyncio
 async def test_obs_columns_exposes_categories():
     """obs_columns() propagates category lists for categorical columns, None for numeric."""
     store = _make_fake_anndata_store()

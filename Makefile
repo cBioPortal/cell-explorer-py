@@ -1,4 +1,4 @@
-.PHONY: help install dev dev-docker test test-cell2zarr test-zarr-auth-proxy test-zarr-access test-all db-migrate db-revision db-seed seed-spectrum openapi dev-keys chat-login chat-logout chat-datasets chat-ask chat-ask-traced chat-repl
+.PHONY: help install dev dev-docker test test-cell2zarr test-zarr-auth-proxy test-zarr-access test-all db-migrate db-revision db-seed seed-spectrum openapi generate-app-config dev-keys chat-login chat-logout chat-datasets chat-ask chat-ask-traced chat-repl
 
 # chat-* targets auto-source .env so the CLI picks up KEYCLOAK_*, CELL_EXPLORER_API_URL, etc.
 WITH_ENV = set -a; [ -f .env ] && . ./.env; set +a;
@@ -35,6 +35,19 @@ seed-spectrum: ## Register the public MSK SPECTRUM TME 2022 dataset (idempotent)
 
 openapi: ## Regenerate OpenAPI spec
 	uv run --project packages/api python -m cell_explorer_api.export_openapi > openapi.json
+
+generate-app-config: ## Regenerate AppConfig Pydantic model from JSON Schema artifact
+	uv run --project packages/cell-explorer-agent datamodel-codegen \
+	  --input packages/cell-explorer-agent/schema/app_config.schema.json \
+	  --input-file-type jsonschema \
+	  --output packages/cell-explorer-agent/src/cell_explorer_agent/schema/app_config.py \
+	  --target-python-version 3.12 \
+	  --output-model-type pydantic_v2.BaseModel \
+	  --use-standard-collections \
+	  --use-union-operator \
+	  --enum-field-as-literal all \
+	  --field-extra-keys description \
+	  --disable-timestamp
 
 test-zarr-auth-proxy: ## Run zarr-auth-proxy tests
 	uv run --project packages/zarr-auth-proxy pytest packages/zarr-auth-proxy/tests/ -v

@@ -23,3 +23,35 @@ async def test_v1_catalog_includes_all_tools(fake_zarr):
         "add_summary_obs_column",
         "add_summary_gene",
     }
+
+
+async def test_experimental_view_tools_disabled_by_default(fake_zarr):
+    cfg = AgentConfig()
+    catalog = build_v1_catalog(fake_zarr, config=cfg)
+    names = [t.name for t in catalog.all()]
+    assert "set_viewport" not in names
+    assert "set_summary_context" not in names
+    assert "set_gene_label_column" not in names
+    assert "set_render_controls" not in names
+
+
+async def test_experimental_view_tools_enabled_registers_new_tools(fake_zarr, monkeypatch):
+    monkeypatch.setenv("CHAT_EXPERIMENTAL_VIEW_TOOLS", "true")
+    cfg = AgentConfig()
+    assert cfg.experimental_view_tools is True
+    catalog = build_v1_catalog(fake_zarr, config=cfg)
+    names = [t.name for t in catalog.all()]
+    assert "set_viewport" in names
+    assert "set_summary_context" in names
+    assert "set_gene_label_column" in names
+    assert "set_render_controls" in names
+
+
+async def test_existing_tools_present_with_or_without_flag(fake_zarr):
+    cfg_off = AgentConfig()
+    cat_off = build_v1_catalog(fake_zarr, config=cfg_off)
+    names_off = {t.name for t in cat_off.all()}
+    # Existing tools always present
+    assert "set_embedding" in names_off
+    assert "set_color_by_gene" in names_off
+    assert "set_color_by_category" in names_off

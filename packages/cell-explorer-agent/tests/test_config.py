@@ -49,3 +49,14 @@ def test_gene_scan_concurrency_rejects_too_large():
 def test_gene_scan_concurrency_accepts_max():
     cfg = AgentConfig(gene_scan_concurrency=200)
     assert cfg.gene_scan_concurrency == 200
+
+
+def test_experimental_view_tools_default_is_false():
+    cfg = AgentConfig()
+    assert cfg.experimental_view_tools is False
+
+
+def test_experimental_view_tools_from_env(monkeypatch):
+    monkeypatch.setenv("CHAT_EXPERIMENTAL_VIEW_TOOLS", "true")
+    cfg = AgentConfig()
+    assert cfg.experimental_view_tools is True

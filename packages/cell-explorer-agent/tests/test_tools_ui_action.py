@@ -11,6 +11,10 @@ from cell_explorer_agent.tools.ui_action.summary import (
     add_summary_obs_column_tool,
     add_summary_gene_tool,
 )
+from cell_explorer_agent.tools.ui_action.viewport import set_viewport_tool
+from cell_explorer_agent.tools.ui_action.summary_context import set_summary_context_tool
+from cell_explorer_agent.tools.ui_action.gene_label_column import set_gene_label_column_tool
+from cell_explorer_agent.tools.ui_action.render import set_render_controls_tool
 
 
 async def test_set_embedding_valid(fake_zarr):
@@ -98,3 +102,87 @@ async def test_add_summary_gene_unknown(fake_zarr):
     tool = add_summary_gene_tool(fake_zarr)
     r = await tool.func(gene="NO_SUCH_GENE")
     assert "error" in r
+
+
+async def test_set_viewport_valid():
+    tool = set_viewport_tool()
+    r = await tool.func(target_x=100.0, target_y=50.0, zoom=3.5)
+    assert r == {"payload": {"viewport": {"target": [100.0, 50.0], "zoom": 3.5}}}
+    assert tool.kind == "ui_action"
+
+
+async def test_set_viewport_negative_zoom_ok():
+    """Zoom can be negative (zoomed out beyond default fit-to-view)."""
+    tool = set_viewport_tool()
+    r = await tool.func(target_x=0.0, target_y=0.0, zoom=-1.0)
+    assert r["payload"]["viewport"]["zoom"] == -1.0
+
+
+async def test_set_summary_context_overall():
+    tool = set_summary_context_tool()
+    r = await tool.func(value="overall")
+    assert r == {"payload": {"summaryContext": "overall"}}
+    assert tool.kind == "ui_action"
+
+
+async def test_set_summary_context_selections():
+    tool = set_summary_context_tool()
+    r = await tool.func(value="selections")
+    assert r == {"payload": {"summaryContext": "selections"}}
+
+
+async def test_set_summary_context_invalid_value():
+    tool = set_summary_context_tool()
+    r = await tool.func(value="other")
+    assert "error" in r
+
+
+async def test_set_gene_label_column_valid(fake_zarr):
+    # FakeZarrAccess.default() includes 'gene_symbol' in var_columns_data
+    tool = set_gene_label_column_tool(fake_zarr)
+    r = await tool.func(column="gene_symbol")
+    assert r == {"payload": {"geneLabelColumn": "gene_symbol"}}
+    assert tool.kind == "ui_action"
+
+
+async def test_set_gene_label_column_unknown(fake_zarr):
+    tool = set_gene_label_column_tool(fake_zarr)
+    r = await tool.func(column="not_a_column")
+    assert "error" in r
+
+
+async def test_set_render_controls_both():
+    tool = set_render_controls_tool()
+    r = await tool.func(point_size=2.5, opacity=0.7)
+    assert r == {"payload": {"pointSize": 2.5, "opacity": 0.7}}
+    assert tool.kind == "ui_action"
+
+
+async def test_set_render_controls_point_size_only():
+    tool = set_render_controls_tool()
+    r = await tool.func(point_size=4.0)
+    assert r == {"payload": {"pointSize": 4.0}}
+
+
+async def test_set_render_controls_opacity_only():
+    tool = set_render_controls_tool()
+    r = await tool.func(opacity=0.3)
+    assert r == {"payload": {"opacity": 0.3}}
+
+
+async def test_set_render_controls_neither():
+    tool = set_render_controls_tool()
+    r = await tool.func()
+    assert "error" in r
+
+
+async def test_set_render_controls_negative_point_size():
+    tool = set_render_controls_tool()
+    r = await tool.func(point_size=-1.0)
+    assert "error" in r  # schema's pointSize must be positive
+
+
+async def test_set_render_controls_opacity_out_of_range():
+    tool = set_render_controls_tool()
+    r = await tool.func(opacity=1.5)
+    assert "error" in r  # schema's opacity must be in [0, 1]
