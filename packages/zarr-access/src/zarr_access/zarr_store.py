@@ -1,11 +1,30 @@
 """Async zarr store wrapper with optional bearer token auth."""
 
+import os
 from typing import Literal
 
 import aiohttp
 import zarr
 import zarr.api.asynchronous
 from zarr.storage import FsspecStore
+
+_DEFAULT_ORIGIN = "https://cell-explorer.cbioportal.org"
+
+
+def _resolve_origin() -> str:
+    """Origin header sent on every server-side request.
+
+    Why: many CDNs (notably CloudFront fronting S3) don't include the request
+    Origin in the cache key. A no-Origin request causes S3 to omit CORS response
+    headers, and the no-CORS response gets cached and later served to browsers
+    that DO send Origin — breaking cross-origin fetches in the frontend. Sending
+    a deterministic Origin from server-side code ensures S3 emits CORS headers
+    and the cache is populated with a CORS-friendly response.
+
+    Override per deployment via ZARR_ACCESS_ORIGIN if the target bucket restricts
+    AllowedOrigins to a specific value.
+    """
+    return os.environ.get("ZARR_ACCESS_ORIGIN", "").strip() or _DEFAULT_ORIGIN
 
 
 class ZarrStore:
@@ -50,16 +69,19 @@ class ZarrStore:
         Returns:
             A ZarrStore instance with zarr version auto-detected.
         """
+        # Always inject Origin so server-side fetches don't poison CDN caches
+        # with no-CORS responses. See _resolve_origin() docstring.
+        merged_headers: dict[str, str] = dict(headers) if headers else {}
+        merged_headers.setdefault("Origin", _resolve_origin())
+
         # Detect version and read consolidated metadata via aiohttp probe
-        zarr_version, consolidated = await cls._probe_version(url, headers)
+        zarr_version, consolidated = await cls._probe_version(url, merged_headers)
 
         # Build fsspec store via from_url, passing headers + optional trace
         # configs as client_kwargs. Tracing is opt-in via ZARR_ACCESS_TRACE=1.
         from zarr_access.tracing import build_trace_configs
 
-        client_kwargs: dict = {}
-        if headers:
-            client_kwargs["headers"] = headers
+        client_kwargs: dict = {"headers": merged_headers}
         trace_configs = build_trace_configs()
         if trace_configs is not None:
             client_kwargs["trace_configs"] = trace_configs

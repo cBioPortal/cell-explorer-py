@@ -53,3 +53,34 @@ async def test_open_without_auth_fails(auth_fixture_server):
     base_url, _ = auth_fixture_server
     with pytest.raises(Exception):
         await ZarrStore.open(f"{base_url}/pbmc3k.zarr")
+
+
+@pytest.mark.asyncio
+async def test_open_sends_default_origin(header_capture_server, monkeypatch):
+    """ZarrStore must send a deterministic Origin header on every request to
+    avoid CDN cache poisoning (CloudFront caches no-Origin S3 responses without
+    CORS headers and serves them to browsers that DO send Origin)."""
+    monkeypatch.delenv("ZARR_ACCESS_ORIGIN", raising=False)
+    base_url, recorded = header_capture_server
+    await ZarrStore.open(f"{base_url}/pbmc3k.zarr")
+    assert recorded, "expected at least one HTTP request"
+    assert all(o == "https://cell-explorer.cbioportal.org" for o in recorded), recorded
+
+
+@pytest.mark.asyncio
+async def test_open_origin_overridable_via_env(header_capture_server, monkeypatch):
+    monkeypatch.setenv("ZARR_ACCESS_ORIGIN", "https://my-deployment.example")
+    base_url, recorded = header_capture_server
+    await ZarrStore.open(f"{base_url}/pbmc3k.zarr")
+    assert all(o == "https://my-deployment.example" for o in recorded), recorded
+
+
+@pytest.mark.asyncio
+async def test_open_caller_origin_takes_precedence(header_capture_server):
+    """If the caller passes an Origin in headers, it wins over the default."""
+    base_url, recorded = header_capture_server
+    await ZarrStore.open(
+        f"{base_url}/pbmc3k.zarr",
+        headers={"Origin": "https://caller-supplied.example"},
+    )
+    assert all(o == "https://caller-supplied.example" for o in recorded), recorded
