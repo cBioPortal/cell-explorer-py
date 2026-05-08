@@ -51,12 +51,12 @@ def test_gene_scan_concurrency_accepts_max():
     assert cfg.gene_scan_concurrency == 200
 
 
-def test_experimental_view_tools_default_is_false():
-    cfg = AgentConfig()
-    assert cfg.experimental_view_tools is False
-
-
-def test_experimental_view_tools_from_env(monkeypatch):
-    monkeypatch.setenv("CHAT_EXPERIMENTAL_VIEW_TOOLS", "true")
+def test_experimental_view_tools_default_is_true():
     cfg = AgentConfig()
     assert cfg.experimental_view_tools is True
+
+
+def test_experimental_view_tools_disabled_via_env(monkeypatch):
+    monkeypatch.setenv("CHAT_EXPERIMENTAL_VIEW_TOOLS", "false")
+    cfg = AgentConfig()
+    assert cfg.experimental_view_tools is False

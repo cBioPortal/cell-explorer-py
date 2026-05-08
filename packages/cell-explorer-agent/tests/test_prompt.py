@@ -24,3 +24,36 @@ async def test_system_prompt_contains_dataset_metadata(fake_zarr):
     assert "X_umap" in sys
     # safety rules are present
     assert "cell barcodes" in sys or "identifier" in sys
+
+
+async def test_system_prompt_documents_new_view_tools(fake_zarr):
+    ctx = await build_dataset_context(
+        fake_zarr, slug="demo", name="Demo", description="A dataset"
+    )
+    sys = build_system_prompt(ctx)
+    # Each new tool is mentioned by name
+    assert "set_viewport" in sys
+    assert "set_summary_context" in sys
+    assert "set_gene_label_column" in sys
+    assert "set_render_controls" in sys
+
+
+async def test_system_prompt_explains_viewport_coord_space(fake_zarr):
+    ctx = await build_dataset_context(
+        fake_zarr, slug="demo", name="Demo", description="A dataset"
+    )
+    sys = build_system_prompt(ctx)
+    # Viewport coords are in embedding space, not pixels — critical for the LLM
+    assert "embedding" in sys.lower()
+    # Some hint about the coordinate space being non-pixel
+    assert "pixel" in sys.lower() or "coordinate space" in sys.lower()
+
+
+async def test_system_prompt_warns_against_proactive_view_changes(fake_zarr):
+    ctx = await build_dataset_context(
+        fake_zarr, slug="demo", name="Demo", description="A dataset"
+    )
+    sys = build_system_prompt(ctx)
+    # The LLM should NOT proactively change view state without user prompting
+    sys_lower = sys.lower()
+    assert "unless" in sys_lower or "only when" in sys_lower or "do not" in sys_lower

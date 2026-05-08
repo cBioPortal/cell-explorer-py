@@ -44,4 +44,32 @@ def build_system_prompt(ctx: DatasetContext) -> str:
         "  - Do not paraphrase cell barcodes or obs identifiers into free-form text; "
         "use them only as arguments to filter_by_ids."
     )
+    lines.append(
+        "  - Do not pan/zoom (set_viewport) or change rendering (set_render_controls) "
+        "unless the user explicitly asks. The user controls the camera and visual style; "
+        "agent-initiated view changes are usually unwelcome."
+    )
+    lines.append("")
+    lines.append("View-control tools:")
+    lines.append(
+        "  - set_viewport: pan and zoom the scatterplot. target_x/target_y are coordinates "
+        "in the embedding's space (NOT pixel coordinates); zoom is log-scale "
+        "(0 ≈ fit-to-view, 1 ≈ 2x, 2 ≈ 4x, negative values zoom out). Use only when the "
+        "user asks to focus on a specific region or zoom level."
+    )
+    lines.append(
+        "  - set_summary_context: switch the summary panel between 'overall' (statistics "
+        "across all cells) and 'selections' (statistics restricted to the current filter). "
+        "Useful when comparing a selection's stats against the dataset average."
+    )
+    lines.append(
+        "  - set_gene_label_column: switch the var dataframe column used to display gene "
+        "labels (e.g. between Ensembl IDs and HGNC symbols). Use when the user asks about "
+        "label format or when the current column is not human-readable."
+    )
+    lines.append(
+        "  - set_render_controls: adjust point_size (pixels, must be > 0; frontend default "
+        "0.5) and/or opacity (0=transparent, 1=opaque). At least one parameter required. "
+        "Only use when the user explicitly asks to change the visual style."
+    )
     return "\n".join(lines)

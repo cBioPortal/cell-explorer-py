@@ -22,10 +22,10 @@ class AgentConfig(BaseSettings):
     daily_msg_budget: int = Field(default=100, ge=1)
     daily_token_budget: int = Field(default=500_000, ge=1)
 
-    # Experimental flag — enables Plan 2 view-config ui_action tools
-    # (set_viewport, set_summary_context, set_gene_label_column,
-    # set_render_controls). Plan 3 will flip the default to True.
-    experimental_view_tools: bool = Field(default=False)
+    # View-control ui_action tools (Plan 2 view-config redesign): set_viewport,
+    # set_summary_context, set_gene_label_column, set_render_controls. Set
+    # CHAT_EXPERIMENTAL_VIEW_TOOLS=false to disable them.
+    experimental_view_tools: bool = Field(default=True)
 
     llm_timeout_s: float = Field(default=60, gt=0)
     turn_timeout_s: float = Field(default=180, gt=0)
