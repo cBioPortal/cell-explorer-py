@@ -19,6 +19,7 @@ class FakeZarrAccess:
     n_var: int = 50
     obs: dict[str, ObsColumn] = field(default_factory=dict)
     var: list[str] = field(default_factory=list)
+    var_columns_data: list[str] = field(default_factory=lambda: ["feature_id", "gene_symbol"])
     obsm: list[str] = field(default_factory=lambda: ["X_umap", "X_pca"])
     expression: dict[str, np.ndarray] = field(default_factory=dict)
     _attrs: dict = field(
@@ -90,6 +91,9 @@ class FakeZarrAccess:
 
     async def var_names(self) -> list[str]:
         return list(self.var)
+
+    async def var_columns(self) -> list[str]:
+        return list(self.var_columns_data)
 
     async def obsm_keys(self) -> list[str]:
         return list(self.obsm)

@@ -84,6 +84,11 @@ class AnnDataZarrAccess:
         assert self._var_names_cache is not None
         return list(self._var_names_cache)
 
+    async def var_columns(self) -> list[str]:
+        """Var dataframe column names (e.g. feature_id, gene_symbol)."""
+        var_df = await self.store.var()
+        return list(var_df.columns)
+
     async def obs_column(self, name: str) -> ObsColumn:
         raw = await self.store.obs_column(name)
         return _decode_col_to_obs_column(name, raw)
