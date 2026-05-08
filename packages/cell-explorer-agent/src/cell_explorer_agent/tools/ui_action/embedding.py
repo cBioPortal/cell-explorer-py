@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from cell_explorer_agent.schema.app_config import validate_partial
+from cell_explorer_agent.schema import validate_partial
 from cell_explorer_agent.tools.registry import Tool
 from cell_explorer_agent.tools.zarr_protocol import ZarrAccess
 
