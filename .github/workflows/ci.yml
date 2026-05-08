@@ -18,6 +18,14 @@ jobs:
 
       - run: uv sync
 
+      - name: AppConfig Pydantic codegen drift check
+        run: |
+          make generate-app-config
+          if ! git diff --exit-code packages/cell-explorer-agent/src/cell_explorer_agent/schema/app_config.py; then
+            echo "::error::packages/cell-explorer-agent/src/cell_explorer_agent/schema/app_config.py is stale. Run 'make generate-app-config' and commit the result."
+            exit 1
+          fi
+
       - run: uv run pytest packages/api/tests/ -v
 
       - run: uv run pytest packages/cell2zarr/tests/ -v

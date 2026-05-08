@@ -22,10 +22,14 @@ from cell_explorer_agent.tools.ui_action.filter import (
     clear_filter_tool,
     filter_by_ids_tool,
 )
+from cell_explorer_agent.tools.ui_action.gene_label_column import set_gene_label_column_tool
+from cell_explorer_agent.tools.ui_action.render import set_render_controls_tool
 from cell_explorer_agent.tools.ui_action.summary import (
     add_summary_gene_tool,
     add_summary_obs_column_tool,
 )
+from cell_explorer_agent.tools.ui_action.summary_context import set_summary_context_tool
+from cell_explorer_agent.tools.ui_action.viewport import set_viewport_tool
 from cell_explorer_agent.tools.zarr_protocol import ZarrAccess
 
 
@@ -50,6 +54,14 @@ def build_v1_catalog(z: ZarrAccess, *, config: AgentConfig) -> ToolCatalog:
     cat.register(clear_filter_tool())
     cat.register(add_summary_obs_column_tool(z))
     cat.register(add_summary_gene_tool(z))
+
+    # Experimental ui_action tools (Plan 2 view-config redesign).
+    # Plan 3 will flip the flag default to True.
+    if config.experimental_view_tools:
+        cat.register(set_viewport_tool())
+        cat.register(set_summary_context_tool())
+        cat.register(set_gene_label_column_tool(z))
+        cat.register(set_render_controls_tool())
 
     return cat
 
