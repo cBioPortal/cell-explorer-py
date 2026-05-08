@@ -85,9 +85,12 @@ class AnnDataZarrAccess:
         return list(self._var_names_cache)
 
     async def var_columns(self) -> list[str]:
-        """Var dataframe column names (e.g. feature_id, gene_symbol)."""
-        var_df = await self.store.var()
-        return list(var_df.columns)
+        """Var dataframe column names (e.g. feature_id, gene_symbol).
+
+        Reads the pre-computed list captured at AnnDataStore.open() time —
+        avoids decoding the full var dataframe on every call.
+        """
+        return list(self.store.var_columns)
 
     async def obs_column(self, name: str) -> ObsColumn:
         raw = await self.store.obs_column(name)

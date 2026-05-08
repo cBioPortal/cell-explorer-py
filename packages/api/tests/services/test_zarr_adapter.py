@@ -181,13 +181,9 @@ async def test_obs_mask_rejects_numeric():
 
 
 @pytest.mark.asyncio
-async def test_var_columns_from_var_dataframe():
+async def test_var_columns_from_anndata_store_property():
     store = _make_fake_anndata_store()
-    var_df = pd.DataFrame(
-        {"feature_name": ["CD8A", "CD4"], "ensembl_id": ["ENSG1", "ENSG2"]},
-        index=["CD8A", "CD4"],
-    )
-    store.var = AsyncMock(return_value=var_df)
+    store.var_columns = ["feature_name", "ensembl_id"]
     adapter = AnnDataZarrAccess(store)
     cols = await adapter.var_columns()
     assert cols == ["feature_name", "ensembl_id"]
