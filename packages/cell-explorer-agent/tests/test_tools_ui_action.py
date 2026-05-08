@@ -12,6 +12,7 @@ from cell_explorer_agent.tools.ui_action.summary import (
     add_summary_gene_tool,
 )
 from cell_explorer_agent.tools.ui_action.viewport import set_viewport_tool
+from cell_explorer_agent.tools.ui_action.summary_context import set_summary_context_tool
 
 
 async def test_set_embedding_valid(fake_zarr):
@@ -113,3 +114,22 @@ async def test_set_viewport_negative_zoom_ok():
     tool = set_viewport_tool()
     r = await tool.func(target_x=0.0, target_y=0.0, zoom=-1.0)
     assert r["payload"]["viewport"]["zoom"] == -1.0
+
+
+async def test_set_summary_context_overall():
+    tool = set_summary_context_tool()
+    r = await tool.func(value="overall")
+    assert r == {"payload": {"summaryContext": "overall"}}
+    assert tool.kind == "ui_action"
+
+
+async def test_set_summary_context_selections():
+    tool = set_summary_context_tool()
+    r = await tool.func(value="selections")
+    assert r == {"payload": {"summaryContext": "selections"}}
+
+
+async def test_set_summary_context_invalid_value():
+    tool = set_summary_context_tool()
+    r = await tool.func(value="other")
+    assert "error" in r
