@@ -33,4 +33,5 @@ pythonpath = ["tests"]
 [dependency-groups]
 dev = [
     "pytest-asyncio>=1.3.0",
+    "datamodel-code-generator>=0.26",
 ]

@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "url": {
+      "type": "string"
+    },
+    "dataset": {
+      "type": "string"
+    },
+    "embedding": {
+      "type": "string"
+    },
+    "colorBy": {
+      "type": "string",
+      "enum": [
+        "gene",
+        "category"
+      ]
+    },
+    "gene": {
+      "type": "string"
+    },
+    "category": {
+      "type": "string"
+    },
+    "geneLabelColumn": {
+      "type": "string"
+    },
+    "filter": {
+      "type": "object",
+      "properties": {
+        "ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "obsColumn": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ids",
+        "obsColumn"
+      ],
+      "additionalProperties": false
+    },
+    "viewport": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ]
+        },
+        "zoom": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "target",
+        "zoom"
+      ],
+      "additionalProperties": false
+    },
+    "pointSize": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "opacity": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "summaryObsColumns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "summaryGenes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "summaryContext": {
+      "type": "string",
+      "enum": [
+        "overall",
+        "selections"
+      ]
+    },
+    "showHeader": {
+      "type": "boolean"
+    },
+    "showLeftSidebar": {
+      "type": "boolean"
+    },
+    "showRightSidebar": {
+      "type": "boolean"
+    },
+    "showDatasetDropdown": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+}
