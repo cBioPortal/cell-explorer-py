@@ -13,6 +13,7 @@ from cell_explorer_agent.tools.ui_action.summary import (
 )
 from cell_explorer_agent.tools.ui_action.viewport import set_viewport_tool
 from cell_explorer_agent.tools.ui_action.summary_context import set_summary_context_tool
+from cell_explorer_agent.tools.ui_action.gene_label_column import set_gene_label_column_tool
 
 
 async def test_set_embedding_valid(fake_zarr):
@@ -132,4 +133,18 @@ async def test_set_summary_context_selections():
 async def test_set_summary_context_invalid_value():
     tool = set_summary_context_tool()
     r = await tool.func(value="other")
+    assert "error" in r
+
+
+async def test_set_gene_label_column_valid(fake_zarr):
+    # FakeZarrAccess.default() includes 'gene_symbol' in var_columns_data
+    tool = set_gene_label_column_tool(fake_zarr)
+    r = await tool.func(column="gene_symbol")
+    assert r == {"payload": {"geneLabelColumn": "gene_symbol"}}
+    assert tool.kind == "ui_action"
+
+
+async def test_set_gene_label_column_unknown(fake_zarr):
+    tool = set_gene_label_column_tool(fake_zarr)
+    r = await tool.func(column="not_a_column")
     assert "error" in r
