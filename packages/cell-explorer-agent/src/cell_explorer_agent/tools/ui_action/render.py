@@ -29,8 +29,8 @@ def set_render_controls_tool() -> Tool:
         kind="ui_action",
         description=(
             "Adjust scatterplot rendering. point_size in pixels (must be > 0; "
-            "default ~2). opacity from 0 (transparent) to 1 (opaque). At least "
-            "one parameter must be specified."
+            "frontend default 0.5). opacity from 0 (transparent) to 1 (opaque). "
+            "At least one parameter must be specified."
         ),
         args_schema={
             "type": "object",
