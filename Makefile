@@ -46,7 +46,8 @@ generate-app-config: ## Regenerate AppConfig Pydantic model from JSON Schema art
 	  --use-standard-collections \
 	  --use-union-operator \
 	  --enum-field-as-literal all \
-	  --field-extra-keys description
+	  --field-extra-keys description \
+	  --disable-timestamp
 
 test-zarr-auth-proxy: ## Run zarr-auth-proxy tests
 	uv run --project packages/zarr-auth-proxy pytest packages/zarr-auth-proxy/tests/ -v
