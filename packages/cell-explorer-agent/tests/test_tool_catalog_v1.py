@@ -14,7 +14,7 @@ async def test_v1_catalog_includes_all_tools(fake_zarr):
         "gene_expression_summary",
         "top_expressed_genes",
         "compare_groups",
-        # ui_action
+        # ui_action (existing)
         "set_embedding",
         "set_color_by_gene",
         "set_color_by_category",
@@ -22,11 +22,18 @@ async def test_v1_catalog_includes_all_tools(fake_zarr):
         "clear_filter",
         "add_summary_obs_column",
         "add_summary_gene",
+        # ui_action (Plan 2 view-config tools, default-on as of Plan 3)
+        "set_viewport",
+        "set_summary_context",
+        "set_gene_label_column",
+        "set_render_controls",
     }
 
 
-async def test_experimental_view_tools_disabled_by_default(fake_zarr):
+async def test_experimental_view_tools_disabled_via_env(fake_zarr, monkeypatch):
+    monkeypatch.setenv("CHAT_EXPERIMENTAL_VIEW_TOOLS", "false")
     cfg = AgentConfig()
+    assert cfg.experimental_view_tools is False
     catalog = build_v1_catalog(fake_zarr, config=cfg)
     names = [t.name for t in catalog.all()]
     assert "set_viewport" not in names
