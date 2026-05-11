@@ -52,6 +52,38 @@
       ],
       "additionalProperties": false
     },
+    "filterByExpression": {
+      "type": "object",
+      "properties": {
+        "gene": {
+          "type": "string"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "gene"
+      ],
+      "additionalProperties": false
+    },
     "viewport": {
       "type": "object",
       "properties": {

@@ -16,6 +16,15 @@ class Filter(BaseModel):
     obsColumn: str
 
 
+class FilterByExpression(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    gene: str
+    min: float | None = None
+    max: float | None = None
+
+
 class Viewport(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -37,6 +46,7 @@ class Model(BaseModel):
     highlightedCategories: list[str] | None = None
     geneLabelColumn: str | None = None
     filter: Filter | None = None
+    filterByExpression: FilterByExpression | None = None
     viewport: Viewport | None = None
     pointSize: PositiveFloat | None = None
     opacity: confloat(ge=0.0, le=1.0) | None = None

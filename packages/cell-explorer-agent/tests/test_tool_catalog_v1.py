@@ -19,6 +19,7 @@ async def test_v1_catalog_includes_all_tools(fake_zarr):
         "set_color_by_gene",
         "set_color_by_category",
         "filter_by_ids",
+        "filter_by_gene_expression",
         "clear_filter",
         "add_summary_obs_column",
         "add_summary_gene",
