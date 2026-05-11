@@ -22,6 +22,9 @@ from cell_explorer_agent.tools.ui_action.filter import (
     clear_filter_tool,
     filter_by_ids_tool,
 )
+from cell_explorer_agent.tools.ui_action.filter_by_expression import (
+    filter_by_gene_expression_tool,
+)
 from cell_explorer_agent.tools.ui_action.gene_label_column import set_gene_label_column_tool
 from cell_explorer_agent.tools.ui_action.render import set_render_controls_tool
 from cell_explorer_agent.tools.ui_action.summary import (
@@ -51,6 +54,7 @@ def build_v1_catalog(z: ZarrAccess, *, config: AgentConfig) -> ToolCatalog:
     cat.register(set_color_by_gene_tool(z))
     cat.register(set_color_by_category_tool(z))
     cat.register(filter_by_ids_tool(z, filter_ids_max=config.filter_ids_max))
+    cat.register(filter_by_gene_expression_tool(z))
     cat.register(clear_filter_tool())
     cat.register(add_summary_obs_column_tool(z))
     cat.register(add_summary_gene_tool(z))

@@ -7,6 +7,9 @@ from cell_explorer_agent.tools.ui_action.filter import (
     filter_by_ids_tool,
     clear_filter_tool,
 )
+from cell_explorer_agent.tools.ui_action.filter_by_expression import (
+    filter_by_gene_expression_tool,
+)
 from cell_explorer_agent.tools.ui_action.summary import (
     add_summary_obs_column_tool,
     add_summary_gene_tool,
@@ -111,6 +114,53 @@ async def test_clear_filter():
     tool = clear_filter_tool()
     r = await tool.func()
     assert r == {"payload": {"filter": {"obsColumn": "_none", "ids": []}}}
+
+
+async def test_filter_by_gene_expression_min_only(fake_zarr):
+    tool = filter_by_gene_expression_tool(fake_zarr)
+    r = await tool.func(gene="CD8A", min=2.0)
+    assert r["payload"] == {
+        "filterByExpression": {"gene": "CD8A", "min": 2.0, "max": None}
+    }
+    assert r["matched_cells"] > 0
+    assert tool.kind == "ui_action"
+
+
+async def test_filter_by_gene_expression_range(fake_zarr):
+    tool = filter_by_gene_expression_tool(fake_zarr)
+    r = await tool.func(gene="CD8A", min=1.0, max=5.0)
+    assert r["payload"] == {
+        "filterByExpression": {"gene": "CD8A", "min": 1.0, "max": 5.0}
+    }
+
+
+async def test_filter_by_gene_expression_no_bounds(fake_zarr):
+    tool = filter_by_gene_expression_tool(fake_zarr)
+    r = await tool.func(gene="CD8A")
+    assert "error" in r
+    assert "at least one" in r["error"]
+
+
+async def test_filter_by_gene_expression_min_gt_max(fake_zarr):
+    tool = filter_by_gene_expression_tool(fake_zarr)
+    r = await tool.func(gene="CD8A", min=10.0, max=1.0)
+    assert "error" in r
+    assert "max" in r["error"]
+
+
+async def test_filter_by_gene_expression_unknown_gene(fake_zarr):
+    tool = filter_by_gene_expression_tool(fake_zarr)
+    r = await tool.func(gene="NOT_A_GENE", min=0.0)
+    assert "error" in r
+
+
+async def test_filter_by_gene_expression_no_cells_match(fake_zarr):
+    tool = filter_by_gene_expression_tool(fake_zarr)
+    # CD8A expression in the fake is rng.random*10 + (T-cell boost), so values
+    # are roughly in [0, 15]. min=1000 yields zero matches.
+    r = await tool.func(gene="CD8A", min=1000.0)
+    assert "error" in r
+    assert "no cells match" in r["error"]
 
 
 async def test_add_summary_obs_column_valid(fake_zarr):

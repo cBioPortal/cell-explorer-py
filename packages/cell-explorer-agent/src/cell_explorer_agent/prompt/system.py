@@ -54,6 +54,12 @@ def build_system_prompt(ctx: DatasetContext) -> str:
         "use them only as arguments to filter_by_ids."
     )
     lines.append(
+        "  - For 'cells with high/low <gene>' / 'CD8A > 2' style queries, use "
+        "filter_by_gene_expression(gene, min, max). Call gene_expression_summary "
+        "first to learn the actual expression range — values are dataset-specific "
+        "(log-normalized typically 0–6, but raw counts can go higher)."
+    )
+    lines.append(
         "  - Do not pan/zoom (set_viewport) or change rendering (set_render_controls) "
         "unless the user explicitly asks. The user controls the camera and visual style; "
         "agent-initiated view changes are usually unwelcome."

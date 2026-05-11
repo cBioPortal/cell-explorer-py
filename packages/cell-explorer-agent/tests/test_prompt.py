@@ -90,6 +90,20 @@ async def test_system_prompt_mentions_highlight_arg(fake_zarr):
     assert "highlight" in sys.lower()
 
 
+async def test_system_prompt_documents_filter_by_gene_expression(fake_zarr):
+    """The prompt should name filter_by_gene_expression and direct the agent
+    to call gene_expression_summary first to learn expression ranges."""
+    ctx = await build_dataset_context(
+        fake_zarr, slug="demo", name="Demo", description="A dataset"
+    )
+    sys = build_system_prompt(ctx)
+    assert "filter_by_gene_expression" in sys
+    # Cross-reference: the prompt should mention gene_expression_summary as
+    # the pre-resolution step (same pattern as describe_obs_column for
+    # filter_by_ids).
+    assert "gene_expression_summary" in sys
+
+
 async def test_system_prompt_directs_describe_obs_column_before_highlight(fake_zarr):
     """The agent should resolve exact category labels via describe_obs_column
     before passing them to either filter_by_ids or set_color_by_category's
