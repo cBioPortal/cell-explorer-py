@@ -10,8 +10,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Validate conventional commit format
+        env:
+          # Pass the title through env to avoid shell interpolation, which would
+          # break on titles containing quotes (the title gets substituted into
+          # the script as a raw string before the shell parses it).
+          TITLE: ${{ github.event.pull_request.title }}
         run: |
-          TITLE="${{ github.event.pull_request.title }}"
           PATTERN='^(feat|fix|perf|refactor|docs|style|test|build|ci|chore)(\(.+\))?\!?: .+'
           if [[ ! "$TITLE" =~ $PATTERN ]]; then
             echo "::error::PR title must follow conventional commit format: type(scope): description"
