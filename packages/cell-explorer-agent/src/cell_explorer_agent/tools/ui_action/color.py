@@ -31,22 +31,56 @@ def set_color_by_gene_tool(z: ZarrAccess) -> Tool:
 
 
 def set_color_by_category_tool(z: ZarrAccess) -> Tool:
-    async def run(category: str) -> dict[str, Any]:
+    async def run(
+        category: str,
+        highlight: list[str] | None = None,
+    ) -> dict[str, Any]:
         cols = await z.obs_columns()
         names = [c.name for c in cols]
         if category not in names:
             return {"error": f"obs column {category!r} not in dataset"}
-        payload = {"colorBy": "category", "category": category}
+
+        payload: dict[str, Any] = {"colorBy": "category", "category": category}
+
+        if highlight is not None:
+            col = await z.obs_column(category)
+            if col.dtype != "categorical" or col.categories is None:
+                return {
+                    "error": f"obs column {category!r} is not categorical; cannot highlight values"
+                }
+            allowed = set(col.categories)
+            unknown = [v for v in highlight if v not in allowed]
+            if unknown:
+                return {
+                    "error": (
+                        f"value(s) {unknown!r} not in obs column {category!r}; "
+                        f"available: {col.categories}"
+                    )
+                }
+            payload["highlightedCategories"] = list(highlight)
+
         validate_partial(payload)
         return {"payload": payload}
 
     return Tool(
         name="set_color_by_category",
         kind="ui_action",
-        description="Color the embedding by a categorical obs column.",
+        description=(
+            "Color the embedding by a categorical obs column. Optionally pass "
+            "`highlight` — a list of category values that should render at full "
+            "opacity while the rest fade to gray. Use highlight when the user "
+            "asks 'show me the T cells' / 'where are the B cells': pick the obs "
+            "column for `category` and pass the requested value(s) in `highlight`."
+        ),
         args_schema={
             "type": "object",
-            "properties": {"category": {"type": "string"}},
+            "properties": {
+                "category": {"type": "string"},
+                "highlight": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
             "required": ["category"],
             "additionalProperties": False,
         },

@@ -39,9 +39,10 @@ def build_system_prompt(ctx: DatasetContext) -> str:
     )
     lines.append(
         "  - For 'show me X cells' / 'where are X cells' / 'highlight X' on a categorical "
-        "value, use set_color_by_category to color the whole canvas by that column — the "
-        "user reads the legend to locate X. Reserve filter_by_ids for explicit isolation "
-        "requests ('filter to', 'only show', 'isolate'); it hides non-matching cells."
+        "value, use set_color_by_category(category=<column>, highlight=[<X>]) — the "
+        "highlight arg makes X render at full opacity while the rest fade to gray. "
+        "Reserve filter_by_ids for explicit isolation requests ('filter to', 'only show', "
+        "'isolate'); it hides non-matching cells from the canvas entirely."
     )
     lines.append(
         "  - Emit at most one ui-action per turn unless the user explicitly asks for multiple changes."

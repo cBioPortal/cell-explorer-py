@@ -34,6 +34,7 @@ class Model(BaseModel):
     colorBy: Literal['gene', 'category'] | None = None
     gene: str | None = None
     category: str | None = None
+    highlightedCategories: list[str] | None = None
     geneLabelColumn: str | None = None
     filter: Filter | None = None
     viewport: Viewport | None = None
