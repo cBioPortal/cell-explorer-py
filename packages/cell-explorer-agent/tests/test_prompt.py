@@ -57,3 +57,23 @@ async def test_system_prompt_warns_against_proactive_view_changes(fake_zarr):
     # The LLM should NOT proactively change view state without user prompting
     sys_lower = sys.lower()
     assert "unless" in sys_lower or "only when" in sys_lower or "do not" in sys_lower
+
+
+async def test_system_prompt_prefers_color_by_over_filter_for_show_queries(fake_zarr):
+    """The agent should reach for set_color_by_category on 'show me X' style queries,
+    not filter_by_ids (which hides non-matching cells from the view)."""
+    ctx = await build_dataset_context(
+        fake_zarr, slug="demo", name="Demo", description="A dataset"
+    )
+    sys = build_system_prompt(ctx)
+    sys_lower = sys.lower()
+    # The policy explicitly names set_color_by_category as the right choice for "show me"
+    assert "set_color_by_category" in sys
+    # The trigger phrasing for "show me" / "where are" type queries is documented
+    assert "show me" in sys_lower or "where are" in sys_lower
+    # filter_by_ids is reserved for explicit isolation requests
+    assert (
+        "isolate" in sys_lower
+        or "filter to" in sys_lower
+        or "only show" in sys_lower
+    )

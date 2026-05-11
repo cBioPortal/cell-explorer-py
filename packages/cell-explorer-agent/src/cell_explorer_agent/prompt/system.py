@@ -38,6 +38,12 @@ def build_system_prompt(ctx: DatasetContext) -> str:
         "  - Use describe_obs_column to learn category values before calling filter_by_ids."
     )
     lines.append(
+        "  - For 'show me X cells' / 'where are X cells' / 'highlight X' on a categorical "
+        "value, use set_color_by_category to color the whole canvas by that column — the "
+        "user reads the legend to locate X. Reserve filter_by_ids for explicit isolation "
+        "requests ('filter to', 'only show', 'isolate'); it hides non-matching cells."
+    )
+    lines.append(
         "  - Emit at most one ui-action per turn unless the user explicitly asks for multiple changes."
     )
     lines.append(
