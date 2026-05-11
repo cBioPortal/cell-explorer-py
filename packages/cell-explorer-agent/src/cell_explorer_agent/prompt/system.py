@@ -35,7 +35,9 @@ def build_system_prompt(ctx: DatasetContext) -> str:
         "  - Prefer bounded reads (get_dataset_schema, describe_obs_column) before heavy queries."
     )
     lines.append(
-        "  - Use describe_obs_column to learn category values before calling filter_by_ids."
+        "  - Use describe_obs_column to learn category values before calling filter_by_ids "
+        "OR passing `highlight` to set_color_by_category. Naming conventions vary by "
+        "dataset (e.g. 'T.cell' vs 'T cell')."
     )
     lines.append(
         "  - For 'show me X cells' / 'where are X cells' / 'highlight X' on a categorical "

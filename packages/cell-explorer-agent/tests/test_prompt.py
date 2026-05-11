@@ -88,3 +88,18 @@ async def test_system_prompt_mentions_highlight_arg(fake_zarr):
     sys = build_system_prompt(ctx)
     # The new arg is named so the LLM knows it exists
     assert "highlight" in sys.lower()
+
+
+async def test_system_prompt_directs_describe_obs_column_before_highlight(fake_zarr):
+    """The agent should resolve exact category labels via describe_obs_column
+    before passing them to either filter_by_ids or set_color_by_category's
+    highlight arg. Otherwise it guesses ('T cell' vs 'T.cell') and fails
+    tool-side validation."""
+    ctx = await build_dataset_context(
+        fake_zarr, slug="demo", name="Demo", description="A dataset"
+    )
+    sys = build_system_prompt(ctx)
+    # The describe_obs_column policy now covers both consumers
+    assert "describe_obs_column" in sys
+    # Both consumer tools are named together
+    assert "filter_by_ids" in sys and "set_color_by_category" in sys
