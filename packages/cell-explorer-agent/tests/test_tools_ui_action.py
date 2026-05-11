@@ -54,6 +54,39 @@ async def test_set_color_by_category_unknown(fake_zarr):
     assert "error" in r
 
 
+async def test_set_color_by_category_with_highlight_valid(fake_zarr):
+    tool = set_color_by_category_tool(fake_zarr)
+    r = await tool.func(category="cell_type", highlight=["T cell"])
+    assert r == {
+        "payload": {
+            "colorBy": "category",
+            "category": "cell_type",
+            "highlightedCategories": ["T cell"],
+        }
+    }
+
+
+async def test_set_color_by_category_with_multiple_highlights(fake_zarr):
+    tool = set_color_by_category_tool(fake_zarr)
+    r = await tool.func(category="cell_type", highlight=["T cell", "Monocyte"])
+    assert r["payload"]["highlightedCategories"] == ["T cell", "Monocyte"]
+
+
+async def test_set_color_by_category_unknown_highlight(fake_zarr):
+    tool = set_color_by_category_tool(fake_zarr)
+    r = await tool.func(category="cell_type", highlight=["NotARealCategory"])
+    assert "error" in r
+    assert "NotARealCategory" in r["error"]
+
+
+async def test_set_color_by_category_highlight_on_non_categorical(fake_zarr):
+    tool = set_color_by_category_tool(fake_zarr)
+    # n_counts is numeric in the fake fixture; can't highlight values on it
+    r = await tool.func(category="n_counts", highlight=["100"])
+    assert "error" in r
+    assert "categorical" in r["error"]
+
+
 async def test_filter_by_ids_valid(fake_zarr):
     tool = filter_by_ids_tool(fake_zarr, filter_ids_max=100_000)
     r = await tool.func(obs_column="cell_type", ids=["cell0", "cell1"])

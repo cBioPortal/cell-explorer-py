@@ -24,6 +24,12 @@
     "category": {
       "type": "string"
     },
+    "highlightedCategories": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "geneLabelColumn": {
       "type": "string"
     },
