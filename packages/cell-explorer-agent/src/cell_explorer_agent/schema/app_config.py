@@ -52,6 +52,8 @@ class Model(BaseModel):
     opacity: confloat(ge=0.0, le=1.0) | None = None
     summaryObsColumns: list[str] | None = None
     summaryGenes: list[str] | None = None
+    removeSummaryObsColumns: list[str] | None = None
+    removeSummaryGenes: list[str] | None = None
     summaryContext: Literal['overall', 'selections'] | None = None
     selectionDisplayMode: Literal['dim', 'hide'] | None = None
     showHeader: bool | None = None

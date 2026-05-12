@@ -14,6 +14,9 @@ from cell_explorer_agent.tools.ui_action.filter_by_expression import (
 from cell_explorer_agent.tools.ui_action.summary import (
     add_summary_obs_column_tool,
     add_summary_gene_tool,
+    clear_summary_tool,
+    remove_summary_gene_tool,
+    remove_summary_obs_column_tool,
 )
 from cell_explorer_agent.tools.ui_action.viewport import set_viewport_tool
 from cell_explorer_agent.tools.ui_action.summary_context import set_summary_context_tool
@@ -308,4 +311,25 @@ async def test_clear_render_controls_emits_nulls():
     tool = clear_render_controls_tool()
     r = await tool.func()
     assert r == {"payload": {"pointSize": None, "opacity": None}}
+    assert tool.kind == "ui_action"
+
+
+async def test_remove_summary_obs_column_emits_payload():
+    tool = remove_summary_obs_column_tool()
+    r = await tool.func(obs_column="cell_type")
+    assert r == {"payload": {"removeSummaryObsColumns": ["cell_type"]}}
+    assert tool.kind == "ui_action"
+
+
+async def test_remove_summary_gene_emits_payload():
+    tool = remove_summary_gene_tool()
+    r = await tool.func(gene="CD8A")
+    assert r == {"payload": {"removeSummaryGenes": ["CD8A"]}}
+    assert tool.kind == "ui_action"
+
+
+async def test_clear_summary_emits_both_nulls():
+    tool = clear_summary_tool()
+    r = await tool.func()
+    assert r == {"payload": {"summaryObsColumns": None, "summaryGenes": None}}
     assert tool.kind == "ui_action"

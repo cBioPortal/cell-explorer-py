@@ -71,6 +71,11 @@ def build_system_prompt(ctx: DatasetContext) -> str:
         "without affecting filters."
     )
     lines.append(
+        "  - For 'unpin <thing> from the summary' use "
+        "remove_summary_obs_column / remove_summary_gene. For 'clear the "
+        "summary' / 'remove everything from summary' use clear_summary."
+    )
+    lines.append(
         "  - Do not pan/zoom (set_viewport) or change rendering (set_render_controls) "
         "unless the user explicitly asks. The user controls the camera and visual style; "
         "agent-initiated view changes are usually unwelcome."
