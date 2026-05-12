@@ -53,6 +53,7 @@ class Model(BaseModel):
     summaryObsColumns: list[str] | None = None
     summaryGenes: list[str] | None = None
     summaryContext: Literal['overall', 'selections'] | None = None
+    selectionDisplayMode: Literal['dim', 'hide'] | None = None
     showHeader: bool | None = None
     showLeftSidebar: bool | None = None
     showRightSidebar: bool | None = None
