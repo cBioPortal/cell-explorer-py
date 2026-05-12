@@ -15,6 +15,7 @@ class Script:
     called_with_system: str = ""
     called_with_message_count: int = 0
     called_with_tool_names: list[str] = field(default_factory=list)
+    called_with_view_state_block: str | None = None
 
 
 @dataclass
@@ -30,12 +31,14 @@ class FakeLLMClient(LLMClient):
         model: str,
         max_tokens: int,
         timeout_s: float,
+        view_state_block: str | None = None,
     ) -> AsyncIterator[LLMEvent]:
         assert self.scripts, "FakeLLMClient: no more scripts"
         s = self.scripts.pop(0)
         s.called_with_system = system
         s.called_with_message_count = len(messages)
         s.called_with_tool_names = [t.name for t in tools]
+        s.called_with_view_state_block = view_state_block
 
         async def gen() -> AsyncIterator[LLMEvent]:
             for e in s.events:

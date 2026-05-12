@@ -90,3 +90,104 @@ def test_unknown_transport_raises():
 
     with pytest.raises(ValueError, match="unknown transport"):
         AnthropicLLMClient(transport="nope")  # type: ignore[arg-type]
+
+
+async def _drain(stream):
+    async for _ in stream:
+        pass
+
+
+def _mock_anthropic_stream_cm():
+    """A minimal async context manager that mimics the Anthropic SDK stream
+    object well enough to drive _stream() through to get_final_message()."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    final = MagicMock()
+    final.usage.input_tokens = 0
+    final.usage.output_tokens = 0
+    final.usage.cache_read_input_tokens = 0
+    final.usage.cache_creation_input_tokens = 0
+    final.stop_reason = "end_turn"
+
+    stream_obj = MagicMock()
+    # async iterator over chunks — yield nothing (no text, no tools)
+    async def _aiter(self):
+        if False:
+            yield None
+        return
+    stream_obj.__aiter__ = _aiter
+    stream_obj.get_final_message = AsyncMock(return_value=final)
+
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=stream_obj)
+    cm.__aexit__ = AsyncMock(return_value=None)
+    return cm
+
+
+async def test_stream_emits_single_cached_block_when_no_view_state(monkeypatch):
+    """Without view_state_block, system arg should be a single cached block —
+    the existing cache prefix behavior must not regress."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "dummy")
+    with patch("anthropic.AsyncAnthropic") as MockA:
+        captured = {}
+
+        def capture_stream(**kwargs):
+            captured.update(kwargs)
+            return _mock_anthropic_stream_cm()
+
+        MockA.return_value.messages.stream = capture_stream
+        client = AnthropicLLMClient(transport="anthropic")
+        await _drain(
+            client.stream(
+                system="STATIC",
+                messages=[UserMessage(content="hi")],
+                tools=[],
+                model="m",
+                max_tokens=100,
+                timeout_s=10,
+            )
+        )
+
+    blocks = captured["system"]
+    assert len(blocks) == 1
+    assert blocks[0] == {
+        "type": "text",
+        "text": "STATIC",
+        "cache_control": {"type": "ephemeral"},
+    }
+
+
+async def test_stream_appends_uncached_block_when_view_state_present(monkeypatch):
+    """With view_state_block, system arg has 2 blocks: cached static + uncached view state.
+    Caching the dynamic block would invalidate the cache every turn."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "dummy")
+    with patch("anthropic.AsyncAnthropic") as MockA:
+        captured = {}
+
+        def capture_stream(**kwargs):
+            captured.update(kwargs)
+            return _mock_anthropic_stream_cm()
+
+        MockA.return_value.messages.stream = capture_stream
+        client = AnthropicLLMClient(transport="anthropic")
+        await _drain(
+            client.stream(
+                system="STATIC",
+                messages=[UserMessage(content="hi")],
+                tools=[],
+                model="m",
+                max_tokens=100,
+                timeout_s=10,
+                view_state_block="VIEW",
+            )
+        )
+
+    blocks = captured["system"]
+    assert len(blocks) == 2
+    # Static prefix stays cached
+    assert blocks[0]["text"] == "STATIC"
+    assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+    # View-state block has NO cache_control
+    assert blocks[1]["type"] == "text"
+    assert blocks[1]["text"] == "VIEW"
+    assert "cache_control" not in blocks[1]

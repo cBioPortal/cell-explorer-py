@@ -111,6 +111,7 @@ class AnthropicLLMClient(LLMClient):
         model: str,
         max_tokens: int,
         timeout_s: float,
+        view_state_block: str | None = None,
     ) -> AsyncIterator[LLMEvent]:
         return self._stream(
             system=system,
@@ -119,6 +120,7 @@ class AnthropicLLMClient(LLMClient):
             model=model,
             max_tokens=max_tokens,
             timeout_s=timeout_s,
+            view_state_block=view_state_block,
         )
 
     async def _stream(
@@ -130,11 +132,16 @@ class AnthropicLLMClient(LLMClient):
         model: str,
         max_tokens: int,
         timeout_s: float,
+        view_state_block: str | None = None,
     ) -> AsyncIterator[LLMEvent]:
-        # Cached system prompt — dataset context is stable per session.
-        system_blocks = [
+        # Cached system prompt — dataset context + policy are stable per session.
+        # View state changes every turn, so it goes in a separate uncached block
+        # appended after the cached prefix.
+        system_blocks: list[dict[str, Any]] = [
             {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
         ]
+        if view_state_block:
+            system_blocks.append({"type": "text", "text": view_state_block})
         anthropic_tools = neutral_tools_to_anthropic(tools)
         anthropic_messages = neutral_messages_to_anthropic(messages)
 

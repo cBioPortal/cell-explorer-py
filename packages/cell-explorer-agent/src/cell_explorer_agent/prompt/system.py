@@ -1,8 +1,13 @@
 """System prompt builder.
 
 The prompt's dataset-metadata block is stable for a chat session, so downstream
-adapters can mark it as a cache prefix (Anthropic prompt caching).
+adapters can mark it as a cache prefix (Anthropic prompt caching). The view-state
+block is dynamic (changes every turn) and is delivered as a separate, non-cached
+system block — see format_view_state_block().
 """
+
+import json
+from typing import Any
 
 from cell_explorer_agent.prompt.dataset_context import DatasetContext
 
@@ -115,3 +120,24 @@ def build_system_prompt(ctx: DatasetContext) -> str:
         "Only use when the user explicitly asks to change the visual style."
     )
     return "\n".join(lines)
+
+
+def format_view_state_block(view_state: dict[str, Any]) -> str | None:
+    """Render a compact view-state block for the agent's system context.
+
+    Returns None for empty snapshots — callers should then omit the block
+    entirely (no point sending an empty hint to the model). The frontend
+    omits default values from its snapshot, so an empty dict means the user
+    is on the default view.
+    """
+    if not view_state:
+        return None
+    payload = json.dumps(view_state, separators=(",", ":"))
+    return (
+        "Current view state (what the user is looking at right now):\n"
+        f"{payload}\n"
+        "Use this to interpret relative queries like 'zoom in more', "
+        "'switch to a different gene', or 'change the color scale'. "
+        "Only fields different from defaults are listed; omitted fields "
+        "are at their defaults."
+    )

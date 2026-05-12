@@ -51,4 +51,5 @@ class LLMClient(Protocol):
         model: str,
         max_tokens: int,
         timeout_s: float,
+        view_state_block: str | None = None,
     ) -> AsyncIterator[LLMEvent]: ...

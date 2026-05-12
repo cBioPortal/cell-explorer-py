@@ -150,7 +150,8 @@ class _FakeChatAgent:
         self._run_events = run_events or []
         self._run_raises = run_raises  # exception or callable[int -> exception | None]
 
-    async def run(self, *, messages):
+    async def run(self, *, messages, view_state=None):
+        self.last_view_state = view_state
         for i, ev in enumerate(self._run_events):
             yield ev
             if self._run_raises is not None:
@@ -407,6 +408,63 @@ def test_post_turn_returns_404_when_chat_disabled(seeded_app):
     })
     assert response.status_code == 404
     assert "not available" in response.json()["detail"].lower()
+
+
+def test_post_turn_forwards_view_state_to_agent(seeded_app):
+    """Wire-level: a `view_state` field on the request reaches agent.run()."""
+    import json as _json
+
+    from cell_explorer_agent.events import Done, TextDelta, TokenUsage
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app)
+
+    fake = _FakeChatAgent(run_events=[
+        TextDelta(text="ok"),
+        Done(usage=TokenUsage(input_tokens=1, output_tokens=1)),
+    ])
+
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        with client.stream("POST", "/api/chat/public-atlas/turns", json={
+            "messages": [{"role": "user", "content": "zoom in"}],
+            "view_state": {"embedding": "X_umap", "gene": "CD8A"},
+        }) as r:
+            assert r.status_code == 200
+            # consume stream so the agent.run() generator is actually driven
+            for _ in r.iter_lines():
+                pass
+
+    assert fake.last_view_state == {"embedding": "X_umap", "gene": "CD8A"}
+
+
+def test_post_turn_view_state_optional(seeded_app):
+    """Omitting view_state keeps the request shape backwards-compatible —
+    agent.run() receives None."""
+    from cell_explorer_agent.events import Done, TextDelta, TokenUsage
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app)
+
+    fake = _FakeChatAgent(run_events=[
+        TextDelta(text="ok"),
+        Done(usage=TokenUsage()),
+    ])
+
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        with client.stream("POST", "/api/chat/public-atlas/turns", json={
+            "messages": [{"role": "user", "content": "hi"}],
+        }) as r:
+            assert r.status_code == 200
+            for _ in r.iter_lines():
+                pass
+
+    assert fake.last_view_state is None
 
 
 def test_post_turn_midstream_error_emits_error_event(seeded_app):
