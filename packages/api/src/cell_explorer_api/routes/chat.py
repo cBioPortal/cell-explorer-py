@@ -191,6 +191,17 @@ async def post_chat_turn(
     except ChatSessionError as exc:
         raise _http_for_chat_session_error(exc) from exc
 
+    # Defense-in-depth: enforce the global chat role even though the
+    # frontend normally disables the input when can_chat=False.
+    permission = compute_chat_permission(
+        user, required_role=settings.chat_required_role,
+    )
+    if not permission.can_chat:
+        raise HTTPException(
+            status_code=403,
+            detail=f"missing chat role: {settings.chat_required_role}",
+        )
+
     return StreamingResponse(
         _ndjson_event_stream(
             agent, _to_agent_messages(body.messages), body.view_state

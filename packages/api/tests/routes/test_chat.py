@@ -592,3 +592,64 @@ def test_get_context_chat_disabled_dataset_returns_404(seeded_app):
 
     assert response.status_code == 404
     assert "chat is not available" in response.json()["detail"].lower()
+
+
+def test_post_turn_missing_chat_role_returns_403(seeded_app):
+    seeded_app.state.settings.chat_required_role = "cell-explorer-chat"
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, roles=["something-else"])
+    fake = _FakeChatAgent()
+
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.post("/api/chat/public-atlas/turns", json={
+            "messages": [{"role": "user", "content": "hi"}],
+        })
+
+    assert response.status_code == 403
+    assert "cell-explorer-chat" in response.json()["detail"]
+
+
+def test_post_turn_with_chat_role_streams_ok(seeded_app):
+    """Sanity: when the role is present, the turn proceeds normally."""
+    import json as _json
+    from cell_explorer_agent.events import Done, TextDelta, TokenUsage
+
+    seeded_app.state.settings.chat_required_role = "cell-explorer-chat"
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, roles=["cell-explorer-chat"])
+    fake = _FakeChatAgent(run_events=[
+        TextDelta(text="ok"),
+        Done(usage=TokenUsage(input_tokens=1, output_tokens=1)),
+    ])
+
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        with client.stream("POST", "/api/chat/public-atlas/turns", json={
+            "messages": [{"role": "user", "content": "hi"}],
+        }) as r:
+            assert r.status_code == 200
+            lines = [_json.loads(l) for l in r.iter_lines() if l]
+    assert [l["type"] for l in lines] == ["text_delta", "done"]
+
+
+def test_post_turn_chat_disabled_dataset_returns_404(seeded_app):
+    from cell_explorer_api.services.chat_session import ChatDisabledError
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app)
+
+    async def _make_agent(**_):
+        raise ChatDisabledError("chat is not enabled for dataset 'public-atlas'")
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.post("/api/chat/public-atlas/turns", json={
+            "messages": [{"role": "user", "content": "hi"}],
+        })
+
+    assert response.status_code == 404
+    assert "chat is not available" in response.json()["detail"].lower()
