@@ -18,6 +18,7 @@ async def test_v1_catalog_includes_all_tools(fake_zarr):
         "set_embedding",
         "set_color_by_gene",
         "set_color_by_category",
+        "clear_color_by",
         "filter_by_ids",
         "filter_by_gene_expression",
         "set_selection_display_mode",
@@ -29,6 +30,7 @@ async def test_v1_catalog_includes_all_tools(fake_zarr):
         "set_summary_context",
         "set_gene_label_column",
         "set_render_controls",
+        "clear_render_controls",
     }
 
 
