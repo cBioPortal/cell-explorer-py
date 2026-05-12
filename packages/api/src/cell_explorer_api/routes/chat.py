@@ -13,10 +13,13 @@ from cell_explorer_agent.events import Error
 from cell_explorer_agent.messages import AssistantMessage, UserMessage
 from cell_explorer_api.auth.dependencies import require_auth
 from cell_explorer_api.auth.models import User
+from cell_explorer_api.auth.optional import optional_auth
 from cell_explorer_api.config import Settings
 from cell_explorer_api.db import get_db
+from cell_explorer_api.services.access import compute_chat_permission
 from cell_explorer_api.services.chat_session import (
     AccessDeniedError,
+    ChatDisabledError,
     ChatSessionError,
     CredentialMintError,
     DatasetNotFoundError,
@@ -61,6 +64,11 @@ class ObsColumnInfo(BaseModel):
     values: list[str] | None = None
 
 
+class ChatPermissionResponse(BaseModel):
+    can_chat: bool
+    reason: str | None = None
+
+
 class ContextResponse(BaseModel):
     slug: str
     name: str
@@ -70,6 +78,7 @@ class ContextResponse(BaseModel):
     obs_columns: list[ObsColumnInfo]
     embedding_keys: list[str]
     available_tools: list[str]
+    permission: ChatPermissionResponse
 
 
 def _to_agent_messages(messages: list[ChatMessage]):
@@ -104,6 +113,11 @@ async def _ndjson_event_stream(
 def _http_for_chat_session_error(exc: ChatSessionError) -> HTTPException:
     if isinstance(exc, DatasetNotFoundError):
         return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, ChatDisabledError):
+        return HTTPException(
+            status_code=404,
+            detail="Chat is not available for this dataset",
+        )
     if isinstance(exc, AccessDeniedError):
         return HTTPException(status_code=403, detail=str(exc))
     if isinstance(exc, CredentialMintError):
@@ -120,17 +134,22 @@ def _http_for_chat_session_error(exc: ChatSessionError) -> HTTPException:
 async def get_chat_context(
     slug: str,
     request: Request,
-    user: User = Depends(require_auth),
+    user: User | None = Depends(optional_auth),
     db: AsyncSession = Depends(get_db),
 ) -> ContextResponse:
     settings: Settings = request.app.state.settings
     if not settings.chat_enabled:
         raise HTTPException(status_code=404, detail="Chat is not available")
     try:
-        agent = await make_chat_agent(user=user, dataset_slug=slug, db=db, settings=settings)
+        agent = await make_chat_agent(
+            user=user, dataset_slug=slug, db=db, settings=settings,
+        )
     except ChatSessionError as exc:
         raise _http_for_chat_session_error(exc) from exc
 
+    permission = compute_chat_permission(
+        user, required_role=settings.chat_required_role,
+    )
     ctx = agent.dataset_ctx
     return ContextResponse(
         slug=ctx.slug,
@@ -149,6 +168,10 @@ async def get_chat_context(
         ],
         embedding_keys=list(ctx.embedding_keys),
         available_tools=[t.name for t in agent.catalog.all()],
+        permission=ChatPermissionResponse(
+            can_chat=permission.can_chat,
+            reason=permission.reason,
+        ),
     )
 
 
@@ -167,6 +190,17 @@ async def post_chat_turn(
         agent = await make_chat_agent(user=user, dataset_slug=slug, db=db, settings=settings)
     except ChatSessionError as exc:
         raise _http_for_chat_session_error(exc) from exc
+
+    # Defense-in-depth: enforce the global chat role even though the
+    # frontend normally disables the input when can_chat=False.
+    permission = compute_chat_permission(
+        user, required_role=settings.chat_required_role,
+    )
+    if not permission.can_chat:
+        raise HTTPException(
+            status_code=403,
+            detail=f"missing chat role: {settings.chat_required_role}",
+        )
 
     return StreamingResponse(
         _ndjson_event_stream(

@@ -46,6 +46,10 @@ class ZarrUnreachableError(ChatSessionError):
     pass
 
 
+class ChatDisabledError(ChatSessionError):
+    """Raised when chat is not enabled for the requested dataset."""
+
+
 def _credential_to_headers(credential: dict[str, Any]) -> dict[str, str]:
     """Translate mint_credentials output into HTTP headers for ZarrStore.open."""
     kind = credential.get("credential_type")
@@ -86,6 +90,12 @@ async def make_chat_agent(
         roles = ", ".join(dataset.required_roles) if dataset.required_roles else "(none)"
         raise AccessDeniedError(
             f"insufficient permissions for {dataset_slug!r}; required roles: {roles}"
+        )
+
+    # 2.5. Chat-disabled gate (Layer 3) — short-circuit before zarr work.
+    if not dataset.chat_enabled:
+        raise ChatDisabledError(
+            f"chat is not enabled for dataset {dataset_slug!r}"
         )
 
     # 3. Mint credentials (private only) and compute URL + headers.

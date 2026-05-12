@@ -18,42 +18,44 @@ async def seed(database_url: str) -> None:
         await conn.run_sync(SQLModel.metadata.create_all)
 
     async with AsyncSession(engine) as session:
-        # Public datasource (no credentials needed)
-        public_cdn = Datasource(
-            name="Public CDN",
+        # Public datasource — dev server serving zarr stores without auth
+        public_dev = Datasource(
+            name="Local Dev Server",
             type=DatasourceType.S3_CLOUDFRONT,
-            base_url="https://public-data.cbioportal.org",
+            base_url="https://localhost:3005",
         )
 
-        # Private datasource (requires credential_ref env vars)
-        private_cdn = Datasource(
-            name="MSK Internal",
+        # Private datasource — zarr-auth-proxy requiring JWT bearer tokens
+        zarr_proxy = Datasource(
+            name="Zarr Auth Proxy",
             type=DatasourceType.HTTP_TOKEN,
-            base_url="https://internal.msk.org/zarr",
-            credential_ref="MSK_INTERNAL",
+            base_url="http://localhost:8002",
+            credential_ref="LOCAL",
         )
 
-        session.add(public_cdn)
-        session.add(private_cdn)
+        session.add(public_dev)
+        session.add(zarr_proxy)
         await session.flush()
 
         datasets = [
             Dataset(
-                datasource_id=public_cdn.id,
-                name="BRCA Tumor Atlas (Demo)",
-                slug="brca-demo",
-                path="brca-tumor-atlas/v1.zarr",
-                description="Public demo breast cancer single-cell atlas",
+                datasource_id=public_dev.id,
+                name="PBMC 3K (Public)",
+                slug="pbmc3k-public",
+                path="pbmc3k.zarr",
+                description="Public PBMC 3K single-cell dataset",
                 is_public=True,
+                chat_enabled=True,
             ),
             Dataset(
-                datasource_id=private_cdn.id,
-                name="PDX Models Internal",
-                slug="pdx-internal",
-                path="pdx-models/latest.zarr",
-                description="Internal PDX model single-cell data",
+                datasource_id=zarr_proxy.id,
+                name="PBMC 3K (Private)",
+                slug="pbmc3k-private",
+                path="pbmc3k.zarr",
+                description="Private PBMC 3K behind zarr-auth-proxy",
                 is_public=False,
-                required_roles=["lab-pdx"],
+                required_roles=["test-role"],
+                chat_enabled=True,
             ),
         ]
         for ds in datasets:

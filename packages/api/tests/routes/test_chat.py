@@ -61,6 +61,7 @@ async def seeded_app(app, db_url):
             slug="public-atlas",
             path="datasets/public.zarr",
             is_public=True,
+            chat_enabled=True,  # NEW
         ))
         await session.commit()
 
@@ -189,11 +190,19 @@ def test_get_context_happy_path(seeded_app):
     assert data["available_tools"] == ["get_dataset_schema"]
 
 
-def test_get_context_unauthenticated_returns_401(seeded_app):
+def test_get_context_anonymous_does_not_401(seeded_app):
+    """After switching to optional_auth, /context returns 200 for anonymous
+    users on chat-enabled datasets (with permission.reason='requires_auth')."""
     client = TestClient(seeded_app)
-    # No cookie set.
-    response = client.get("/api/chat/public-atlas/context")
-    assert response.status_code == 401
+    fake = _FakeChatAgent()
+
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.get("/api/chat/public-atlas/context")
+
+    assert response.status_code == 200
 
 
 def test_get_context_dataset_not_found_returns_404(seeded_app):
@@ -494,3 +503,153 @@ def test_post_turn_midstream_error_emits_error_event(seeded_app):
     assert types == ["text_delta", "error"]
     assert lines[1]["message"] == "chat failed: boom"
     assert lines[1]["retryable"] is False
+
+
+# ---------- permission field tests ----------
+
+def test_get_context_includes_permission_when_authed_with_no_role_required(seeded_app):
+    """Default config: no CHAT_REQUIRED_ROLE => any authed user passes."""
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app)
+    fake = _FakeChatAgent()
+
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.get("/api/chat/public-atlas/context")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["permission"] == {"can_chat": True, "reason": None}
+
+
+def test_get_context_permission_missing_role(seeded_app):
+    """Authed user without the required role gets can_chat=false."""
+    seeded_app.state.settings.chat_required_role = "cell-explorer-chat"
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, roles=["something-else"])
+    fake = _FakeChatAgent()
+
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.get("/api/chat/public-atlas/context")
+
+    assert response.status_code == 200
+    assert response.json()["permission"] == {
+        "can_chat": False,
+        "reason": "missing_role:cell-explorer-chat",
+    }
+
+
+def test_get_context_permission_user_has_role(seeded_app):
+    seeded_app.state.settings.chat_required_role = "cell-explorer-chat"
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, roles=["cell-explorer-chat"])
+    fake = _FakeChatAgent()
+
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.get("/api/chat/public-atlas/context")
+
+    assert response.status_code == 200
+    assert response.json()["permission"] == {"can_chat": True, "reason": None}
+
+
+def test_get_context_anonymous_returns_requires_auth(seeded_app):
+    """Anonymous on a public chat-enabled dataset: 200 + requires_auth."""
+    client = TestClient(seeded_app)
+    # No cookie — anonymous.
+    fake = _FakeChatAgent()
+
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.get("/api/chat/public-atlas/context")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["permission"] == {
+        "can_chat": False,
+        "reason": "requires_auth",
+    }
+
+
+def test_get_context_chat_disabled_dataset_returns_404(seeded_app):
+    from cell_explorer_api.services.chat_session import ChatDisabledError
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app)
+
+    async def _make_agent(**_):
+        raise ChatDisabledError("chat is not enabled for dataset 'public-atlas'")
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.get("/api/chat/public-atlas/context")
+
+    assert response.status_code == 404
+    assert "chat is not available" in response.json()["detail"].lower()
+
+
+def test_post_turn_missing_chat_role_returns_403(seeded_app):
+    seeded_app.state.settings.chat_required_role = "cell-explorer-chat"
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, roles=["something-else"])
+    fake = _FakeChatAgent()
+
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.post("/api/chat/public-atlas/turns", json={
+            "messages": [{"role": "user", "content": "hi"}],
+        })
+
+    assert response.status_code == 403
+    assert "cell-explorer-chat" in response.json()["detail"]
+
+
+def test_post_turn_with_chat_role_streams_ok(seeded_app):
+    """Sanity: when the role is present, the turn proceeds normally."""
+    import json as _json
+    from cell_explorer_agent.events import Done, TextDelta, TokenUsage
+
+    seeded_app.state.settings.chat_required_role = "cell-explorer-chat"
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, roles=["cell-explorer-chat"])
+    fake = _FakeChatAgent(run_events=[
+        TextDelta(text="ok"),
+        Done(usage=TokenUsage(input_tokens=1, output_tokens=1)),
+    ])
+
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        with client.stream("POST", "/api/chat/public-atlas/turns", json={
+            "messages": [{"role": "user", "content": "hi"}],
+        }) as r:
+            assert r.status_code == 200
+            lines = [_json.loads(l) for l in r.iter_lines() if l]
+    assert [l["type"] for l in lines] == ["text_delta", "done"]
+
+
+def test_post_turn_chat_disabled_dataset_returns_404(seeded_app):
+    from cell_explorer_api.services.chat_session import ChatDisabledError
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app)
+
+    async def _make_agent(**_):
+        raise ChatDisabledError("chat is not enabled for dataset 'public-atlas'")
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.post("/api/chat/public-atlas/turns", json={
+            "messages": [{"role": "user", "content": "hi"}],
+        })
+
+    assert response.status_code == 404
+    assert "chat is not available" in response.json()["detail"].lower()

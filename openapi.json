@@ -740,6 +740,30 @@
         ],
         "title": "ChatMessage"
       },
+      "ChatPermissionResponse": {
+        "properties": {
+          "can_chat": {
+            "type": "boolean",
+            "title": "Can Chat"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "can_chat"
+        ],
+        "title": "ChatPermissionResponse"
+      },
       "ContextResponse": {
         "properties": {
           "slug": {
@@ -782,6 +806,9 @@
             },
             "type": "array",
             "title": "Available Tools"
+          },
+          "permission": {
+            "$ref": "#/components/schemas/ChatPermissionResponse"
           }
         },
         "type": "object",
@@ -793,7 +820,8 @@
           "n_var",
           "obs_columns",
           "embedding_keys",
-          "available_tools"
+          "available_tools",
+          "permission"
         ],
         "title": "ContextResponse"
       },
@@ -856,6 +884,10 @@
             },
             "type": "array",
             "title": "Required Roles"
+          },
+          "chat_enabled": {
+            "type": "boolean",
+            "title": "Chat Enabled"
           }
         },
         "type": "object",
@@ -867,7 +899,8 @@
           "path",
           "description",
           "is_public",
-          "required_roles"
+          "required_roles",
+          "chat_enabled"
         ],
         "title": "DatasetAdminResponse"
       },
@@ -912,6 +945,11 @@
             "type": "array",
             "title": "Required Roles",
             "default": []
+          },
+          "chat_enabled": {
+            "type": "boolean",
+            "title": "Chat Enabled",
+            "default": false
           }
         },
         "type": "object",
@@ -974,6 +1012,10 @@
               }
             ],
             "title": "Url"
+          },
+          "chat_enabled": {
+            "type": "boolean",
+            "title": "Chat Enabled"
           }
         },
         "type": "object",
@@ -982,7 +1024,8 @@
           "name",
           "description",
           "is_public",
-          "url"
+          "url",
+          "chat_enabled"
         ],
         "title": "DatasetResponse"
       },
@@ -1045,6 +1088,17 @@
               }
             ],
             "title": "Required Roles"
+          },
+          "chat_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chat Enabled"
           }
         },
         "type": "object",
@@ -1062,6 +1116,17 @@
           "base_url": {
             "type": "string",
             "title": "Base Url"
+          },
+          "internal_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Internal Base Url"
           },
           "credential_ref": {
             "anyOf": [
@@ -1116,6 +1181,17 @@
             "type": "string",
             "title": "Base Url"
           },
+          "internal_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Internal Base Url"
+          },
           "credential_ref": {
             "anyOf": [
               {
@@ -1134,6 +1210,7 @@
           "name",
           "type",
           "base_url",
+          "internal_base_url",
           "credential_ref"
         ],
         "title": "DatasourceResponse"
@@ -1170,6 +1247,17 @@
               }
             ],
             "title": "Base Url"
+          },
+          "internal_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Internal Base Url"
           },
           "credential_ref": {
             "anyOf": [

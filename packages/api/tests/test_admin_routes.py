@@ -236,3 +236,69 @@ def test_delete_dataset(seeded_app):
     # Verify it's gone
     response = client.get("/api/datasets/delete-me")
     assert response.status_code == 404
+
+
+# --- chat_enabled field ---
+
+def test_admin_create_dataset_with_chat_enabled(seeded_app):
+    """Admin POST /datasets accepts chat_enabled and round-trips it."""
+    ds_id = seeded_app.state.test_datasource_id
+    client = TestClient(seeded_app)
+    response = client.post(
+        "/api/admin/datasets",
+        headers=AUTH_HEADER,
+        json={
+            "datasource_id": ds_id,
+            "name": "Chat Demo",
+            "slug": "chat-demo",
+            "path": "demo.zarr",
+            "is_public": True,
+            "chat_enabled": True,
+        },
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["chat_enabled"] is True
+
+
+def test_admin_update_dataset_toggles_chat_enabled(seeded_app):
+    """Admin PUT /datasets/{slug} can toggle chat_enabled."""
+    ds_id = seeded_app.state.test_datasource_id
+    client = TestClient(seeded_app)
+    # Create with chat_enabled=True first
+    client.post(
+        "/api/admin/datasets",
+        headers=AUTH_HEADER,
+        json={
+            "datasource_id": ds_id,
+            "name": "Toggle Chat",
+            "slug": "toggle-chat",
+            "path": "toggle.zarr",
+            "is_public": True,
+            "chat_enabled": True,
+        },
+    )
+    response = client.put(
+        "/api/admin/datasets/toggle-chat",
+        headers=AUTH_HEADER,
+        json={"chat_enabled": False},
+    )
+    assert response.status_code == 200
+    assert response.json()["chat_enabled"] is False
+
+
+def test_admin_create_dataset_chat_enabled_defaults_false(seeded_app):
+    """chat_enabled defaults to False when not provided."""
+    ds_id = seeded_app.state.test_datasource_id
+    client = TestClient(seeded_app)
+    response = client.post(
+        "/api/admin/datasets",
+        headers=AUTH_HEADER,
+        json={
+            "datasource_id": ds_id,
+            "name": "X",
+            "slug": "x-default",
+            "path": "x.zarr",
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["chat_enabled"] is False

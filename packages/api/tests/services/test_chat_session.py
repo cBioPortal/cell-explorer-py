@@ -7,6 +7,7 @@ from cell_explorer_agent.config import AgentConfig
 
 from cell_explorer_api.services.chat_session import (
     AccessDeniedError,
+    ChatDisabledError,
     ChatSessionError,
     DatasetNotFoundError,
     make_chat_agent,
@@ -48,7 +49,7 @@ async def test_dataset_not_found_raises():
 @pytest.mark.asyncio
 async def test_public_dataset_returns_agent_without_minting():
     dataset = MagicMock(slug="pbmc3k", name="PBMC 3k", description="",
-                         is_public=True, required_roles=[], path="pbmc3k.zarr")
+                         is_public=True, required_roles=[], chat_enabled=True, path="pbmc3k.zarr")
     datasource = MagicMock(base_url="https://example.com", type="HTTP_TOKEN",
                             credential_ref=None)
     db = await _mk_db_session(_make_db_row(dataset, datasource))
@@ -85,7 +86,7 @@ async def test_public_dataset_returns_agent_without_minting():
 @pytest.mark.asyncio
 async def test_private_dataset_without_role_raises_403():
     dataset = MagicMock(slug="brca", is_public=False,
-                         required_roles=["researcher"])
+                         required_roles=["researcher"], chat_enabled=True)
     datasource = MagicMock()
     db = await _mk_db_session(_make_db_row(dataset, datasource))
     settings = MagicMock()
@@ -135,7 +136,7 @@ def test_credential_to_headers_unknown_raises():
 async def test_private_dataset_with_role_mints_credentials():
     dataset = MagicMock(slug="brca", name="BRCA", description="",
                          is_public=False, required_roles=["researcher"],
-                         path="brca.zarr")
+                         chat_enabled=True, path="brca.zarr")
     datasource = MagicMock(base_url="https://example.com", type="HTTP_TOKEN",
                             credential_ref="brca_key")
     db = await _mk_db_session(_make_db_row(dataset, datasource))
@@ -173,7 +174,7 @@ async def test_private_dataset_with_role_mints_credentials():
 @pytest.mark.asyncio
 async def test_credential_mint_error_propagates_as_chat_session_error():
     dataset = MagicMock(slug="brca", is_public=False,
-                         required_roles=["researcher"], path="brca.zarr")
+                         required_roles=["researcher"], chat_enabled=True, path="brca.zarr")
     datasource = MagicMock()
     db = await _mk_db_session(_make_db_row(dataset, datasource))
     settings = MagicMock()
@@ -187,3 +188,49 @@ async def test_credential_mint_error_propagates_as_chat_session_error():
             await make_chat_agent(
                 user=user, dataset_slug="brca", db=db, settings=settings, llm=llm
             )
+
+
+@pytest.mark.asyncio
+async def test_chat_disabled_dataset_raises():
+    dataset = MagicMock(
+        slug="locked", is_public=True, required_roles=[],
+        chat_enabled=False, path="locked.zarr",
+    )
+    datasource = MagicMock(base_url="https://example.com")
+    db = await _mk_db_session(_make_db_row(dataset, datasource))
+    settings = MagicMock()
+    user = _FakeUser(roles=[])
+    llm = FakeLLMClient(scripts=[])
+
+    with pytest.raises(ChatDisabledError, match="locked"):
+        await make_chat_agent(
+            user=user, dataset_slug="locked", db=db, settings=settings, llm=llm
+        )
+
+
+@pytest.mark.asyncio
+async def test_chat_enabled_dataset_passes_gate():
+    """chat_enabled=True must let the call proceed past the new gate."""
+    dataset = MagicMock(
+        slug="open", is_public=True, required_roles=[],
+        chat_enabled=True, path="open.zarr",
+    )
+    datasource = MagicMock(base_url="https://example.com")
+    db = await _mk_db_session(_make_db_row(dataset, datasource))
+    settings = MagicMock()
+    user = _FakeUser(roles=[])
+    llm = FakeLLMClient(scripts=[])
+
+    fake_anndata = MagicMock()
+    fake_anndata.n_obs = 10
+    fake_anndata.n_vars = 20
+    fake_anndata.obsm_keys = []
+    fake_anndata.obs_columns = []
+    with patch("cell_explorer_api.services.chat_session.ZarrStore") as MockZS, \
+         patch("cell_explorer_api.services.chat_session.AnnDataStore") as MockADS:
+        MockZS.open = AsyncMock(return_value=MagicMock())
+        MockADS.open = AsyncMock(return_value=fake_anndata)
+        agent = await make_chat_agent(
+            user=user, dataset_slug="open", db=db, settings=settings, llm=llm
+        )
+        assert agent is not None
