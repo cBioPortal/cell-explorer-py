@@ -106,28 +106,38 @@
       "additionalProperties": false
     },
     "viewport": {
-      "type": "object",
-      "properties": {
-        "target": {
-          "type": "array",
-          "prefixItems": [
-            {
-              "type": "number"
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ]
             },
-            {
+            "zoom": {
               "type": "number"
             }
-          ]
+          },
+          "required": [
+            "target",
+            "zoom"
+          ],
+          "additionalProperties": false
         },
-        "zoom": {
-          "type": "number"
+        {
+          "type": "null"
         }
-      },
-      "required": [
-        "target",
-        "zoom"
-      ],
-      "additionalProperties": false
+      ]
+    },
+    "fitViewportToSelection": {
+      "type": "boolean"
     },
     "pointSize": {
       "anyOf": [

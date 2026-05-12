@@ -48,6 +48,7 @@ class Model(BaseModel):
     filter: Filter | None = None
     filterByExpression: FilterByExpression | None = None
     viewport: Viewport | None = None
+    fitViewportToSelection: bool | None = None
     pointSize: PositiveFloat | None = None
     opacity: confloat(ge=0.0, le=1.0) | None = None
     summaryObsColumns: list[str] | None = None

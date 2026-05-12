@@ -42,7 +42,11 @@ from cell_explorer_agent.tools.ui_action.summary import (
     remove_summary_obs_column_tool,
 )
 from cell_explorer_agent.tools.ui_action.summary_context import set_summary_context_tool
-from cell_explorer_agent.tools.ui_action.viewport import set_viewport_tool
+from cell_explorer_agent.tools.ui_action.viewport import (
+    clear_viewport_tool,
+    fit_viewport_to_selection_tool,
+    set_viewport_tool,
+)
 from cell_explorer_agent.tools.zarr_protocol import ZarrAccess
 
 
@@ -78,6 +82,8 @@ def build_v1_catalog(z: ZarrAccess, *, config: AgentConfig) -> ToolCatalog:
     # Plan 3 will flip the flag default to True.
     if config.experimental_view_tools:
         cat.register(set_viewport_tool())
+        cat.register(clear_viewport_tool())
+        cat.register(fit_viewport_to_selection_tool())
         cat.register(set_summary_context_tool())
         cat.register(set_gene_label_column_tool(z))
         cat.register(set_render_controls_tool())
