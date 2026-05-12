@@ -17,6 +17,7 @@ from cell_explorer_agent.tools.ui_action.color import (
     clear_color_by_tool,
     set_color_by_category_tool,
     set_color_by_gene_tool,
+    set_color_scale_tool,
 )
 from cell_explorer_agent.tools.ui_action.embedding import set_embedding_tool
 from cell_explorer_agent.tools.ui_action.filter import (
@@ -67,6 +68,7 @@ def build_v1_catalog(z: ZarrAccess, *, config: AgentConfig) -> ToolCatalog:
     cat.register(set_embedding_tool(z))
     cat.register(set_color_by_gene_tool(z))
     cat.register(set_color_by_category_tool(z))
+    cat.register(set_color_scale_tool())
     cat.register(clear_color_by_tool())
     cat.register(filter_by_ids_tool(z, filter_ids_max=config.filter_ids_max))
     cat.register(filter_by_gene_expression_tool(z))
