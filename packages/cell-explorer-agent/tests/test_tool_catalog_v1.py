@@ -25,6 +25,9 @@ async def test_v1_catalog_includes_all_tools(fake_zarr):
         "clear_filter",
         "add_summary_obs_column",
         "add_summary_gene",
+        "remove_summary_obs_column",
+        "remove_summary_gene",
+        "clear_summary",
         # ui_action (Plan 2 view-config tools, default-on as of Plan 3)
         "set_viewport",
         "set_summary_context",

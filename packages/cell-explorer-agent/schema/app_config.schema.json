@@ -153,12 +153,38 @@
       ]
     },
     "summaryObsColumns": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "summaryGenes": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "removeSummaryObsColumns": {
       "type": "array",
       "items": {
         "type": "string"
       }
     },
-    "summaryGenes": {
+    "removeSummaryGenes": {
       "type": "array",
       "items": {
         "type": "string"

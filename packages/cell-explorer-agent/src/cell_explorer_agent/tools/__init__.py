@@ -37,6 +37,9 @@ from cell_explorer_agent.tools.ui_action.selection_display_mode import (
 from cell_explorer_agent.tools.ui_action.summary import (
     add_summary_gene_tool,
     add_summary_obs_column_tool,
+    clear_summary_tool,
+    remove_summary_gene_tool,
+    remove_summary_obs_column_tool,
 )
 from cell_explorer_agent.tools.ui_action.summary_context import set_summary_context_tool
 from cell_explorer_agent.tools.ui_action.viewport import set_viewport_tool
@@ -67,6 +70,9 @@ def build_v1_catalog(z: ZarrAccess, *, config: AgentConfig) -> ToolCatalog:
     cat.register(clear_filter_tool())
     cat.register(add_summary_obs_column_tool(z))
     cat.register(add_summary_gene_tool(z))
+    cat.register(remove_summary_obs_column_tool())
+    cat.register(remove_summary_gene_tool())
+    cat.register(clear_summary_tool())
 
     # Experimental ui_action tools (Plan 2 view-config redesign).
     # Plan 3 will flip the flag default to True.
