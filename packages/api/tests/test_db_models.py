@@ -33,6 +33,26 @@ def test_datasource_credential_ref_nullable():
     assert ds.credential_ref is None
 
 
+def test_datasource_fetch_base_url_falls_back_to_base_url():
+    ds = Datasource(
+        name="No split",
+        type=DatasourceType.HTTP_TOKEN,
+        base_url="https://public.example",
+    )
+    assert ds.internal_base_url is None
+    assert ds.fetch_base_url == "https://public.example"
+
+
+def test_datasource_fetch_base_url_prefers_internal():
+    ds = Datasource(
+        name="Compose split",
+        type=DatasourceType.HTTP_TOKEN,
+        base_url="http://localhost:8002",
+        internal_base_url="http://zarr-server:8000",
+    )
+    assert ds.fetch_base_url == "http://zarr-server:8000"
+
+
 def test_dataset_create():
     datasource_id = uuid.uuid4()
     dataset = Dataset(

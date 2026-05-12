@@ -23,12 +23,14 @@ class DatasourceCreate(BaseModel):
     name: str
     type: DatasourceType
     base_url: str
+    internal_base_url: str | None = None
     credential_ref: str | None = None
 
 
 class DatasourceUpdate(BaseModel):
     name: str | None = None
     base_url: str | None = None
+    internal_base_url: str | None = None
     credential_ref: str | None = None
 
 
@@ -37,6 +39,7 @@ class DatasourceResponse(BaseModel):
     name: str
     type: DatasourceType
     base_url: str
+    internal_base_url: str | None
     credential_ref: str | None
 
 
@@ -97,6 +100,7 @@ async def create_datasource(
         name=ds.name,
         type=ds.type,
         base_url=ds.base_url,
+        internal_base_url=ds.internal_base_url,
         credential_ref=ds.credential_ref,
     )
 
@@ -112,7 +116,8 @@ async def list_datasources(
             name=ds.name,
             type=ds.type,
             base_url=ds.base_url,
-            credential_ref=ds.credential_ref,
+            internal_base_url=ds.internal_base_url,
+        credential_ref=ds.credential_ref,
         )
         for ds in result.all()
     ]
@@ -144,6 +149,7 @@ async def update_datasource(
         name=ds.name,
         type=ds.type,
         base_url=ds.base_url,
+        internal_base_url=ds.internal_base_url,
         credential_ref=ds.credential_ref,
     )
 
