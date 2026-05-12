@@ -23,11 +23,22 @@ class Datasource(SQLModel, table=True):
     name: str
     type: DatasourceType
     base_url: str
+    # Optional URL used for *server-side* fetches (chat agent, etc.) when the
+    # deployment topology means the API can't reach `base_url` directly (e.g.
+    # docker-compose where the api container can't hit host-port-mapped
+    # localhost:8002 but can reach zarr-server:8000 on the compose network).
+    # Falls back to base_url when None.
+    internal_base_url: str | None = None
     credential_ref: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     datasets: list["Dataset"] = Relationship(back_populates="datasource")
+
+    @property
+    def fetch_base_url(self) -> str:
+        """URL the API itself should use to fetch from this datasource."""
+        return self.internal_base_url or self.base_url
 
 
 class Dataset(SQLModel, table=True):

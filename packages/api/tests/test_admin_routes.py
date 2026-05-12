@@ -73,6 +73,36 @@ def test_create_datasource(ready_app):
     assert "id" in data
 
 
+def test_create_datasource_with_internal_base_url(ready_app):
+    client = TestClient(ready_app)
+    response = client.post(
+        "/api/admin/datasources",
+        json={
+            "name": "Compose Split",
+            "type": "http_token",
+            "base_url": "http://localhost:8002",
+            "internal_base_url": "http://zarr-server:8000",
+        },
+        headers=AUTH_HEADER,
+    )
+    assert response.status_code == 201, response.text
+    data = response.json()
+    assert data["base_url"] == "http://localhost:8002"
+    assert data["internal_base_url"] == "http://zarr-server:8000"
+
+
+def test_update_datasource_internal_base_url(seeded_app):
+    ds_id = seeded_app.state.test_datasource_id
+    client = TestClient(seeded_app)
+    response = client.put(
+        f"/api/admin/datasources/{ds_id}",
+        json={"internal_base_url": "http://zarr-server:8000"},
+        headers=AUTH_HEADER,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["internal_base_url"] == "http://zarr-server:8000"
+
+
 def test_list_datasources(seeded_app):
     client = TestClient(seeded_app)
     response = client.get("/api/admin/datasources", headers=AUTH_HEADER)

@@ -88,16 +88,21 @@ async def make_chat_agent(
             f"insufficient permissions for {dataset_slug!r}; required roles: {roles}"
         )
 
-    # 3. Mint credentials (private only) and compute URL + headers
+    # 3. Mint credentials (private only) and compute URL + headers.
+    # Server-side fetches must use fetch_base_url (internal_base_url || base_url)
+    # because the API and the client may have different network views of the
+    # datasource (docker-compose: container-network hostname vs host-port URL).
+    # The credential token (if any) is signed for the dataset path, not the URL,
+    # so the same token works regardless of which URL fetches it.
     if dataset.is_public:
-        url = f"{datasource.base_url}/{dataset.path}"
+        url = f"{datasource.fetch_base_url}/{dataset.path}"
         headers: dict[str, str] = {}
     else:
         try:
             credential = mint_credentials(datasource, dataset.path)
         except CredentialError as exc:
             raise CredentialMintError(str(exc)) from exc
-        url = credential["url"]
+        url = f"{datasource.fetch_base_url}/{dataset.path}"
         headers = _credential_to_headers(credential)
 
     # 4. Open the zarr stack
