@@ -64,6 +64,9 @@ class Settings(BaseSettings):
 
     # Chat (LLM)
     anthropic_api_key: str | None = None
+    # Optional Keycloak role required for chat access. None = any
+    # authenticated user can chat (subject to per-dataset chat_enabled).
+    chat_required_role: str | None = None
 
     # CLI integration
     cli_state_secret: str | None = None
