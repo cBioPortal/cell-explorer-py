@@ -4,6 +4,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from typing import Any
 
 from cell_explorer_agent.config import AgentConfig
 from cell_explorer_agent.events import (
@@ -29,7 +30,7 @@ from cell_explorer_agent.messages import (
     ToolResultMessage,
 )
 from cell_explorer_agent.prompt.dataset_context import DatasetContext
-from cell_explorer_agent.prompt.system import build_system_prompt
+from cell_explorer_agent.prompt.system import build_system_prompt, format_view_state_block
 from cell_explorer_agent.tools.registry import ToolCatalog
 
 logger = logging.getLogger(__name__)
@@ -42,8 +43,16 @@ class ChatAgent:
     dataset_ctx: DatasetContext
     config: AgentConfig
 
-    async def run(self, *, messages: list[Message]) -> AsyncIterator[ChatEvent]:
+    async def run(
+        self,
+        *,
+        messages: list[Message],
+        view_state: dict[str, Any] | None = None,
+    ) -> AsyncIterator[ChatEvent]:
         system = build_system_prompt(self.dataset_ctx)
+        view_state_block = (
+            format_view_state_block(view_state) if view_state else None
+        )
         tools = self.catalog.all()
         history: list[Message] = list(messages)
         total_usage = TokenUsage()
@@ -62,6 +71,7 @@ class ChatAgent:
                 model=self.config.llm_model,
                 max_tokens=2048,
                 timeout_s=self.config.llm_timeout_s,
+                view_state_block=view_state_block,
             ):
                 if isinstance(ev, LLMTextDelta):
                     assistant_text += ev.text

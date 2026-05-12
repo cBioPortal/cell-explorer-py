@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncIterator
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -38,6 +38,7 @@ class ChatMessage(BaseModel):
 
 class TurnRequest(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1)
+    view_state: dict[str, Any] | None = None
 
     @field_validator("messages")
     @classmethod
@@ -81,7 +82,9 @@ def _to_agent_messages(messages: list[ChatMessage]):
     return out
 
 
-async def _ndjson_event_stream(agent, messages) -> AsyncIterator[bytes]:
+async def _ndjson_event_stream(
+    agent, messages, view_state: dict[str, Any] | None = None
+) -> AsyncIterator[bytes]:
     """Serialize agent events as NDJSON, one event per \\n-terminated line.
 
     Catches any unexpected exception, wraps it in an Error event, emits it,
@@ -89,7 +92,7 @@ async def _ndjson_event_stream(agent, messages) -> AsyncIterator[bytes]:
     is re-raised so the framework can clean up.
     """
     try:
-        async for event in agent.run(messages=messages):
+        async for event in agent.run(messages=messages, view_state=view_state):
             yield (event.model_dump_json() + "\n").encode()
     except asyncio.CancelledError:
         raise
@@ -166,6 +169,8 @@ async def post_chat_turn(
         raise _http_for_chat_session_error(exc) from exc
 
     return StreamingResponse(
-        _ndjson_event_stream(agent, _to_agent_messages(body.messages)),
+        _ndjson_event_stream(
+            agent, _to_agent_messages(body.messages), body.view_state
+        ),
         media_type="application/x-ndjson",
     )

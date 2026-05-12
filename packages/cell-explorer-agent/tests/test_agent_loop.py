@@ -273,3 +273,74 @@ async def test_cancellation_propagates(fake_zarr):
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+async def test_run_forwards_view_state_block_to_llm(fake_zarr):
+    """Non-empty view_state → formatted block reaches the LLM client."""
+    script = Script(
+        events=[
+            LLMTextDelta(text="ok"),
+            LLMStop(reason="end_turn", usage=LLMUsage()),
+        ]
+    )
+    llm = FakeLLMClient(scripts=[script])
+    ctx = await build_dataset_context(fake_zarr, slug="d", name="D", description="")
+    agent = ChatAgent(llm=llm, catalog=ToolCatalog(), dataset_ctx=ctx, config=AgentConfig())
+    async for _ in agent.run(
+        messages=[UserMessage(content="zoom in more")],
+        view_state={"embedding": "X_umap", "gene": "CD8A"},
+    ):
+        pass
+    assert script.called_with_view_state_block is not None
+    assert "X_umap" in script.called_with_view_state_block
+    assert "CD8A" in script.called_with_view_state_block
+
+
+async def test_run_omits_view_state_block_when_empty(fake_zarr):
+    """Empty / missing view_state → no block sent (default view)."""
+    script = Script(
+        events=[
+            LLMTextDelta(text="ok"),
+            LLMStop(reason="end_turn", usage=LLMUsage()),
+        ]
+    )
+    llm = FakeLLMClient(scripts=[script])
+    ctx = await build_dataset_context(fake_zarr, slug="d", name="D", description="")
+    agent = ChatAgent(llm=llm, catalog=ToolCatalog(), dataset_ctx=ctx, config=AgentConfig())
+    async for _ in agent.run(
+        messages=[UserMessage(content="hi")],
+        view_state={},
+    ):
+        pass
+    assert script.called_with_view_state_block is None
+
+
+async def test_run_view_state_block_sent_on_every_iteration(fake_zarr):
+    """The view-state block must reach the LLM on each iteration of a multi-tool turn,
+    not just the first — the agent's internal tool round-trips re-call llm.stream()."""
+    s1 = Script(
+        events=[
+            LLMToolCall(id="t1", name="get_dataset_schema", args={}),
+            LLMStop(reason="tool_use", usage=LLMUsage()),
+        ]
+    )
+    s2 = Script(
+        events=[
+            LLMTextDelta(text="done"),
+            LLMStop(reason="end_turn", usage=LLMUsage()),
+        ]
+    )
+    llm = FakeLLMClient(scripts=[s1, s2])
+    ctx = await build_dataset_context(fake_zarr, slug="d", name="D", description="")
+    cat = ToolCatalog()
+    cat.register(get_dataset_schema_tool(fake_zarr, limit_bytes=32_768))
+    agent = ChatAgent(llm=llm, catalog=cat, dataset_ctx=ctx, config=AgentConfig())
+    async for _ in agent.run(
+        messages=[UserMessage(content="hi")],
+        view_state={"embedding": "X_umap"},
+    ):
+        pass
+    # Both LLM round-trips should have received the same view-state block
+    assert s1.called_with_view_state_block is not None
+    assert "X_umap" in s1.called_with_view_state_block
+    assert s2.called_with_view_state_block == s1.called_with_view_state_block

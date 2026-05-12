@@ -25,6 +25,47 @@
         }
       }
     },
+    "/api/auth/cli-login": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Cli Login",
+        "description": "Browser OAuth flow for the CLI.\n\nThe CLI passes its localhost callback URL. We validate it, sign it into a\nstate JWT, and redirect to Keycloak. The existing /callback endpoint will\ndetect the CLI flow on the way back.",
+        "operationId": "cli_login_api_auth_cli_login_get",
+        "parameters": [
+          {
+            "name": "redirect_uri",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Redirect Uri"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/callback": {
       "get": {
         "tags": [
@@ -267,6 +308,30 @@
       }
     },
     "/api/admin/datasets": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Datasets Admin",
+        "operationId": "list_datasets_admin_api_admin_datasets_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetAdminListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
       "post": {
         "tags": [
           "admin"
@@ -556,10 +621,198 @@
           }
         }
       }
+    },
+    "/api/chat/{slug}/context": {
+      "get": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Get Chat Context",
+        "operationId": "get_chat_context_api_chat__slug__context_get",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat/{slug}/turns": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Post Chat Turn",
+        "operationId": "post_chat_turn_api_chat__slug__turns_post",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TurnRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "ChatMessage": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ],
+            "title": "Role"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "ChatMessage"
+      },
+      "ContextResponse": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "n_obs": {
+            "type": "integer",
+            "title": "N Obs"
+          },
+          "n_var": {
+            "type": "integer",
+            "title": "N Var"
+          },
+          "obs_columns": {
+            "items": {
+              "$ref": "#/components/schemas/ObsColumnInfo"
+            },
+            "type": "array",
+            "title": "Obs Columns"
+          },
+          "embedding_keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Embedding Keys"
+          },
+          "available_tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Available Tools"
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "description",
+          "n_obs",
+          "n_var",
+          "obs_columns",
+          "embedding_keys",
+          "available_tools"
+        ],
+        "title": "ContextResponse"
+      },
+      "DatasetAdminListResponse": {
+        "properties": {
+          "datasets": {
+            "items": {
+              "$ref": "#/components/schemas/DatasetAdminResponse"
+            },
+            "type": "array",
+            "title": "Datasets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "datasets"
+        ],
+        "title": "DatasetAdminListResponse"
+      },
       "DatasetAdminResponse": {
         "properties": {
           "id": {
@@ -970,6 +1223,10 @@
           "auth_enabled": {
             "type": "boolean",
             "title": "Auth Enabled"
+          },
+          "chat_enabled": {
+            "type": "boolean",
+            "title": "Chat Enabled"
           }
         },
         "type": "object",
@@ -977,9 +1234,87 @@
           "version",
           "environment",
           "git_sha",
-          "auth_enabled"
+          "auth_enabled",
+          "chat_enabled"
         ],
         "title": "InfoResponse"
+      },
+      "ObsColumnInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "dtype": {
+            "type": "string",
+            "enum": [
+              "categorical",
+              "numeric",
+              "string"
+            ],
+            "title": "Dtype"
+          },
+          "cardinality": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cardinality"
+          },
+          "values": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Values"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "dtype"
+        ],
+        "title": "ObsColumnInfo"
+      },
+      "TurnRequest": {
+        "properties": {
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Messages"
+          },
+          "view_state": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "View State"
+          }
+        },
+        "type": "object",
+        "required": [
+          "messages"
+        ],
+        "title": "TurnRequest"
       },
       "User": {
         "properties": {

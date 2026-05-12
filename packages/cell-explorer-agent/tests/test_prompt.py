@@ -1,5 +1,5 @@
 from cell_explorer_agent.prompt.dataset_context import build_dataset_context
-from cell_explorer_agent.prompt.system import build_system_prompt
+from cell_explorer_agent.prompt.system import build_system_prompt, format_view_state_block
 
 
 async def test_dataset_context_from_fake(fake_zarr):
@@ -117,3 +117,32 @@ async def test_system_prompt_directs_describe_obs_column_before_highlight(fake_z
     assert "describe_obs_column" in sys
     # Both consumer tools are named together
     assert "filter_by_ids" in sys and "set_color_by_category" in sys
+
+
+def test_format_view_state_block_empty_returns_none():
+    """Empty snapshots produce no block — caller can skip injection entirely."""
+    assert format_view_state_block({}) is None
+
+
+def test_format_view_state_block_contains_compact_json():
+    block = format_view_state_block({"embedding": "X_umap", "gene": "CD8A"})
+    assert block is not None
+    # JSON payload appears in the block
+    assert '"embedding"' in block and '"X_umap"' in block
+    assert '"gene"' in block and '"CD8A"' in block
+
+
+def test_format_view_state_block_has_header_for_agent():
+    """The header should orient the agent — 'this is what the user sees now'."""
+    block = format_view_state_block({"embedding": "X_umap"})
+    assert block is not None
+    lower = block.lower()
+    assert "view" in lower or "current" in lower
+
+
+def test_format_view_state_block_is_compact():
+    """No pretty-printing — the wire is small enough already."""
+    block = format_view_state_block({"a": 1, "b": 2})
+    assert block is not None
+    # Compact JSON has no newlines inside the object literal
+    assert '{"a":' in block or '{"a": ' not in block
