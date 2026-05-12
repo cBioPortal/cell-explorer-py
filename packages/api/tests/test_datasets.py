@@ -61,6 +61,7 @@ async def seeded_app(app, db_url):
             slug="public-atlas",
             path="datasets/public.zarr",
             is_public=True,
+            chat_enabled=True,
         )
         private_dataset = Dataset(
             datasource_id=ds.id,
@@ -215,3 +216,24 @@ def test_private_dataset_url_is_null_for_anonymous(seeded_app):
     assert response.status_code == 200
     data = response.json()
     assert data["url"] is None  # Must call /access to get credentials
+
+
+def test_list_datasets_includes_chat_enabled(seeded_app):
+    """The list endpoint surfaces the per-dataset chat opt-in."""
+    client = TestClient(seeded_app)
+    response = client.get("/api/datasets")
+    assert response.status_code == 200
+    datasets = response.json()["datasets"]
+    assert len(datasets) > 0
+    # Every entry has chat_enabled populated
+    for d in datasets:
+        assert "chat_enabled" in d
+        assert isinstance(d["chat_enabled"], bool)
+
+
+def test_get_dataset_includes_chat_enabled(seeded_app):
+    """The detail endpoint also surfaces chat_enabled."""
+    client = TestClient(seeded_app)
+    response = client.get("/api/datasets/public-atlas")
+    assert response.status_code == 200
+    assert response.json()["chat_enabled"] is True  # seed has chat_enabled=True

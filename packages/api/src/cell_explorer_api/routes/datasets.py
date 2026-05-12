@@ -21,6 +21,7 @@ class DatasetResponse(BaseModel):
     description: str | None
     is_public: bool
     url: str | None
+    chat_enabled: bool
 
 
 class DatasetListResponse(BaseModel):
@@ -38,6 +39,7 @@ def _dataset_to_response(dataset: Dataset) -> DatasetResponse:
         description=dataset.description,
         is_public=dataset.is_public,
         url=url,
+        chat_enabled=dataset.chat_enabled,
     )
 
 
