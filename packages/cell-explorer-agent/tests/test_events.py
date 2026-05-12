@@ -6,6 +6,7 @@ from cell_explorer_agent.events import (
     UIAction,
     Error,
     Done,
+    ThreadOpen,
     TokenUsage,
     ChatEvent,
     dump_event,
@@ -51,3 +52,19 @@ def test_dump_event_produces_valid_json_line():
     parsed = json.loads(line)
     assert parsed == {"type": "text_delta", "text": "hi"}
     assert "\n" not in line
+
+
+def test_thread_open_serializes_to_expected_shape():
+    ev = ThreadOpen(thread_id="abc-123", title="Show CD8A in T cells")
+    payload = json.loads(ev.model_dump_json())
+    assert payload == {
+        "type": "thread_open",
+        "thread_id": "abc-123",
+        "title": "Show CD8A in T cells",
+    }
+
+
+def test_thread_open_is_part_of_chat_event_union():
+    # mypy/runtime test: the union accepts ThreadOpen
+    ev: ChatEvent = ThreadOpen(thread_id="x", title="y")
+    assert ev.type == "thread_open"
