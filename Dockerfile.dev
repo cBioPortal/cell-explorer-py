@@ -19,4 +19,7 @@ RUN uv sync
 
 EXPOSE 8000
 
-CMD ["uv", "run", "uvicorn", "cell_explorer_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/packages/api/src"]
+# Run pending Alembic migrations once at container start, then exec uvicorn
+# with --reload. The reload swaps workers on code change but doesn't restart
+# the container, so migrations run exactly once per `docker compose up`.
+CMD ["sh", "-c", "uv run --project packages/api alembic -c packages/api/alembic.ini upgrade head && exec uv run uvicorn cell_explorer_api.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/packages/api/src"]
