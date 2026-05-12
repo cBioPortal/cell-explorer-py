@@ -45,6 +45,15 @@
         }
       ]
     },
+    "colorScaleName": {
+      "type": "string",
+      "enum": [
+        "viridis",
+        "magma",
+        "plasma",
+        "inferno"
+      ]
+    },
     "highlightedCategories": {
       "type": "array",
       "items": {

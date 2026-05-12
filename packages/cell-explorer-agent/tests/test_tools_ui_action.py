@@ -3,6 +3,7 @@ from cell_explorer_agent.tools.ui_action.color import (
     clear_color_by_tool,
     set_color_by_gene_tool,
     set_color_by_category_tool,
+    set_color_scale_tool,
 )
 from cell_explorer_agent.tools.ui_action.filter import (
     filter_by_ids_tool,
@@ -351,3 +352,22 @@ async def test_fit_viewport_to_selection_emits_true():
     r = await tool.func()
     assert r == {"payload": {"fitViewportToSelection": True}}
     assert tool.kind == "ui_action"
+
+
+async def test_set_color_scale_emits_named_scale():
+    tool = set_color_scale_tool()
+    r = await tool.func(name="plasma")
+    assert r == {"payload": {"colorScaleName": "plasma"}}
+    assert tool.kind == "ui_action"
+
+
+async def test_set_color_scale_rejects_unknown():
+    tool = set_color_scale_tool()
+    # The Literal type annotation enforces this at the schema layer; with a
+    # raw value, validate_partial raises ValidationError. The current tool
+    # doesn't catch it, so this propagates as an exception (matching the
+    # other open-domain tools' behavior — set_embedding, set_color_by_gene).
+    import pytest
+    from cell_explorer_agent.schema import ValidationError
+    with pytest.raises(ValidationError):
+        await tool.func(name="rainbow")  # type: ignore[arg-type]

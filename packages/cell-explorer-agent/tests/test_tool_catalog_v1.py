@@ -18,6 +18,7 @@ async def test_v1_catalog_includes_all_tools(fake_zarr):
         "set_embedding",
         "set_color_by_gene",
         "set_color_by_category",
+        "set_color_scale",
         "clear_color_by",
         "filter_by_ids",
         "filter_by_gene_expression",

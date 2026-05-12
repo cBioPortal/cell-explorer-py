@@ -81,6 +81,12 @@ def build_system_prompt(ctx: DatasetContext) -> str:
         "use fit_viewport_to_selection (requires an active filter)."
     )
     lines.append(
+        "  - For 'use plasma' / 'switch to inferno' / specific palette "
+        "requests on gene coloring, use set_color_scale. Available scales: "
+        "viridis (default), magma, plasma, inferno. Doesn't affect "
+        "categorical coloring."
+    )
+    lines.append(
         "  - Do not pan/zoom (set_viewport) or change rendering (set_render_controls) "
         "unless the user explicitly asks. The user controls the camera and visual style; "
         "agent-initiated view changes are usually unwelcome."

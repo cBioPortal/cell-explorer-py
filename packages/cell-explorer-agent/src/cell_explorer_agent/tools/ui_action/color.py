@@ -1,10 +1,43 @@
-"""set_color_by_gene, set_color_by_category tools."""
+"""set_color_by_gene, set_color_by_category, set_color_scale, clear_color_by tools."""
 
-from typing import Any
+from typing import Any, Literal
 
 from cell_explorer_agent.schema import validate_partial
 from cell_explorer_agent.tools.registry import Tool
 from cell_explorer_agent.tools.zarr_protocol import ZarrAccess
+
+
+def set_color_scale_tool() -> Tool:
+    async def run(
+        name: Literal["viridis", "magma", "plasma", "inferno"],
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"colorScaleName": name}
+        validate_partial(payload)
+        return {"payload": payload}
+
+    return Tool(
+        name="set_color_scale",
+        kind="ui_action",
+        description=(
+            "Switch the continuous color scale used for gene-mode coloring. "
+            "Affects how expression values map to RGB; the categorical palette "
+            "is independent. Use when the user asks for a specific palette "
+            "('switch to plasma' / 'use inferno') or expresses a perceptual "
+            "preference. Default is viridis."
+        ),
+        args_schema={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "enum": ["viridis", "magma", "plasma", "inferno"],
+                },
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+        func=run,
+    )
 
 
 def set_color_by_gene_tool(z: ZarrAccess) -> Tool:
