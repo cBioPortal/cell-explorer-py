@@ -18,6 +18,9 @@ from cell_explorer_agent.tools.ui_action.viewport import set_viewport_tool
 from cell_explorer_agent.tools.ui_action.summary_context import set_summary_context_tool
 from cell_explorer_agent.tools.ui_action.gene_label_column import set_gene_label_column_tool
 from cell_explorer_agent.tools.ui_action.render import set_render_controls_tool
+from cell_explorer_agent.tools.ui_action.selection_display_mode import (
+    set_selection_display_mode_tool,
+)
 
 
 async def test_set_embedding_valid(fake_zarr):
@@ -269,3 +272,22 @@ async def test_set_render_controls_opacity_out_of_range():
     tool = set_render_controls_tool()
     r = await tool.func(opacity=1.5)
     assert "error" in r  # schema's opacity must be in [0, 1]
+
+
+async def test_set_selection_display_mode_dim():
+    tool = set_selection_display_mode_tool()
+    r = await tool.func(value="dim")
+    assert r == {"payload": {"selectionDisplayMode": "dim"}}
+    assert tool.kind == "ui_action"
+
+
+async def test_set_selection_display_mode_hide():
+    tool = set_selection_display_mode_tool()
+    r = await tool.func(value="hide")
+    assert r == {"payload": {"selectionDisplayMode": "hide"}}
+
+
+async def test_set_selection_display_mode_invalid_value():
+    tool = set_selection_display_mode_tool()
+    r = await tool.func(value="other")
+    assert "error" in r

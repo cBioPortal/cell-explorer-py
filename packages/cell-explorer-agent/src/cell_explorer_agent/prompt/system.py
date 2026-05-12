@@ -60,6 +60,12 @@ def build_system_prompt(ctx: DatasetContext) -> str:
         "(log-normalized typically 0–6, but raw counts can go higher)."
     )
     lines.append(
+        "  - filter_by_ids and filter_by_gene_expression default to hiding "
+        "non-matching cells. If the user wants to keep context visible (phrases "
+        "like 'in context', 'don't hide the rest', 'fade the others'), call "
+        "set_selection_display_mode('dim') after the filter."
+    )
+    lines.append(
         "  - Do not pan/zoom (set_viewport) or change rendering (set_render_controls) "
         "unless the user explicitly asks. The user controls the camera and visual style; "
         "agent-initiated view changes are usually unwelcome."

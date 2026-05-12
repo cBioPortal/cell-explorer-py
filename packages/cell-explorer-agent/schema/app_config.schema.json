@@ -136,6 +136,13 @@
         "selections"
       ]
     },
+    "selectionDisplayMode": {
+      "type": "string",
+      "enum": [
+        "dim",
+        "hide"
+      ]
+    },
     "showHeader": {
       "type": "boolean"
     },
