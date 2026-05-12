@@ -30,6 +30,8 @@ async def test_v1_catalog_includes_all_tools(fake_zarr):
         "clear_summary",
         # ui_action (Plan 2 view-config tools, default-on as of Plan 3)
         "set_viewport",
+        "clear_viewport",
+        "fit_viewport_to_selection",
         "set_summary_context",
         "set_gene_label_column",
         "set_render_controls",

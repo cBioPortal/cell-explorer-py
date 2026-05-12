@@ -76,6 +76,11 @@ def build_system_prompt(ctx: DatasetContext) -> str:
         "summary' / 'remove everything from summary' use clear_summary."
     )
     lines.append(
+        "  - For 'reset the view' / 'zoom out' / 'show the whole UMAP' use "
+        "clear_viewport. For 'zoom in on the selection' / 'fit to my filter' "
+        "use fit_viewport_to_selection (requires an active filter)."
+    )
+    lines.append(
         "  - Do not pan/zoom (set_viewport) or change rendering (set_render_controls) "
         "unless the user explicitly asks. The user controls the camera and visual style; "
         "agent-initiated view changes are usually unwelcome."
