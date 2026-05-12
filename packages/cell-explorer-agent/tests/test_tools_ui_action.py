@@ -1,5 +1,6 @@
 from cell_explorer_agent.tools.ui_action.embedding import set_embedding_tool
 from cell_explorer_agent.tools.ui_action.color import (
+    clear_color_by_tool,
     set_color_by_gene_tool,
     set_color_by_category_tool,
 )
@@ -17,7 +18,10 @@ from cell_explorer_agent.tools.ui_action.summary import (
 from cell_explorer_agent.tools.ui_action.viewport import set_viewport_tool
 from cell_explorer_agent.tools.ui_action.summary_context import set_summary_context_tool
 from cell_explorer_agent.tools.ui_action.gene_label_column import set_gene_label_column_tool
-from cell_explorer_agent.tools.ui_action.render import set_render_controls_tool
+from cell_explorer_agent.tools.ui_action.render import (
+    clear_render_controls_tool,
+    set_render_controls_tool,
+)
 from cell_explorer_agent.tools.ui_action.selection_display_mode import (
     set_selection_display_mode_tool,
 )
@@ -291,3 +295,17 @@ async def test_set_selection_display_mode_invalid_value():
     tool = set_selection_display_mode_tool()
     r = await tool.func(value="other")
     assert "error" in r
+
+
+async def test_clear_color_by_emits_null():
+    tool = clear_color_by_tool()
+    r = await tool.func()
+    assert r == {"payload": {"colorBy": None}}
+    assert tool.kind == "ui_action"
+
+
+async def test_clear_render_controls_emits_nulls():
+    tool = clear_render_controls_tool()
+    r = await tool.func()
+    assert r == {"payload": {"pointSize": None, "opacity": None}}
+    assert tool.kind == "ui_action"

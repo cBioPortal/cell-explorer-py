@@ -30,6 +30,31 @@ def set_color_by_gene_tool(z: ZarrAccess) -> Tool:
     )
 
 
+def clear_color_by_tool() -> Tool:
+    async def run() -> dict[str, Any]:
+        # `colorBy: null` is the frontend's reset sentinel: applyConfig calls
+        # clearGene + clearObsColumn, and the canvas falls back to default gray.
+        payload: dict[str, Any] = {"colorBy": None}
+        validate_partial(payload)
+        return {"payload": payload}
+
+    return Tool(
+        name="clear_color_by",
+        kind="ui_action",
+        description=(
+            "Reset the embedding coloring to the default (gray points). Use "
+            "when the user says 'stop coloring' / 'clear the color' / 'reset "
+            "color'. Does not affect filters or rendering controls."
+        ),
+        args_schema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+        func=run,
+    )
+
+
 def set_color_by_category_tool(z: ZarrAccess) -> Tool:
     async def run(
         category: str,

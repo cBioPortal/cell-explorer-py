@@ -66,6 +66,11 @@ def build_system_prompt(ctx: DatasetContext) -> str:
         "set_selection_display_mode('dim') after the filter."
     )
     lines.append(
+        "  - For 'stop coloring' / 'reset color' / 'undo my rendering changes' "
+        "use clear_color_by or clear_render_controls. These reset to defaults "
+        "without affecting filters."
+    )
+    lines.append(
         "  - Do not pan/zoom (set_viewport) or change rendering (set_render_controls) "
         "unless the user explicitly asks. The user controls the camera and visual style; "
         "agent-initiated view changes are usually unwelcome."

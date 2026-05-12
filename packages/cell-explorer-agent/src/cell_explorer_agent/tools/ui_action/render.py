@@ -6,6 +6,31 @@ from cell_explorer_agent.schema import validate_partial, ValidationError
 from cell_explorer_agent.tools.registry import Tool
 
 
+def clear_render_controls_tool() -> Tool:
+    async def run() -> dict[str, Any]:
+        # `null` is the frontend's reset sentinel: applyConfig restores the
+        # store defaults (0.5 / 0.5).
+        payload: dict[str, Any] = {"pointSize": None, "opacity": None}
+        validate_partial(payload)
+        return {"payload": payload}
+
+    return Tool(
+        name="clear_render_controls",
+        kind="ui_action",
+        description=(
+            "Reset point_size and opacity to the frontend defaults (0.5 each). "
+            "Use when the user says 'reset rendering' / 'undo my point size and "
+            "opacity changes' / 'go back to default'."
+        ),
+        args_schema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+        func=run,
+    )
+
+
 def set_render_controls_tool() -> Tool:
     async def run(
         point_size: float | None = None,

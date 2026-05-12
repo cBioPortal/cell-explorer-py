@@ -12,17 +12,38 @@
       "type": "string"
     },
     "colorBy": {
-      "type": "string",
-      "enum": [
-        "gene",
-        "category"
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "gene",
+            "category"
+          ]
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "gene": {
-      "type": "string"
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "category": {
-      "type": "string"
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "highlightedCategories": {
       "type": "array",
@@ -109,13 +130,27 @@
       "additionalProperties": false
     },
     "pointSize": {
-      "type": "number",
-      "exclusiveMinimum": 0
+      "anyOf": [
+        {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "opacity": {
-      "type": "number",
-      "minimum": 0,
-      "maximum": 1
+      "anyOf": [
+        {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "summaryObsColumns": {
       "type": "array",
