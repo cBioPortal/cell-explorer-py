@@ -94,4 +94,7 @@ ENV ENVIRONMENT=production
 ENV GIT_SHA=${GIT_SHA}
 EXPOSE 8000
 
-CMD ["uv", "run", "uvicorn", "cell_explorer_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run pending Alembic migrations, then exec uvicorn so it becomes PID 1
+# and receives signals directly. Alembic upgrade is idempotent — safe to run
+# on every container start.
+CMD ["sh", "-c", "uv run --project packages/api alembic -c packages/api/alembic.ini upgrade head && exec uv run uvicorn cell_explorer_api.main:app --host 0.0.0.0 --port 8000"]
