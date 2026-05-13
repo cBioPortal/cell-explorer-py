@@ -92,6 +92,12 @@ def build_system_prompt(ctx: DatasetContext) -> str:
         "categorical coloring."
     )
     lines.append(
+        "  - For 'show cluster labels' / 'label the clusters' / 'turn off "
+        "labels' / 'hide labels', use set_category_labels(value=True|False). "
+        "Labels only render in category color mode (set_color_by_category "
+        "first if needed). The toggle persists across color-mode switches."
+    )
+    lines.append(
         "  - Do not pan/zoom (set_viewport) or change rendering (set_render_controls) "
         "unless the user explicitly asks. The user controls the camera and visual style; "
         "agent-initiated view changes are usually unwelcome."
