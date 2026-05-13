@@ -21,6 +21,23 @@ from cell_explorer_api.db.models import Dataset, Datasource, DatasourceType
 from cell_explorer_api.main import create_app
 
 
+async def _first_dataset_id_async(app):
+    """Return the seeded dataset's id (async helper for test setup)."""
+    from sqlmodel import select
+    from sqlmodel.ext.asyncio.session import AsyncSession
+    from cell_explorer_api.db.models import Dataset
+
+    engine = app.state.db_engine
+    async with AsyncSession(engine) as s:
+        return (await s.exec(select(Dataset))).first().id
+
+
+def _first_dataset_id(app):
+    """Return the seeded dataset's id (sync helper for test setup)."""
+    import asyncio
+    return asyncio.run(_first_dataset_id_async(app))
+
+
 def _generate_rsa_keypair():
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     return private_key, private_key.public_key()
@@ -365,10 +382,11 @@ def test_post_turn_streams_ndjson_events(seeded_app):
             assert r.headers["content-type"].startswith("application/x-ndjson")
             lines = [_json.loads(line) for line in r.iter_lines() if line]
 
-    assert [l["type"] for l in lines] == ["text_delta", "text_delta", "done"]
-    assert lines[0]["text"] == "hello "
-    assert lines[1]["text"] == "world"
-    assert lines[2]["usage"]["input_tokens"] == 10
+    assert lines[0]["type"] == "thread_open"
+    assert [l["type"] for l in lines[1:]] == ["text_delta", "text_delta", "done"]
+    assert lines[1]["text"] == "hello "
+    assert lines[2]["text"] == "world"
+    assert lines[3]["usage"]["input_tokens"] == 10
 
 
 def test_post_turn_dataset_not_found_returns_404(seeded_app):
@@ -500,9 +518,9 @@ def test_post_turn_midstream_error_emits_error_event(seeded_app):
             lines = [_json.loads(line) for line in r.iter_lines() if line]
 
     types = [l["type"] for l in lines]
-    assert types == ["text_delta", "error"]
-    assert lines[1]["message"] == "chat failed: boom"
-    assert lines[1]["retryable"] is False
+    assert types == ["thread_open", "text_delta", "error"]
+    assert lines[2]["message"] == "chat failed: boom"
+    assert lines[2]["retryable"] is False
 
 
 # ---------- permission field tests ----------
@@ -634,7 +652,8 @@ def test_post_turn_with_chat_role_streams_ok(seeded_app):
         }) as r:
             assert r.status_code == 200
             lines = [_json.loads(l) for l in r.iter_lines() if l]
-    assert [l["type"] for l in lines] == ["text_delta", "done"]
+    assert lines[0]["type"] == "thread_open"
+    assert [l["type"] for l in lines[1:]] == ["text_delta", "done"]
 
 
 def test_post_turn_chat_disabled_dataset_returns_404(seeded_app):
@@ -653,3 +672,142 @@ def test_post_turn_chat_disabled_dataset_returns_404(seeded_app):
 
     assert response.status_code == 404
     assert "chat is not available" in response.json()["detail"].lower()
+
+
+# ---------- thread persistence tests ----------
+
+def test_post_turn_creates_new_thread_when_thread_id_is_null(seeded_app):
+    """First send with thread_id=None creates a new ChatThread."""
+    import json as _json
+    from cell_explorer_agent.events import Done, TextDelta, TokenUsage
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="user-1")
+    fake = _FakeChatAgent(run_events=[
+        TextDelta(text="hello"),
+        Done(usage=TokenUsage()),
+    ])
+
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        with client.stream("POST", "/api/chat/public-atlas/turns", json={
+            "messages": [{"role": "user", "content": "Show me CD8A in T cells"}],
+        }) as r:
+            assert r.status_code == 200
+            lines = [_json.loads(l) for l in r.iter_lines() if l]
+
+    # First event must be thread_open with the derived title
+    assert lines[0]["type"] == "thread_open"
+    assert lines[0]["title"] == "Show me CD8A in T cells"
+    thread_id = lines[0]["thread_id"]
+
+    # Verify the thread + messages were persisted
+    import asyncio
+    from sqlmodel import select
+    from cell_explorer_api.db.models import ChatThread, ChatMessageRow
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    async def _verify():
+        engine = seeded_app.state.db_engine
+        async with AsyncSession(engine) as s:
+            t = (await s.exec(select(ChatThread))).first()
+            assert t is not None
+            assert str(t.id) == thread_id
+            assert t.user_sub == "user-1"
+            msgs = (await s.exec(
+                select(ChatMessageRow).where(ChatMessageRow.thread_id == t.id)
+                .order_by(ChatMessageRow.created_at.asc())
+            )).all()
+            assert [(m.role, m.content) for m in msgs] == [
+                ("user", "Show me CD8A in T cells"),
+                ("assistant", "hello"),
+            ]
+    asyncio.run(_verify())
+
+
+def test_post_turn_appends_to_existing_thread_when_thread_id_set(seeded_app):
+    """Second send with the same thread_id appends to it."""
+    import asyncio
+    import json as _json
+    from cell_explorer_agent.events import Done, TextDelta, TokenUsage
+    from cell_explorer_api.db.models import ChatThread
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    async def _seed():
+        engine = seeded_app.state.db_engine
+        async with AsyncSession(engine) as s:
+            t = ChatThread(user_sub="user-1", dataset_id=await _first_dataset_id_async(seeded_app),
+                           title="My existing thread")
+            s.add(t)
+            await s.commit()
+            await s.refresh(t)
+            return t.id
+    existing_id = asyncio.run(_seed())
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="user-1")
+    fake = _FakeChatAgent(run_events=[
+        TextDelta(text="more"),
+        Done(usage=TokenUsage()),
+    ])
+
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        with client.stream("POST", "/api/chat/public-atlas/turns", json={
+            "messages": [{"role": "user", "content": "follow-up"}],
+            "thread_id": str(existing_id),
+        }) as r:
+            assert r.status_code == 200
+            lines = [_json.loads(l) for l in r.iter_lines() if l]
+
+    assert lines[0]["thread_id"] == str(existing_id)
+
+
+def test_post_turn_thread_id_cross_user_returns_403(seeded_app):
+    import asyncio
+    from cell_explorer_api.db.models import ChatThread
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    async def _seed():
+        engine = seeded_app.state.db_engine
+        async with AsyncSession(engine) as s:
+            t = ChatThread(user_sub="other-user", dataset_id=await _first_dataset_id_async(seeded_app),
+                           title="not yours")
+            s.add(t)
+            await s.commit()
+            await s.refresh(t)
+            return t.id
+    other_id = asyncio.run(_seed())
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="user-1")
+    fake = _FakeChatAgent()
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.post("/api/chat/public-atlas/turns", json={
+            "messages": [{"role": "user", "content": "hi"}],
+            "thread_id": str(other_id),
+        })
+    assert response.status_code == 403
+
+
+def test_post_turn_thread_id_missing_returns_404(seeded_app):
+    import uuid
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="user-1")
+    fake = _FakeChatAgent()
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.post("/api/chat/public-atlas/turns", json={
+            "messages": [{"role": "user", "content": "hi"}],
+            "thread_id": str(uuid.uuid4()),
+        })
+    assert response.status_code == 404

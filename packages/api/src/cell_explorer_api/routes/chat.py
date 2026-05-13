@@ -1,6 +1,7 @@
 """HTTP routes for the chat agent (Plan 2a)."""
 
 import asyncio
+import uuid as _uuid
 from collections.abc import AsyncIterator
 from typing import Any, Literal
 
@@ -9,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from cell_explorer_agent.events import Error
+from cell_explorer_agent.events import Error, ThreadOpen
 from cell_explorer_agent.messages import AssistantMessage, UserMessage
 from cell_explorer_api.auth.dependencies import require_auth
 from cell_explorer_api.auth.models import User
@@ -25,6 +26,13 @@ from cell_explorer_api.services.chat_session import (
     DatasetNotFoundError,
     ZarrUnreachableError,
     make_chat_agent,
+)
+from cell_explorer_api.services.threads import (
+    ThreadAccessDeniedError,
+    ThreadNotFoundError,
+    append_message,
+    create_thread,
+    load_thread,
 )
 
 router = APIRouter(tags=["chat"])
@@ -42,6 +50,7 @@ class ChatMessage(BaseModel):
 class TurnRequest(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1)
     view_state: dict[str, Any] | None = None
+    thread_id: _uuid.UUID | None = None
 
     @field_validator("messages")
     @classmethod
@@ -92,20 +101,50 @@ def _to_agent_messages(messages: list[ChatMessage]):
 
 
 async def _ndjson_event_stream(
-    agent, messages, view_state: dict[str, Any] | None = None
+    agent,
+    messages,
+    view_state: dict[str, Any] | None,
+    *,
+    engine,  # AsyncEngine — used to open a fresh session for stream-time writes
+    thread_id: str,
+    thread_title: str,
 ) -> AsyncIterator[bytes]:
-    """Serialize agent events as NDJSON, one event per \\n-terminated line.
-
-    Catches any unexpected exception, wraps it in an Error event, emits it,
-    then returns. asyncio.CancelledError (client disconnect, ASGI shutdown)
-    is re-raised so the framework can clean up.
+    """Serialize agent events as NDJSON. Emits a leading thread_open event,
+    accumulates assistant text deltas, and persists the assistant's final
+    body when the stream finishes successfully.
     """
+    from cell_explorer_api.db.models import ChatThread
+    from sqlmodel import select
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    # 1) Leading thread_open.
+    thread_open = ThreadOpen(thread_id=thread_id, title=thread_title)
+    yield (thread_open.model_dump_json() + "\n").encode()
+
+    assistant_buffer: list[str] = []
     try:
         async for event in agent.run(messages=messages, view_state=view_state):
+            if event.type == "text_delta":
+                assistant_buffer.append(event.text)
             yield (event.model_dump_json() + "\n").encode()
+            if event.type == "done" and assistant_buffer:
+                # Persist assistant message in a fresh session — the request's
+                # db session may have been closed when the handler returned.
+                import uuid as _uuid_mod
+                tid = _uuid_mod.UUID(thread_id)
+                async with AsyncSession(engine) as stream_db:
+                    thread = (await stream_db.exec(
+                        select(ChatThread).where(ChatThread.id == tid)
+                    )).first()
+                    if thread is not None:
+                        await append_message(
+                            stream_db, thread, role="assistant",
+                            content="".join(assistant_buffer),
+                        )
+                        await stream_db.commit()
     except asyncio.CancelledError:
         raise
-    except Exception as exc:  # noqa: BLE001 — by design: any leak becomes an event
+    except Exception as exc:  # noqa: BLE001 — leak becomes an event
         err = Error(message=f"chat failed: {exc}", retryable=False)
         yield (err.model_dump_json() + "\n").encode()
 
@@ -202,9 +241,50 @@ async def post_chat_turn(
             detail=f"missing chat role: {settings.chat_required_role}",
         )
 
+    # The dataset row was already looked up inside make_chat_agent; re-fetch
+    # here for the FK on chat_threads (cheap, single-row).
+    from sqlmodel import select
+    from cell_explorer_api.db.models import Dataset
+    dataset = (await db.exec(select(Dataset).where(Dataset.slug == slug))).first()
+
+    # Last user message is the one we persist (history is full conversation;
+    # the actual NEW user input is the last entry).
+    last_user_message = body.messages[-1].content
+
+    # Resolve thread: create new, or load existing (with owner check).
+    if body.thread_id is None:
+        thread = await create_thread(
+            db, user=user, dataset=dataset, first_user_message=last_user_message,
+        )
+    else:
+        try:
+            thread = await load_thread(db, user=user, thread_id=body.thread_id)
+        except ThreadNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ThreadAccessDeniedError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    # Persist the user message BEFORE the LLM call so a mid-stream crash
+    # doesn't lose it.
+    await append_message(db, thread, role="user", content=last_user_message)
+
+    # Capture plain values now, before commit() expires the ORM attributes.
+    # The async generator runs after this handler returns, outside the
+    # request's db session scope, so it uses its own fresh session.
+    thread_id_str = str(thread.id)
+    thread_title_str = thread.title
+    engine = request.app.state.db_engine
+
+    await db.commit()
+
     return StreamingResponse(
         _ndjson_event_stream(
-            agent, _to_agent_messages(body.messages), body.view_state
+            agent,
+            _to_agent_messages(body.messages),
+            body.view_state,
+            engine=engine,
+            thread_id=thread_id_str,
+            thread_title=thread_title_str,
         ),
         media_type="application/x-ndjson",
     )
