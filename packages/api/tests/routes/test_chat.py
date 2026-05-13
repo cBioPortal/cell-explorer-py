@@ -828,3 +828,101 @@ def test_post_turn_thread_id_missing_returns_404(seeded_app):
             "thread_id": str(uuid.uuid4()),
         })
     assert response.status_code == 404
+
+
+# ---------- GET /threads tests ----------
+
+def test_get_threads_returns_users_threads_only(seeded_app):
+    import asyncio
+    from cell_explorer_api.db.models import ChatThread
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    async def _seed():
+        engine = seeded_app.state.db_engine
+        ds_id = await _first_dataset_id_async(seeded_app)
+        async with AsyncSession(engine) as s:
+            s.add(ChatThread(user_sub="user-1", dataset_id=ds_id, title="A"))
+            s.add(ChatThread(user_sub="user-1", dataset_id=ds_id, title="B"))
+            s.add(ChatThread(user_sub="other", dataset_id=ds_id, title="not mine"))
+            await s.commit()
+    asyncio.run(_seed())
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="user-1")
+
+    fake = _FakeChatAgent()
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.get("/api/chat/public-atlas/threads")
+    assert response.status_code == 200
+    threads = response.json()["threads"]
+    titles = {t["title"] for t in threads}
+    assert titles == {"A", "B"}
+    assert "not mine" not in titles
+
+
+def test_get_threads_empty_when_no_threads(seeded_app):
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="user-1")
+
+    fake = _FakeChatAgent()
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.get("/api/chat/public-atlas/threads")
+    assert response.status_code == 200
+    assert response.json() == {"threads": []}
+
+
+def test_get_threads_includes_message_count(seeded_app):
+    import asyncio
+    from cell_explorer_api.db.models import ChatThread, ChatMessageRow
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    async def _seed():
+        engine = seeded_app.state.db_engine
+        ds_id = await _first_dataset_id_async(seeded_app)
+        async with AsyncSession(engine) as s:
+            t = ChatThread(user_sub="user-1", dataset_id=ds_id, title="hi")
+            s.add(t)
+            await s.flush()
+            s.add(ChatMessageRow(thread_id=t.id, role="user", content="x"))
+            s.add(ChatMessageRow(thread_id=t.id, role="assistant", content="y"))
+            await s.commit()
+    asyncio.run(_seed())
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="user-1")
+
+    fake = _FakeChatAgent()
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.get("/api/chat/public-atlas/threads")
+    assert response.status_code == 200
+    assert response.json()["threads"][0]["message_count"] == 2
+
+
+def test_get_threads_unauthenticated_returns_401(seeded_app):
+    client = TestClient(seeded_app)
+    response = client.get("/api/chat/public-atlas/threads")
+    assert response.status_code == 401
+
+
+def test_get_threads_chat_disabled_dataset_returns_404(seeded_app):
+    """If make_chat_agent raises ChatDisabledError, the thread list returns 404."""
+    from cell_explorer_api.services.chat_session import ChatDisabledError
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="user-1")
+
+    async def _make_agent(**_):
+        raise ChatDisabledError("chat is not enabled for dataset 'public-atlas'")
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.get("/api/chat/public-atlas/threads")
+    assert response.status_code == 404

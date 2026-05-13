@@ -3,6 +3,7 @@
 import asyncio
 import uuid as _uuid
 from collections.abc import AsyncIterator
+from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -34,6 +35,7 @@ from cell_explorer_api.services.threads import (
     ThreadNotFoundError,
     append_message,
     create_thread,
+    list_threads,
     load_thread,
 )
 
@@ -90,6 +92,18 @@ class ContextResponse(BaseModel):
     embedding_keys: list[str]
     available_tools: list[str]
     permission: ChatPermissionResponse
+
+
+class ThreadSummaryResponse(BaseModel):
+    id: _uuid.UUID
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    message_count: int
+
+
+class ThreadListResponse(BaseModel):
+    threads: list[ThreadSummaryResponse]
 
 
 def _to_agent_messages(messages: list[ChatMessage]):
@@ -285,4 +299,43 @@ async def post_chat_turn(
             thread_title=thread_title_str,
         ),
         media_type="application/x-ndjson",
+    )
+
+
+@router.get("/chat/{slug}/threads", response_model=ThreadListResponse)
+async def get_chat_threads(
+    slug: str,
+    request: Request,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+) -> ThreadListResponse:
+    settings: Settings = request.app.state.settings
+    if not settings.chat_enabled:
+        raise HTTPException(status_code=404, detail="Chat is not available")
+
+    # Reuse make_chat_agent for the dataset access + chat-enabled gating cascade.
+    # We don't need the agent itself, just the gating side effects.
+    try:
+        await make_chat_agent(
+            user=user, dataset_slug=slug, db=db, settings=settings,
+        )
+    except ChatSessionError as exc:
+        raise _http_for_chat_session_error(exc) from exc
+
+    dataset = (await db.exec(select(Dataset).where(Dataset.slug == slug))).first()
+    if dataset is None:
+        raise HTTPException(status_code=404, detail=f"dataset {slug!r} not found")
+
+    summaries = await list_threads(db, user=user, dataset=dataset)
+    return ThreadListResponse(
+        threads=[
+            ThreadSummaryResponse(
+                id=s.id,
+                title=s.title,
+                created_at=s.created_at,
+                updated_at=s.updated_at,
+                message_count=s.message_count,
+            )
+            for s in summaries
+        ],
     )
