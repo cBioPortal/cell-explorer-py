@@ -58,6 +58,7 @@ class Model(BaseModel):
     removeSummaryGenes: list[str] | None = None
     summaryContext: Literal['overall', 'selections'] | None = None
     selectionDisplayMode: Literal['dim', 'hide'] | None = None
+    showCategoryLabels: bool | None = None
     showHeader: bool | None = None
     showLeftSidebar: bool | None = None
     showRightSidebar: bool | None = None

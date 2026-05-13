@@ -23,6 +23,7 @@ async def test_v1_catalog_includes_all_tools(fake_zarr):
         "filter_by_ids",
         "filter_by_gene_expression",
         "set_selection_display_mode",
+        "set_category_labels",
         "clear_filter",
         "add_summary_obs_column",
         "add_summary_gene",

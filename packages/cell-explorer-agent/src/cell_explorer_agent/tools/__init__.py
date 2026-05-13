@@ -32,6 +32,9 @@ from cell_explorer_agent.tools.ui_action.render import (
     clear_render_controls_tool,
     set_render_controls_tool,
 )
+from cell_explorer_agent.tools.ui_action.category_labels import (
+    set_category_labels_tool,
+)
 from cell_explorer_agent.tools.ui_action.selection_display_mode import (
     set_selection_display_mode_tool,
 )
@@ -73,6 +76,7 @@ def build_v1_catalog(z: ZarrAccess, *, config: AgentConfig) -> ToolCatalog:
     cat.register(filter_by_ids_tool(z, filter_ids_max=config.filter_ids_max))
     cat.register(filter_by_gene_expression_tool(z))
     cat.register(set_selection_display_mode_tool())
+    cat.register(set_category_labels_tool())
     cat.register(clear_filter_tool())
     cat.register(add_summary_obs_column_tool(z))
     cat.register(add_summary_gene_tool(z))

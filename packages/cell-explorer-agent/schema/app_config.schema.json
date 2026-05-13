@@ -223,6 +223,9 @@
         "hide"
       ]
     },
+    "showCategoryLabels": {
+      "type": "boolean"
+    },
     "showHeader": {
       "type": "boolean"
     },

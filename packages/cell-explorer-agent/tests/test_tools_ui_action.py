@@ -30,6 +30,9 @@ from cell_explorer_agent.tools.ui_action.render import (
     clear_render_controls_tool,
     set_render_controls_tool,
 )
+from cell_explorer_agent.tools.ui_action.category_labels import (
+    set_category_labels_tool,
+)
 from cell_explorer_agent.tools.ui_action.selection_display_mode import (
     set_selection_display_mode_tool,
 )
@@ -303,6 +306,19 @@ async def test_set_selection_display_mode_invalid_value():
     tool = set_selection_display_mode_tool()
     r = await tool.func(value="other")
     assert "error" in r
+
+
+async def test_set_category_labels_true():
+    tool = set_category_labels_tool()
+    r = await tool.func(value=True)
+    assert r == {"payload": {"showCategoryLabels": True}}
+    assert tool.kind == "ui_action"
+
+
+async def test_set_category_labels_false():
+    tool = set_category_labels_tool()
+    r = await tool.func(value=False)
+    assert r == {"payload": {"showCategoryLabels": False}}
 
 
 async def test_clear_color_by_emits_null():
