@@ -66,3 +66,37 @@ class Dataset(SQLModel, table=True):
         if self.datasource is None:
             return None
         return f"{self.datasource.base_url}/{self.path}"
+
+
+def _utcnow() -> datetime:
+    """Return current UTC time as a timezone-naive datetime.
+
+    SQLite stores datetimes without timezone info; using naive UTC
+    keeps in-memory values consistent with what the DB returns.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+class ChatThread(SQLModel, table=True):
+    """A single chat conversation owned by one user, scoped to one dataset."""
+
+    __tablename__ = "chat_threads"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_sub: str = Field(index=True)  # Keycloak `sub` claim
+    dataset_id: uuid.UUID = Field(foreign_key="datasets.id", index=True)
+    title: str
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class ChatMessageRow(SQLModel, table=True):
+    """One persisted chat message belonging to a thread."""
+
+    __tablename__ = "chat_messages"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    thread_id: uuid.UUID = Field(foreign_key="chat_threads.id", index=True, ondelete="CASCADE")
+    role: str  # "user" | "assistant"
+    content: str
+    created_at: datetime = Field(default_factory=_utcnow)

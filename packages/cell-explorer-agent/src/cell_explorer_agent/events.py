@@ -40,7 +40,15 @@ class Done(BaseModel):
     usage: TokenUsage = TokenUsage()
 
 
-ChatEvent = TextDelta | ToolProgress | UIAction | Error | Done
+class ThreadOpen(BaseModel):
+    """Emitted first in every /turns stream — tells the client which thread
+    this turn belongs to (created or continued) and its current title."""
+    type: Literal["thread_open"] = "thread_open"
+    thread_id: str
+    title: str
+
+
+ChatEvent = TextDelta | ToolProgress | UIAction | Error | Done | ThreadOpen
 
 
 def dump_event(event: ChatEvent) -> str:
