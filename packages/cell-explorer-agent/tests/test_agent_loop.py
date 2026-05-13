@@ -206,6 +206,71 @@ async def test_tool_exception_becomes_tool_result(fake_zarr):
     assert events[-1].__class__.__name__ == "Done"
 
 
+async def test_tool_call_start_end_log_lines(fake_zarr, caplog):
+    """Every successful tool call emits start + end log lines with tool name,
+    kind, and duration so docker logs can show real-time agent activity."""
+    llm = FakeLLMClient(
+        scripts=[
+            Script(events=[
+                LLMToolCall(id="t1", name="get_dataset_schema", args={}),
+                LLMStop(reason="tool_use", usage=LLMUsage()),
+            ]),
+            Script(events=[
+                LLMTextDelta(text="ok"),
+                LLMStop(reason="end_turn", usage=LLMUsage()),
+            ]),
+        ]
+    )
+    ctx = await build_dataset_context(fake_zarr, slug="d", name="D", description="")
+    cat = ToolCatalog()
+    cat.register(get_dataset_schema_tool(fake_zarr, limit_bytes=32_768))
+    agent = ChatAgent(llm=llm, catalog=cat, dataset_ctx=ctx, config=AgentConfig())
+
+    with caplog.at_level("INFO", logger="cell_explorer_agent.agent"):
+        _ = [e async for e in agent.run(messages=[UserMessage(content="x")])]
+
+    msgs = [r.getMessage() for r in caplog.records]
+    starts = [m for m in msgs if m.startswith("chat.tool.call.start")]
+    ends = [m for m in msgs if m.startswith("chat.tool.call.end")]
+    assert len(starts) == 1, msgs
+    assert "tool=get_dataset_schema" in starts[0]
+    assert "kind=data" in starts[0]
+    assert len(ends) == 1, msgs
+    assert "tool=get_dataset_schema" in ends[0]
+    assert "duration_ms=" in ends[0]
+
+
+async def test_tool_call_error_log_includes_duration(fake_zarr, caplog):
+    llm = FakeLLMClient(
+        scripts=[
+            Script(events=[
+                LLMToolCall(id="t1", name="explode", args={}),
+                LLMStop(reason="tool_use", usage=LLMUsage()),
+            ]),
+            Script(events=[
+                LLMTextDelta(text="oops"),
+                LLMStop(reason="end_turn", usage=LLMUsage()),
+            ]),
+        ]
+    )
+    ctx = await build_dataset_context(fake_zarr, slug="d", name="D", description="")
+    cat = ToolCatalog()
+    cat.register(Tool(
+        name="explode", kind="data", description="",
+        args_schema={"type": "object", "properties": {}}, func=_raising_tool,
+    ))
+    agent = ChatAgent(llm=llm, catalog=cat, dataset_ctx=ctx, config=AgentConfig())
+
+    with caplog.at_level("ERROR", logger="cell_explorer_agent.agent"):
+        _ = [e async for e in agent.run(messages=[UserMessage(content="x")])]
+
+    errs = [r.getMessage() for r in caplog.records if "chat.tool.call.error" in r.getMessage()]
+    assert len(errs) == 1, [r.getMessage() for r in caplog.records]
+    assert "tool=explode" in errs[0]
+    assert "duration_ms=" in errs[0]
+    assert "correlation=" in errs[0]
+
+
 async def test_max_tool_calls_cap(fake_zarr):
     # LLM keeps calling a tool forever; cap should kick in.
     def make_repeater(id_prefix):

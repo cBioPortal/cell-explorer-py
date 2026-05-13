@@ -1,10 +1,28 @@
 """ChatAgent — turn loop over an LLMClient with data + ui-action tools."""
 
+import json
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
+
+_MAX_ARG_LOG_LEN = 200
+
+
+def _short_args(args: dict[str, Any]) -> str:
+    """Compact, length-capped representation of tool args for log lines.
+
+    Serialize as JSON for readability; truncate so a single call with a large
+    payload (gene-id list, etc.) doesn't blow out a log line. Non-JSON-able
+    values fall back to repr.
+    """
+    try:
+        s = json.dumps(args, separators=(",", ":"), default=str)
+    except Exception:
+        s = repr(args)
+    return s if len(s) <= _MAX_ARG_LOG_LEN else s[:_MAX_ARG_LOG_LEN] + "...(truncated)"
 
 from cell_explorer_agent.config import AgentConfig
 from cell_explorer_agent.events import (
@@ -123,14 +141,23 @@ class ChatAgent:
                     )
                     continue
 
+                logger.info(
+                    "chat.tool.call.start tool=%s kind=%s args=%s",
+                    tool.name,
+                    tool.kind,
+                    _short_args(call.args),
+                )
+                start_ts = time.monotonic()
                 try:
                     yield ToolProgress(tool=tool.name, status="started")
                     result = await tool.func(**call.args)
                 except Exception as exc:
+                    duration_ms = int((time.monotonic() - start_ts) * 1000)
                     correlation = uuid.uuid4().hex
                     logger.exception(
-                        "chat.tool.call failed tool=%s correlation=%s",
+                        "chat.tool.call.error tool=%s duration_ms=%d correlation=%s",
                         tool.name,
+                        duration_ms,
                         correlation,
                     )
                     yield ToolProgress(
@@ -144,6 +171,13 @@ class ChatAgent:
                         )
                     )
                     continue
+                duration_ms = int((time.monotonic() - start_ts) * 1000)
+                logger.info(
+                    "chat.tool.call.end tool=%s kind=%s duration_ms=%d",
+                    tool.name,
+                    tool.kind,
+                    duration_ms,
+                )
 
                 if tool.kind == "data":
                     yield ToolProgress(tool=tool.name, status="ok")
