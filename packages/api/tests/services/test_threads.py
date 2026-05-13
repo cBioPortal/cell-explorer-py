@@ -3,7 +3,6 @@
 from dataclasses import dataclass
 
 import pytest
-from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -128,12 +127,14 @@ async def test_list_threads_returns_only_users_threads_for_dataset(session, seed
 
 
 async def test_list_threads_orders_by_updated_at_desc(session, seeded_dataset):
+    import asyncio
     user = FakeUser(sub="u", roles=[])
     t1 = await create_thread(session, user=user, dataset=seeded_dataset,
                              first_user_message="first")
     t2 = await create_thread(session, user=user, dataset=seeded_dataset,
                              first_user_message="second")
     await session.commit()
+    await asyncio.sleep(0.01)
     await append_message(session, t1, role="assistant", content="reply")
     await session.commit()
 
@@ -150,6 +151,16 @@ async def test_list_threads_includes_message_count(session, seeded_dataset):
     await session.commit()
     summaries = await list_threads(session, user=user, dataset=seeded_dataset)
     assert summaries[0].message_count == 2
+
+
+async def test_list_threads_zero_message_count_for_empty_thread(session, seeded_dataset):
+    user = FakeUser(sub="u", roles=[])
+    await create_thread(session, user=user, dataset=seeded_dataset,
+                        first_user_message="empty so far")
+    await session.commit()
+    summaries = await list_threads(session, user=user, dataset=seeded_dataset)
+    assert len(summaries) == 1
+    assert summaries[0].message_count == 0
 
 
 # ---------- load_thread ---------------------------------------------------
@@ -194,6 +205,26 @@ async def test_append_message_bumps_updated_at(session, seeded_dataset):
     await session.commit()
     await session.refresh(t)
     assert t.updated_at > before
+
+
+async def test_load_thread_messages_returns_in_created_order(session, seeded_dataset):
+    from cell_explorer_api.services.threads import load_thread_messages
+    import asyncio
+    user = FakeUser(sub="u", roles=[])
+    t = await create_thread(session, user=user, dataset=seeded_dataset,
+                            first_user_message="hi")
+    await append_message(session, t, role="user", content="first user")
+    await asyncio.sleep(0.01)
+    await append_message(session, t, role="assistant", content="first assistant")
+    await asyncio.sleep(0.01)
+    await append_message(session, t, role="user", content="second user")
+    await session.commit()
+    messages = await load_thread_messages(session, thread=t)
+    assert [(m.role, m.content) for m in messages] == [
+        ("user", "first user"),
+        ("assistant", "first assistant"),
+        ("user", "second user"),
+    ]
 
 
 # ---------- delete_thread -------------------------------------------------

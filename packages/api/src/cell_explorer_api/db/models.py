@@ -99,4 +99,4 @@ class ChatMessageRow(SQLModel, table=True):
     thread_id: uuid.UUID = Field(foreign_key="chat_threads.id", index=True, ondelete="CASCADE")
     role: str  # "user" | "assistant"
     content: str
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=_utcnow)
