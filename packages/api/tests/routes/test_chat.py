@@ -926,3 +926,89 @@ def test_get_threads_chat_disabled_dataset_returns_404(seeded_app):
     with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
         response = client.get("/api/chat/public-atlas/threads")
     assert response.status_code == 404
+
+
+# ---------- GET /threads/{id} tests ----------
+
+
+def test_get_thread_detail_returns_full_history(seeded_app):
+    import asyncio
+    from cell_explorer_api.db.models import ChatThread, ChatMessageRow
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    async def _seed():
+        engine = seeded_app.state.db_engine
+        ds_id = await _first_dataset_id_async(seeded_app)
+        async with AsyncSession(engine) as s:
+            t = ChatThread(user_sub="user-1", dataset_id=ds_id, title="hi")
+            s.add(t)
+            await s.flush()
+            s.add(ChatMessageRow(thread_id=t.id, role="user", content="Q1"))
+            s.add(ChatMessageRow(thread_id=t.id, role="assistant", content="A1"))
+            s.add(ChatMessageRow(thread_id=t.id, role="user", content="Q2"))
+            await s.commit()
+            await s.refresh(t)
+            return t.id
+    thread_id = asyncio.run(_seed())
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="user-1")
+    fake = _FakeChatAgent()
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.get(f"/api/chat/public-atlas/threads/{thread_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["title"] == "hi"
+    assert [(m["role"], m["content"]) for m in data["messages"]] == [
+        ("user", "Q1"), ("assistant", "A1"), ("user", "Q2"),
+    ]
+
+
+def test_get_thread_detail_missing_returns_404(seeded_app):
+    import uuid
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="user-1")
+    fake = _FakeChatAgent()
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.get(f"/api/chat/public-atlas/threads/{uuid.uuid4()}")
+    assert response.status_code == 404
+
+
+def test_get_thread_detail_cross_user_returns_403(seeded_app):
+    import asyncio
+    from cell_explorer_api.db.models import ChatThread
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    async def _seed():
+        engine = seeded_app.state.db_engine
+        ds_id = await _first_dataset_id_async(seeded_app)
+        async with AsyncSession(engine) as s:
+            t = ChatThread(user_sub="other-user", dataset_id=ds_id, title="not yours")
+            s.add(t)
+            await s.commit()
+            await s.refresh(t)
+            return t.id
+    other_id = asyncio.run(_seed())
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="user-1")
+    fake = _FakeChatAgent()
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.get(f"/api/chat/public-atlas/threads/{other_id}")
+    assert response.status_code == 403
+
+
+def test_get_thread_detail_unauthenticated_returns_401(seeded_app):
+    import uuid
+    client = TestClient(seeded_app)
+    response = client.get(f"/api/chat/public-atlas/threads/{uuid.uuid4()}")
+    assert response.status_code == 401

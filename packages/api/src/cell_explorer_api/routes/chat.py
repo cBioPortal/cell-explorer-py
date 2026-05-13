@@ -37,6 +37,7 @@ from cell_explorer_api.services.threads import (
     create_thread,
     list_threads,
     load_thread,
+    load_thread_messages,
 )
 
 router = APIRouter(tags=["chat"])
@@ -104,6 +105,18 @@ class ThreadSummaryResponse(BaseModel):
 
 class ThreadListResponse(BaseModel):
     threads: list[ThreadSummaryResponse]
+
+
+class ThreadMessageResponse(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+    created_at: datetime
+
+
+class ThreadDetailResponse(BaseModel):
+    id: _uuid.UUID
+    title: str
+    messages: list[ThreadMessageResponse]
 
 
 def _to_agent_messages(messages: list[ChatMessage]):
@@ -337,5 +350,45 @@ async def get_chat_threads(
                 message_count=s.message_count,
             )
             for s in summaries
+        ],
+    )
+
+
+@router.get("/chat/{slug}/threads/{thread_id}", response_model=ThreadDetailResponse)
+async def get_chat_thread_detail(
+    slug: str,
+    thread_id: _uuid.UUID,
+    request: Request,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+) -> ThreadDetailResponse:
+    settings: Settings = request.app.state.settings
+    if not settings.chat_enabled:
+        raise HTTPException(status_code=404, detail="Chat is not available")
+    try:
+        await make_chat_agent(
+            user=user, dataset_slug=slug, db=db, settings=settings,
+        )
+    except ChatSessionError as exc:
+        raise _http_for_chat_session_error(exc) from exc
+
+    try:
+        thread = await load_thread(db, user=user, thread_id=thread_id)
+    except ThreadNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ThreadAccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    messages = await load_thread_messages(db, thread=thread)
+    return ThreadDetailResponse(
+        id=thread.id,
+        title=thread.title,
+        messages=[
+            ThreadMessageResponse(
+                role=m.role,  # type: ignore[arg-type] — DB stores str; narrow at route
+                content=m.content,
+                created_at=m.created_at,
+            )
+            for m in messages
         ],
     )
