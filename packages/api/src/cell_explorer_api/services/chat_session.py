@@ -64,6 +64,46 @@ def _credential_to_headers(credential: dict[str, Any]) -> dict[str, str]:
     raise CredentialMintError(f"unknown credential_type {kind!r}")
 
 
+async def assert_chat_access(
+    *,
+    user: User,
+    dataset_slug: str,
+    db: AsyncSession,
+) -> Dataset:
+    """Run the chat gating cascade WITHOUT building an agent.
+
+    Performs dataset lookup, dataset-access check, and per-dataset chat
+    opt-in check — the same first three checks `make_chat_agent` does —
+    but stops short of minting credentials and opening the zarr store.
+
+    Used by the cheap endpoints (/threads, /threads/{id}, DELETE) that
+    need the same authorization but don't need a working LLM session.
+
+    Returns the resolved Dataset (with datasource attached) for use as
+    an FK target.
+    """
+    stmt = select(Dataset, Datasource).join(Datasource).where(Dataset.slug == dataset_slug)
+    result = await db.exec(stmt)
+    row = result.first()
+    if row is None:
+        raise DatasetNotFoundError(f"dataset {dataset_slug!r} not found")
+    dataset, datasource = row
+    dataset.datasource = datasource
+
+    if not user_can_access(dataset, user=user):
+        roles = ", ".join(dataset.required_roles) if dataset.required_roles else "(none)"
+        raise AccessDeniedError(
+            f"insufficient permissions for {dataset_slug!r}; required roles: {roles}"
+        )
+
+    if not dataset.chat_enabled:
+        raise ChatDisabledError(
+            f"chat is not enabled for dataset {dataset_slug!r}"
+        )
+
+    return dataset
+
+
 async def make_chat_agent(
     *,
     user: User,
@@ -76,27 +116,10 @@ async def make_chat_agent(
     """Build a ChatAgent with real auth + credentials for the given dataset."""
     agent_config = agent_config or AgentConfig()
 
-    # 1. Look up dataset + datasource
-    stmt = select(Dataset, Datasource).join(Datasource).where(Dataset.slug == dataset_slug)
-    result = await db.exec(stmt)
-    row = result.first()
-    if row is None:
-        raise DatasetNotFoundError(f"dataset {dataset_slug!r} not found")
-    dataset, datasource = row
-    dataset.datasource = datasource  # match the pattern in routes/datasets.py
-
-    # 2. Access check
-    if not user_can_access(dataset, user=user):
-        roles = ", ".join(dataset.required_roles) if dataset.required_roles else "(none)"
-        raise AccessDeniedError(
-            f"insufficient permissions for {dataset_slug!r}; required roles: {roles}"
-        )
-
-    # 2.5. Chat-disabled gate (Layer 3) — short-circuit before zarr work.
-    if not dataset.chat_enabled:
-        raise ChatDisabledError(
-            f"chat is not enabled for dataset {dataset_slug!r}"
-        )
+    # 1, 2, 2.5: dataset lookup + access check + chat-enabled gate
+    dataset = await assert_chat_access(user=user, dataset_slug=dataset_slug, db=db)
+    datasource = dataset.datasource
+    assert datasource is not None  # assert_chat_access attaches it
 
     # 3. Mint credentials (private only) and compute URL + headers.
     # Server-side fetches must use fetch_base_url (internal_base_url || base_url)

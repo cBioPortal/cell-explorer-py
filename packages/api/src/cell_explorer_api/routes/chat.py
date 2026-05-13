@@ -28,6 +28,7 @@ from cell_explorer_api.services.chat_session import (
     CredentialMintError,
     DatasetNotFoundError,
     ZarrUnreachableError,
+    assert_chat_access,
     make_chat_agent,
 )
 from cell_explorer_api.services.threads import (
@@ -327,18 +328,13 @@ async def get_chat_threads(
     if not settings.chat_enabled:
         raise HTTPException(status_code=404, detail="Chat is not available")
 
-    # Reuse make_chat_agent for the dataset access + chat-enabled gating cascade.
-    # We don't need the agent itself, just the gating side effects.
+    # Lightweight gate: dataset lookup + access check + chat_enabled flag,
+    # without opening the zarr store. /threads doesn't need a live LLM
+    # session — it just lists DB rows the user already owns.
     try:
-        await make_chat_agent(
-            user=user, dataset_slug=slug, db=db, settings=settings,
-        )
+        dataset = await assert_chat_access(user=user, dataset_slug=slug, db=db)
     except ChatSessionError as exc:
         raise _http_for_chat_session_error(exc) from exc
-
-    dataset = (await db.exec(select(Dataset).where(Dataset.slug == slug))).first()
-    if dataset is None:
-        raise HTTPException(status_code=404, detail=f"dataset {slug!r} not found")
 
     summaries = await list_threads(db, user=user, dataset=dataset)
     return ThreadListResponse(
@@ -367,9 +363,7 @@ async def get_chat_thread_detail(
     if not settings.chat_enabled:
         raise HTTPException(status_code=404, detail="Chat is not available")
     try:
-        await make_chat_agent(
-            user=user, dataset_slug=slug, db=db, settings=settings,
-        )
+        await assert_chat_access(user=user, dataset_slug=slug, db=db)
     except ChatSessionError as exc:
         raise _http_for_chat_session_error(exc) from exc
 
@@ -407,9 +401,7 @@ async def delete_chat_thread(
     if not settings.chat_enabled:
         raise HTTPException(status_code=404, detail="Chat is not available")
     try:
-        await make_chat_agent(
-            user=user, dataset_slug=slug, db=db, settings=settings,
-        )
+        await assert_chat_access(user=user, dataset_slug=slug, db=db)
     except ChatSessionError as exc:
         raise _http_for_chat_session_error(exc) from exc
 
