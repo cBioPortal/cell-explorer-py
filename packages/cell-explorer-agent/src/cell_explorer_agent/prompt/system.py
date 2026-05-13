@@ -103,6 +103,27 @@ def build_system_prompt(ctx: DatasetContext) -> str:
         "agent-initiated view changes are usually unwelcome."
     )
     lines.append("")
+    lines.append("Citing your sources:")
+    lines.append(
+        "  - When stating a fact derived from a tool result, append a citation "
+        "marker of the form [t:<tool_use_id>] immediately after the fact. Use the "
+        "id from the tool_use block you previously emitted (the same id that "
+        "appears in the tool_result you read). The frontend renders these markers "
+        "as clickable links that point users at the underlying tool call."
+    )
+    lines.append(
+        "  - Cite any data-derived number, gene name, category value, cell count, "
+        "percentage, or summary statistic. Do not cite paraphrases of the user's "
+        "question, generic biological background, or your own narration. UI-action "
+        "tool calls (set_color_by_gene, filter_by_ids, set_viewport, etc.) do not "
+        "need citations — the user already saw the action."
+    )
+    lines.append(
+        "  - Use the form [t:<id>] verbatim. Do not invent ids — only use ones from "
+        "tool_use blocks already in the conversation. Multiple citations next to "
+        "one claim are fine: 'CD3D, GZMB, NKG7 [t:abc][t:def]'."
+    )
+    lines.append("")
     lines.append("View-control tools:")
     lines.append(
         "  - set_viewport: pan and zoom the scatterplot. target_x/target_y are coordinates "

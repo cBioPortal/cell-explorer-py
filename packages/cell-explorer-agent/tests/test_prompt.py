@@ -119,6 +119,20 @@ async def test_system_prompt_directs_describe_obs_column_before_highlight(fake_z
     assert "filter_by_ids" in sys and "set_color_by_category" in sys
 
 
+async def test_system_prompt_instructs_citation_markers(fake_zarr):
+    """The agent should know to emit [t:<id>] markers after data-derived facts
+    so the frontend can render citation back-links into the WhyPanel trace."""
+    ctx = await build_dataset_context(
+        fake_zarr, slug="demo", name="Demo", description=""
+    )
+    sys = build_system_prompt(ctx)
+    assert "[t:<tool_use_id>]" in sys
+    # The model needs to know which kinds of claims to cite and which to skip.
+    assert "data-derived" in sys.lower() or "fact" in sys.lower()
+    # And not to invent ids.
+    assert "do not invent" in sys.lower() or "invent ids" in sys.lower()
+
+
 def test_format_view_state_block_empty_returns_none():
     """Empty snapshots produce no block — caller can skip injection entirely."""
     assert format_view_state_block({}) is None
