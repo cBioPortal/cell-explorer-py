@@ -11,7 +11,6 @@ import pytest_asyncio
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -60,16 +59,10 @@ def app(settings):
 
 @pytest_asyncio.fixture()
 async def seeded_app(app, db_url):
-    from sqlalchemy import event
-    engine = create_async_engine(db_url)
-    # Enable foreign key enforcement for SQLite (same as create_engine does)
-    if db_url.startswith("sqlite"):
-        @event.listens_for(engine.sync_engine, "connect")
-        def _enable_sqlite_foreign_keys(dbapi_conn, _connection_record):
-            cursor = dbapi_conn.cursor()
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.close()
-
+    from cell_explorer_api.db import create_engine
+    # Use project helper so the SQLite foreign_keys pragma listener is
+    # attached automatically (needed for ON DELETE CASCADE in tests).
+    engine = create_engine(db_url)
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
 
