@@ -82,6 +82,16 @@ async def test_data_tool_turn(fake_zarr):
     text = "".join(e.text for e in events if isinstance(e, TextDelta))
     assert "100 cells" in text
 
+    # Why-panel wire fields: 'started' carries args, 'ok' carries duration_ms.
+    progress = [e for e in events if isinstance(e, ToolProgress)]
+    started = next(e for e in progress if e.status == "started")
+    finished = next(e for e in progress if e.status == "ok")
+    assert started.args == {}
+    assert started.duration_ms is None
+    assert finished.duration_ms is not None
+    assert finished.duration_ms >= 0
+    assert finished.args is None
+
 
 from cell_explorer_agent.events import UIAction
 from cell_explorer_agent.tools.ui_action.color import set_color_by_gene_tool
