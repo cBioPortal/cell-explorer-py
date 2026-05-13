@@ -150,7 +150,10 @@ class ChatAgent:
                 start_ts = time.monotonic()
                 try:
                     yield ToolProgress(
-                        tool=tool.name, status="started", args=call.args
+                        tool=tool.name,
+                        status="started",
+                        args=call.args,
+                        tool_call_id=call.id,
                     )
                     result = await tool.func(**call.args)
                 except Exception as exc:
@@ -167,6 +170,7 @@ class ChatAgent:
                         status="error",
                         summary=str(exc),
                         duration_ms=duration_ms,
+                        tool_call_id=call.id,
                     )
                     results.append(
                         ToolResult(
@@ -186,7 +190,10 @@ class ChatAgent:
 
                 if tool.kind == "data":
                     yield ToolProgress(
-                        tool=tool.name, status="ok", duration_ms=duration_ms
+                        tool=tool.name,
+                        status="ok",
+                        duration_ms=duration_ms,
+                        tool_call_id=call.id,
                     )
                     results.append(
                         ToolResult(tool_call_id=call.id, content=result)
@@ -198,6 +205,7 @@ class ChatAgent:
                             status="error",
                             summary=result["error"],
                             duration_ms=duration_ms,
+                            tool_call_id=call.id,
                         )
                         results.append(
                             ToolResult(
@@ -209,7 +217,10 @@ class ChatAgent:
                     else:
                         yield UIAction(payload=result["payload"])
                         yield ToolProgress(
-                            tool=tool.name, status="ok", duration_ms=duration_ms
+                            tool=tool.name,
+                            status="ok",
+                            duration_ms=duration_ms,
+                            tool_call_id=call.id,
                         )
                         results.append(
                             ToolResult(

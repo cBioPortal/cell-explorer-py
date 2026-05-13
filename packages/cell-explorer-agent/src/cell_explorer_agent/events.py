@@ -21,6 +21,10 @@ class ToolProgress(BaseModel):
     # Populated on the 'ok' / 'error' events. Wall-clock time from when the
     # 'started' event was emitted until completion or failure.
     duration_ms: int | None = None
+    # LLM-generated tool_use_id. Same string the model emits in [t:<id>]
+    # citation markers — used by the frontend to scroll/flash a citation's
+    # target row in the WhyPanel. Optional so older clients don't break.
+    tool_call_id: str | None = None
 
 
 class UIAction(BaseModel):

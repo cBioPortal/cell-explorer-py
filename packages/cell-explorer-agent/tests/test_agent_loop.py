@@ -82,7 +82,8 @@ async def test_data_tool_turn(fake_zarr):
     text = "".join(e.text for e in events if isinstance(e, TextDelta))
     assert "100 cells" in text
 
-    # Why-panel wire fields: 'started' carries args, 'ok' carries duration_ms.
+    # Why-panel wire fields: 'started' carries args, 'ok' carries duration_ms,
+    # both carry tool_call_id (used by citation back-links).
     progress = [e for e in events if isinstance(e, ToolProgress)]
     started = next(e for e in progress if e.status == "started")
     finished = next(e for e in progress if e.status == "ok")
@@ -91,6 +92,8 @@ async def test_data_tool_turn(fake_zarr):
     assert finished.duration_ms is not None
     assert finished.duration_ms >= 0
     assert finished.args is None
+    assert started.tool_call_id == "t1"
+    assert finished.tool_call_id == "t1"
 
 
 from cell_explorer_agent.events import UIAction
