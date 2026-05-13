@@ -15,6 +15,12 @@ class ToolProgress(BaseModel):
     tool: str
     status: Literal["started", "ok", "error"]
     summary: str | None = None
+    # Populated on the 'started' event for the "why" panel — JSON-serializable
+    # representation of the tool's input arguments.
+    args: dict[str, Any] | None = None
+    # Populated on the 'ok' / 'error' events. Wall-clock time from when the
+    # 'started' event was emitted until completion or failure.
+    duration_ms: int | None = None
 
 
 class UIAction(BaseModel):
