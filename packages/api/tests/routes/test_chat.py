@@ -60,7 +60,16 @@ def app(settings):
 
 @pytest_asyncio.fixture()
 async def seeded_app(app, db_url):
+    from sqlalchemy import event
     engine = create_async_engine(db_url)
+    # Enable foreign key enforcement for SQLite (same as create_engine does)
+    if db_url.startswith("sqlite"):
+        @event.listens_for(engine.sync_engine, "connect")
+        def _enable_sqlite_foreign_keys(dbapi_conn, _connection_record):
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
 
@@ -1011,4 +1020,94 @@ def test_get_thread_detail_unauthenticated_returns_401(seeded_app):
     import uuid
     client = TestClient(seeded_app)
     response = client.get(f"/api/chat/public-atlas/threads/{uuid.uuid4()}")
+    assert response.status_code == 401
+
+
+# ---------- DELETE /threads/{id} tests ----------
+
+
+def test_delete_thread_removes_thread_and_messages(seeded_app):
+    import asyncio
+    from sqlmodel import select
+    from cell_explorer_api.db.models import ChatThread, ChatMessageRow
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    async def _seed():
+        engine = seeded_app.state.db_engine
+        ds_id = await _first_dataset_id_async(seeded_app)
+        async with AsyncSession(engine) as s:
+            t = ChatThread(user_sub="user-1", dataset_id=ds_id, title="hi")
+            s.add(t)
+            await s.flush()
+            s.add(ChatMessageRow(thread_id=t.id, role="user", content="x"))
+            s.add(ChatMessageRow(thread_id=t.id, role="assistant", content="y"))
+            await s.commit()
+            await s.refresh(t)
+            return t.id
+    thread_id = asyncio.run(_seed())
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="user-1")
+    fake = _FakeChatAgent()
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.delete(f"/api/chat/public-atlas/threads/{thread_id}")
+    assert response.status_code == 204
+
+    async def _verify():
+        engine = seeded_app.state.db_engine
+        async with AsyncSession(engine) as s:
+            t = (await s.exec(select(ChatThread).where(ChatThread.id == thread_id))).first()
+            assert t is None
+            m = (await s.exec(select(ChatMessageRow).where(ChatMessageRow.thread_id == thread_id))).first()
+            assert m is None
+    asyncio.run(_verify())
+
+
+def test_delete_thread_missing_returns_404(seeded_app):
+    import uuid
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="user-1")
+    fake = _FakeChatAgent()
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.delete(f"/api/chat/public-atlas/threads/{uuid.uuid4()}")
+    assert response.status_code == 404
+
+
+def test_delete_thread_cross_user_returns_403(seeded_app):
+    import asyncio
+    from cell_explorer_api.db.models import ChatThread
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    async def _seed():
+        engine = seeded_app.state.db_engine
+        ds_id = await _first_dataset_id_async(seeded_app)
+        async with AsyncSession(engine) as s:
+            t = ChatThread(user_sub="other-user", dataset_id=ds_id, title="not yours")
+            s.add(t)
+            await s.commit()
+            await s.refresh(t)
+            return t.id
+    other_id = asyncio.run(_seed())
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="user-1")
+    fake = _FakeChatAgent()
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.delete(f"/api/chat/public-atlas/threads/{other_id}")
+    assert response.status_code == 403
+
+
+def test_delete_thread_unauthenticated_returns_401(seeded_app):
+    import uuid
+    client = TestClient(seeded_app)
+    response = client.delete(f"/api/chat/public-atlas/threads/{uuid.uuid4()}")
     assert response.status_code == 401

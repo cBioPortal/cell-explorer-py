@@ -35,6 +35,7 @@ from cell_explorer_api.services.threads import (
     ThreadNotFoundError,
     append_message,
     create_thread,
+    delete_thread,
     list_threads,
     load_thread,
     load_thread_messages,
@@ -392,3 +393,31 @@ async def get_chat_thread_detail(
             for m in messages
         ],
     )
+
+
+@router.delete("/chat/{slug}/threads/{thread_id}", status_code=204)
+async def delete_chat_thread(
+    slug: str,
+    thread_id: _uuid.UUID,
+    request: Request,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    settings: Settings = request.app.state.settings
+    if not settings.chat_enabled:
+        raise HTTPException(status_code=404, detail="Chat is not available")
+    try:
+        await make_chat_agent(
+            user=user, dataset_slug=slug, db=db, settings=settings,
+        )
+    except ChatSessionError as exc:
+        raise _http_for_chat_session_error(exc) from exc
+
+    try:
+        await delete_thread(db, user=user, thread_id=thread_id)
+    except ThreadNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ThreadAccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    await db.commit()
