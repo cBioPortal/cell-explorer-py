@@ -766,6 +766,23 @@ def test_post_turn_appends_to_existing_thread_when_thread_id_set(seeded_app):
 
     assert lines[0]["thread_id"] == str(existing_id)
 
+    # Verify messages were actually appended to the existing thread.
+    from cell_explorer_api.db.models import ChatMessageRow
+    from sqlmodel import select as _select
+
+    async def _verify():
+        engine = seeded_app.state.db_engine
+        async with AsyncSession(engine) as s:
+            msgs = (await s.exec(
+                _select(ChatMessageRow).where(ChatMessageRow.thread_id == existing_id)
+                .order_by(ChatMessageRow.created_at.asc())
+            )).all()
+            assert [(m.role, m.content) for m in msgs] == [
+                ("user", "follow-up"),
+                ("assistant", "more"),
+            ]
+    asyncio.run(_verify())
+
 
 def test_post_turn_thread_id_cross_user_returns_403(seeded_app):
     import asyncio
