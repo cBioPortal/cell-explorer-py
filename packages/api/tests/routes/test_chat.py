@@ -916,16 +916,16 @@ def test_get_threads_unauthenticated_returns_401(seeded_app):
 
 
 def test_get_threads_chat_disabled_dataset_returns_404(seeded_app):
-    """If make_chat_agent raises ChatDisabledError, the thread list returns 404."""
+    """If the gating cascade raises ChatDisabledError, the thread list returns 404."""
     from cell_explorer_api.services.chat_session import ChatDisabledError
 
     client = TestClient(seeded_app)
     _set_auth_cookie(client, seeded_app, sub="user-1")
 
-    async def _make_agent(**_):
+    async def _assert(**_):
         raise ChatDisabledError("chat is not enabled for dataset 'public-atlas'")
 
-    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+    with patch("cell_explorer_api.routes.chat.assert_chat_access", _assert):
         response = client.get("/api/chat/public-atlas/threads")
     assert response.status_code == 404
 
