@@ -5,16 +5,7 @@ import asyncio
 from fastapi.testclient import TestClient
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-# Re-use the fixtures defined in test_chat.py (seeded_app + its transitive
-# dependencies + _set_auth_cookie). pytest only picks up fixtures from the
-# importing module, so we re-export the whole chain here.
-from .test_chat import (  # noqa: F401  (fixture imports)
-    _set_auth_cookie,
-    app,
-    db_url,
-    seeded_app,
-    settings,
-)
+from .conftest import _set_auth_cookie
 
 
 def _create_thread_with_assistant_msg(seeded_app, *, user_sub: str) -> str:
