@@ -186,3 +186,27 @@ def test_put_feedback_requires_auth(seeded_app):
         json={"rating": "up"},
     )
     assert res.status_code == 401, res.text
+
+
+def test_delete_feedback_removes_row(seeded_app):
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="user-1")
+    msg_id = _create_thread_with_assistant_msg(seeded_app, user_sub="user-1")
+    client.put(
+        f"/api/chat/public-atlas/messages/{msg_id}/feedback",
+        json={"rating": "up"},
+    )
+    res = client.delete(
+        f"/api/chat/public-atlas/messages/{msg_id}/feedback",
+    )
+    assert res.status_code == 204
+
+
+def test_delete_feedback_404_when_none(seeded_app):
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="user-1")
+    msg_id = _create_thread_with_assistant_msg(seeded_app, user_sub="user-1")
+    res = client.delete(
+        f"/api/chat/public-atlas/messages/{msg_id}/feedback",
+    )
+    assert res.status_code == 404

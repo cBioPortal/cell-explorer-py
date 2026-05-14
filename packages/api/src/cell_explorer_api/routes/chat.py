@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlmodel import select
@@ -495,3 +495,35 @@ async def put_message_feedback(
         comment=fb.comment,
         updated_at=fb.updated_at,
     )
+
+
+@router.delete(
+    "/chat/{slug}/messages/{message_id}/feedback",
+    status_code=204,
+)
+async def delete_message_feedback(
+    slug: str,
+    message_id: _uuid.UUID,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    # Resolve message + thread ownership before deleting feedback.
+    msg_stmt = select(ChatMessageRow).where(ChatMessageRow.id == message_id)
+    msg = (await db.exec(msg_stmt)).first()
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    thread_stmt = select(ChatThread).where(ChatThread.id == msg.thread_id)
+    thread = (await db.exec(thread_stmt)).first()
+    if thread is None or thread.user_sub != user.sub:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    fb_stmt = select(ChatFeedback).where(
+        ChatFeedback.message_id == message_id,
+        ChatFeedback.user_sub == user.sub,
+    )
+    fb = (await db.exec(fb_stmt)).first()
+    if fb is None:
+        raise HTTPException(status_code=404, detail="No feedback to clear")
+    await db.delete(fb)
+    await db.commit()
+    return Response(status_code=204)
