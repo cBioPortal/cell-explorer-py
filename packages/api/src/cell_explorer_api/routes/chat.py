@@ -163,6 +163,7 @@ async def _ndjson_event_stream(
     yield (thread_open.model_dump_json() + "\n").encode()
 
     assistant_buffer: list[str] = []
+    persisted = False  # Did we write the assistant message yet?
     try:
         async for event in agent.run(messages=messages, view_state=view_state):
             if event.type == "text_delta":
@@ -182,13 +183,33 @@ async def _ndjson_event_stream(
                         message_id = str(msg.id)
                         await stream_db.commit()
                         event.message_id = message_id
+                        persisted = True
             yield (event.model_dump_json() + "\n").encode()
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 — leak becomes an event
         err = Error(message=f"chat failed: {exc}", retryable=False)
         yield (err.model_dump_json() + "\n").encode()
-        return
+    finally:
+        # If we never persisted (mid-stream error, or agent finished without
+        # `done`), write an assistant placeholder so the thread keeps its
+        # user/assistant alternation invariant. Without this, the user message
+        # above this turn would orphan and break the next turn's validation.
+        # Best-effort: a write failure here must not mask the upstream error.
+        if not persisted:
+            try:
+                async with AsyncSession(engine) as stream_db:
+                    thread = (await stream_db.exec(
+                        select(ChatThread).where(ChatThread.id == thread_id)
+                    )).first()
+                    if thread is not None:
+                        await append_message(
+                            stream_db, thread, role="assistant",
+                            content="(turn failed)",
+                        )
+                        await stream_db.commit()
+            except Exception:  # noqa: BLE001 — best-effort cleanup
+                pass
 
 
 def _http_for_chat_session_error(exc: ChatSessionError) -> HTTPException:
