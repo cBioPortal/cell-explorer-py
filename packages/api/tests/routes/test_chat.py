@@ -434,6 +434,53 @@ def test_post_turn_midstream_error_emits_error_event(seeded_app):
     assert lines[2]["retryable"] is False
 
 
+def test_post_turn_midstream_error_persists_assistant_placeholder(seeded_app):
+    """When the agent raises before `done`, the thread must still end with an
+    assistant row so future turns don't break user/assistant alternation."""
+    import asyncio
+    import json as _json
+    from cell_explorer_agent.events import TextDelta
+    from cell_explorer_api.db.models import ChatThread, ChatMessageRow
+    from sqlmodel import select
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="user-1")
+
+    fake = _FakeChatAgent(
+        run_events=[TextDelta(text="partial ")],
+        run_raises=lambda i: RuntimeError("boom") if i == 0 else None,
+    )
+
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        with client.stream("POST", "/api/chat/public-atlas/turns", json={
+            "messages": [{"role": "user", "content": "trigger failure"}],
+        }) as r:
+            assert r.status_code == 200
+            lines = [_json.loads(line) for line in r.iter_lines() if line]
+    assert lines[-1]["type"] == "error"
+
+    async def _verify():
+        engine = seeded_app.state.db_engine
+        async with AsyncSession(engine) as s:
+            t = (await s.exec(select(ChatThread))).first()
+            assert t is not None
+            msgs = (await s.exec(
+                select(ChatMessageRow).where(ChatMessageRow.thread_id == t.id)
+                .order_by(ChatMessageRow.created_at.asc())
+            )).all()
+            # User message persisted, plus a placeholder assistant message so
+            # the alternation invariant holds.
+            assert [(m.role, m.content) for m in msgs] == [
+                ("user", "trigger failure"),
+                ("assistant", "(turn failed)"),
+            ]
+    asyncio.run(_verify())
+
+
 # ---------- permission field tests ----------
 
 def test_get_context_includes_permission_when_authed_with_no_role_required(seeded_app):
