@@ -6,9 +6,10 @@ from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.orm import aliased
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -19,7 +20,13 @@ from cell_explorer_api.auth.models import User
 from cell_explorer_api.auth.optional import optional_auth
 from cell_explorer_api.config import Settings
 from cell_explorer_api.db import get_db
-from cell_explorer_api.db.models import ChatThread, Dataset
+from cell_explorer_api.db.models import (
+    ChatFeedback,
+    ChatMessageRow,
+    ChatThread,
+    Dataset,
+    _utcnow,
+)
 from cell_explorer_api.services.access import compute_chat_permission
 from cell_explorer_api.services.chat_session import (
     AccessDeniedError,
@@ -39,7 +46,6 @@ from cell_explorer_api.services.threads import (
     delete_thread,
     list_threads,
     load_thread,
-    load_thread_messages,
 )
 
 router = APIRouter(tags=["chat"])
@@ -109,10 +115,17 @@ class ThreadListResponse(BaseModel):
     threads: list[ThreadSummaryResponse]
 
 
+class ThreadMessageFeedback(BaseModel):
+    rating: Literal["up", "down"]
+    comment: str | None
+
+
 class ThreadMessageResponse(BaseModel):
+    id: _uuid.UUID
     role: Literal["user", "assistant"]
     content: str
     created_at: datetime
+    feedback: ThreadMessageFeedback | None = None
 
 
 class ThreadDetailResponse(BaseModel):
@@ -374,18 +387,42 @@ async def get_chat_thread_detail(
     except ThreadAccessDeniedError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
-    messages = await load_thread_messages(db, thread=thread)
+    # LEFT JOIN feedback scoped to the caller. The ON clause restricts the
+    # join to this user's own rows so a different user's feedback on the same
+    # message cannot leak into the response.
+    fb_alias = aliased(ChatFeedback)
+    msg_stmt = (
+        select(ChatMessageRow, fb_alias)
+        .outerjoin(
+            fb_alias,
+            (fb_alias.message_id == ChatMessageRow.id)
+            & (fb_alias.user_sub == user.sub),
+        )
+        .where(ChatMessageRow.thread_id == thread.id)
+        .order_by(ChatMessageRow.created_at.asc())
+    )
+    rows = (await db.exec(msg_stmt)).all()
+
+    messages: list[ThreadMessageResponse] = []
+    for msg, fb in rows:
+        messages.append(
+            ThreadMessageResponse(
+                id=msg.id,
+                role=msg.role,  # type: ignore[arg-type] — DB stores str; narrow at route
+                content=msg.content,
+                created_at=msg.created_at,
+                feedback=(
+                    ThreadMessageFeedback(rating=fb.rating, comment=fb.comment)  # type: ignore[arg-type]
+                    if fb is not None
+                    else None
+                ),
+            )
+        )
+
     return ThreadDetailResponse(
         id=thread.id,
         title=thread.title,
-        messages=[
-            ThreadMessageResponse(
-                role=m.role,  # type: ignore[arg-type] — DB stores str; narrow at route
-                content=m.content,
-                created_at=m.created_at,
-            )
-            for m in messages
-        ],
+        messages=messages,
     )
 
 
@@ -413,3 +450,111 @@ async def delete_chat_thread(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     await db.commit()
+
+
+# ---------- message feedback ----------
+
+
+class FeedbackRequest(BaseModel):
+    rating: Literal["up", "down"]
+    comment: str | None = None
+
+
+class FeedbackResponse(BaseModel):
+    rating: Literal["up", "down"]
+    comment: str | None
+    updated_at: datetime
+
+
+@router.put(
+    "/chat/{slug}/messages/{message_id}/feedback",
+    response_model=FeedbackResponse,
+)
+async def put_message_feedback(
+    slug: str,
+    message_id: _uuid.UUID,
+    body: FeedbackRequest,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+) -> FeedbackResponse:
+    # Resolve message; verify ownership via thread.user_sub. We deliberately
+    # do NOT 404 on the dataset/slug here — chat_enabled may have been turned
+    # off after the user received the message, but they still own it.
+    msg = (
+        await db.exec(select(ChatMessageRow).where(ChatMessageRow.id == message_id))
+    ).first()
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    thread = (
+        await db.exec(select(ChatThread).where(ChatThread.id == msg.thread_id))
+    ).first()
+    if thread is None or thread.user_sub != user.sub:
+        # Hide existence from non-owners.
+        raise HTTPException(status_code=404, detail="Message not found")
+    if msg.role != "assistant":
+        raise HTTPException(
+            status_code=422, detail="Only assistant messages can be rated"
+        )
+
+    # Upsert by (message_id, user_sub).
+    existing = (
+        await db.exec(
+            select(ChatFeedback).where(
+                ChatFeedback.message_id == message_id,
+                ChatFeedback.user_sub == user.sub,
+            )
+        )
+    ).first()
+    now = _utcnow()
+    if existing is None:
+        fb = ChatFeedback(
+            message_id=message_id,
+            user_sub=user.sub,
+            rating=body.rating,
+            comment=body.comment,
+        )
+        db.add(fb)
+    else:
+        existing.rating = body.rating
+        existing.comment = body.comment
+        existing.updated_at = now
+        fb = existing
+    await db.commit()
+    await db.refresh(fb)
+    return FeedbackResponse(
+        rating=fb.rating,  # type: ignore[arg-type]
+        comment=fb.comment,
+        updated_at=fb.updated_at,
+    )
+
+
+@router.delete(
+    "/chat/{slug}/messages/{message_id}/feedback",
+    status_code=204,
+)
+async def delete_message_feedback(
+    slug: str,
+    message_id: _uuid.UUID,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    # Resolve message + thread ownership before deleting feedback.
+    msg_stmt = select(ChatMessageRow).where(ChatMessageRow.id == message_id)
+    msg = (await db.exec(msg_stmt)).first()
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    thread_stmt = select(ChatThread).where(ChatThread.id == msg.thread_id)
+    thread = (await db.exec(thread_stmt)).first()
+    if thread is None or thread.user_sub != user.sub:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    fb_stmt = select(ChatFeedback).where(
+        ChatFeedback.message_id == message_id,
+        ChatFeedback.user_sub == user.sub,
+    )
+    fb = (await db.exec(fb_stmt)).first()
+    if fb is None:
+        raise HTTPException(status_code=404, detail="No feedback to clear")
+    await db.delete(fb)
+    await db.commit()
+    return Response(status_code=204)
