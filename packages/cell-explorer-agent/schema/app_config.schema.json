@@ -226,6 +226,16 @@
     "showCategoryLabels": {
       "type": "boolean"
     },
+    "categoryLabelsObsColumn": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "showHeader": {
       "type": "boolean"
     },
