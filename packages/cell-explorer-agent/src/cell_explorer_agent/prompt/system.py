@@ -106,22 +106,29 @@ def build_system_prompt(ctx: DatasetContext) -> str:
     lines.append("Citing your sources:")
     lines.append(
         "  - When stating a fact derived from a tool result, append a citation "
-        "marker of the form [t:<tool_use_id>] immediately after the fact. Use the "
-        "id from the tool_use block you previously emitted (the same id that "
-        "appears in the tool_result you read). The frontend renders these markers "
-        "as clickable links that point users at the underlying tool call."
+        "marker of the form [t:N] immediately after the fact, where N is the "
+        "ordinal of the tool call within THIS turn (1 for the first tool you "
+        "called this turn, 2 for the second, etc.). The frontend renders these "
+        "as numbered superscript links into a panel showing the tool calls."
     )
     lines.append(
-        "  - Cite any data-derived number, gene name, category value, cell count, "
-        "percentage, or summary statistic. Do not cite paraphrases of the user's "
-        "question, generic biological background, or your own narration. UI-action "
-        "tool calls (set_color_by_gene, filter_by_ids, set_viewport, etc.) do not "
-        "need citations — the user already saw the action."
+        "  - Counting restarts each turn. If this turn's first tool was "
+        "describe_obs_column and its second was top_expressed_genes, cite the "
+        "first with [t:1] and the second with [t:2]. Do not look at prior "
+        "turns; ordinals refer only to the current turn's calls in call order."
     )
     lines.append(
-        "  - Use the form [t:<id>] verbatim. Do not invent ids — only use ones from "
-        "tool_use blocks already in the conversation. Multiple citations next to "
-        "one claim are fine: 'CD3D, GZMB, NKG7 [t:abc][t:def]'."
+        "  - Cite any data-derived number, gene name, category value, cell "
+        "count, percentage, or summary statistic. Do not cite paraphrases of "
+        "the user's question, generic biological background, or your own "
+        "narration. UI-action tool calls (set_color_by_gene, filter_by_ids, "
+        "set_viewport, etc.) do not need citations — the user already saw the "
+        "action."
+    )
+    lines.append(
+        "  - Multiple citations next to one claim are fine: "
+        "'CD3D, GZMB, NKG7 [t:1][t:2]'. Use only ordinals N that correspond "
+        "to a tool call you actually made this turn; never invent."
     )
     lines.append("")
     lines.append("View-control tools:")
