@@ -49,7 +49,12 @@ def clear_filter_tool() -> Tool:
     return Tool(
         name="clear_filter",
         kind="ui_action",
-        description="Clear any active filter in the viewer.",
+        description=(
+            "Clear any active filter in the viewer (filter_by_ids or "
+            "filter_by_gene_expression). Call this for 'clear filter', "
+            "'undo filter', 'remove filter', 'show all cells', or 'show "
+            "everything again'."
+        ),
         args_schema={"type": "object", "properties": {}, "additionalProperties": False},
         func=run,
     )

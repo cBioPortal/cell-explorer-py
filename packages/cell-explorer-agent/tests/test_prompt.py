@@ -119,6 +119,23 @@ async def test_system_prompt_directs_describe_obs_column_before_highlight(fake_z
     assert "filter_by_ids" in sys and "set_color_by_category" in sys
 
 
+async def test_system_prompt_routes_undo_filter_to_clear_filter(fake_zarr):
+    """Without this rule, the agent answers 'undo the filter please' with
+    confident text and no tool call. The trigger phrases AND the tool name
+    must both appear so the model can route correctly."""
+    ctx = await build_dataset_context(
+        fake_zarr, slug="demo", name="Demo", description=""
+    )
+    sys = build_system_prompt(ctx)
+    sys_lower = sys.lower()
+    assert "clear_filter" in sys
+    # User phrasings the model needs to recognize
+    assert "undo filter" in sys_lower
+    assert "clear filter" in sys_lower
+    # Don't claim success without actually invoking the tool.
+    assert "never claim" in sys_lower or "without actually" in sys_lower
+
+
 async def test_system_prompt_instructs_ordinal_citation_markers(fake_zarr):
     """The agent should know to emit [t:N] markers (N = ordinal of the tool
     call within this turn) — short ordinals are reliable for the model to
