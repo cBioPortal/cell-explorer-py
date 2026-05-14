@@ -9,6 +9,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.orm import aliased
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -45,7 +46,6 @@ from cell_explorer_api.services.threads import (
     delete_thread,
     list_threads,
     load_thread,
-    load_thread_messages,
 )
 
 router = APIRouter(tags=["chat"])
@@ -115,10 +115,17 @@ class ThreadListResponse(BaseModel):
     threads: list[ThreadSummaryResponse]
 
 
+class ThreadMessageFeedback(BaseModel):
+    rating: Literal["up", "down"]
+    comment: str | None
+
+
 class ThreadMessageResponse(BaseModel):
+    id: _uuid.UUID
     role: Literal["user", "assistant"]
     content: str
     created_at: datetime
+    feedback: ThreadMessageFeedback | None = None
 
 
 class ThreadDetailResponse(BaseModel):
@@ -380,18 +387,42 @@ async def get_chat_thread_detail(
     except ThreadAccessDeniedError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
-    messages = await load_thread_messages(db, thread=thread)
+    # LEFT JOIN feedback scoped to the caller. The ON clause restricts the
+    # join to this user's own rows so a different user's feedback on the same
+    # message cannot leak into the response.
+    fb_alias = aliased(ChatFeedback)
+    msg_stmt = (
+        select(ChatMessageRow, fb_alias)
+        .outerjoin(
+            fb_alias,
+            (fb_alias.message_id == ChatMessageRow.id)
+            & (fb_alias.user_sub == user.sub),
+        )
+        .where(ChatMessageRow.thread_id == thread.id)
+        .order_by(ChatMessageRow.created_at.asc())
+    )
+    rows = (await db.exec(msg_stmt)).all()
+
+    messages: list[ThreadMessageResponse] = []
+    for msg, fb in rows:
+        messages.append(
+            ThreadMessageResponse(
+                id=msg.id,
+                role=msg.role,  # type: ignore[arg-type] — DB stores str; narrow at route
+                content=msg.content,
+                created_at=msg.created_at,
+                feedback=(
+                    ThreadMessageFeedback(rating=fb.rating, comment=fb.comment)  # type: ignore[arg-type]
+                    if fb is not None
+                    else None
+                ),
+            )
+        )
+
     return ThreadDetailResponse(
         id=thread.id,
         title=thread.title,
-        messages=[
-            ThreadMessageResponse(
-                role=m.role,  # type: ignore[arg-type] — DB stores str; narrow at route
-                content=m.content,
-                created_at=m.created_at,
-            )
-            for m in messages
-        ],
+        messages=messages,
     )
 
 
