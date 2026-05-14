@@ -3,7 +3,7 @@
 import asyncio
 import uuid as _uuid
 from collections.abc import AsyncIterator
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -19,7 +19,7 @@ from cell_explorer_api.auth.models import User
 from cell_explorer_api.auth.optional import optional_auth
 from cell_explorer_api.config import Settings
 from cell_explorer_api.db import get_db
-from cell_explorer_api.db.models import ChatThread, Dataset
+from cell_explorer_api.db.models import ChatFeedback, ChatMessageRow, ChatThread, Dataset
 from cell_explorer_api.services.access import compute_chat_permission
 from cell_explorer_api.services.chat_session import (
     AccessDeniedError,
@@ -413,3 +413,80 @@ async def delete_chat_thread(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     await db.commit()
+
+
+# ---------- message feedback ----------
+
+
+class FeedbackRequest(BaseModel):
+    rating: Literal["up", "down"]
+    comment: str | None = None
+
+
+class FeedbackResponse(BaseModel):
+    rating: Literal["up", "down"]
+    comment: str | None
+    updated_at: datetime
+
+
+@router.put(
+    "/chat/{slug}/messages/{message_id}/feedback",
+    response_model=FeedbackResponse,
+)
+async def put_message_feedback(
+    slug: str,
+    message_id: _uuid.UUID,
+    body: FeedbackRequest,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+) -> FeedbackResponse:
+    # Resolve message; verify ownership via thread.user_sub. We deliberately
+    # do NOT 404 on the dataset/slug here — chat_enabled may have been turned
+    # off after the user received the message, but they still own it.
+    msg = (
+        await db.exec(select(ChatMessageRow).where(ChatMessageRow.id == message_id))
+    ).first()
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    thread = (
+        await db.exec(select(ChatThread).where(ChatThread.id == msg.thread_id))
+    ).first()
+    if thread is None or thread.user_sub != user.sub:
+        # Hide existence from non-owners.
+        raise HTTPException(status_code=404, detail="Message not found")
+    if msg.role != "assistant":
+        raise HTTPException(
+            status_code=422, detail="Only assistant messages can be rated"
+        )
+
+    # Upsert by (message_id, user_sub).
+    existing = (
+        await db.exec(
+            select(ChatFeedback).where(
+                ChatFeedback.message_id == message_id,
+                ChatFeedback.user_sub == user.sub,
+            )
+        )
+    ).first()
+    now = datetime.now(timezone.utc)
+    if existing is None:
+        fb = ChatFeedback(
+            message_id=message_id,
+            user_sub=user.sub,
+            rating=body.rating,
+            comment=body.comment,
+        )
+        db.add(fb)
+    else:
+        existing.rating = body.rating
+        existing.comment = body.comment
+        existing.updated_at = now
+        db.add(existing)
+        fb = existing
+    await db.commit()
+    await db.refresh(fb)
+    return FeedbackResponse(
+        rating=fb.rating,  # type: ignore[arg-type]
+        comment=fb.comment,
+        updated_at=fb.updated_at,
+    )
