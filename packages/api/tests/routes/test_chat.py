@@ -295,6 +295,9 @@ def test_post_turn_streams_ndjson_events(seeded_app):
     assert lines[1]["text"] == "hello "
     assert lines[2]["text"] == "world"
     assert lines[3]["usage"]["input_tokens"] == 10
+    # done event carries the server-assigned id of the persisted assistant
+    # message so the client can attach feedback affordances mid-session.
+    assert isinstance(lines[3]["message_id"], str) and lines[3]["message_id"]
 
 
 def test_post_turn_dataset_not_found_returns_404(seeded_app):

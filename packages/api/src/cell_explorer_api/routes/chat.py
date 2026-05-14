@@ -155,7 +155,8 @@ async def _ndjson_event_stream(
 ) -> AsyncIterator[bytes]:
     """Serialize agent events as NDJSON. Emits a leading thread_open event,
     accumulates assistant text deltas, and persists the assistant's final
-    body when the stream finishes successfully.
+    body when the agent signals `done` — attaching the new message's id to
+    the done event so the client can act on it (e.g., feedback affordances).
     """
     # 1) Leading thread_open.
     thread_open = ThreadOpen(thread_id=str(thread_id), title=thread_title)
@@ -166,6 +167,21 @@ async def _ndjson_event_stream(
         async for event in agent.run(messages=messages, view_state=view_state):
             if event.type == "text_delta":
                 assistant_buffer.append(event.text)
+            elif event.type == "done" and assistant_buffer:
+                # Persist before yielding so the client sees the real id.
+                async with AsyncSession(engine) as stream_db:
+                    thread = (await stream_db.exec(
+                        select(ChatThread).where(ChatThread.id == thread_id)
+                    )).first()
+                    if thread is not None:
+                        msg = await append_message(
+                            stream_db, thread, role="assistant",
+                            content="".join(assistant_buffer),
+                        )
+                        # Capture id before commit() expires ORM attributes.
+                        message_id = str(msg.id)
+                        await stream_db.commit()
+                        event.message_id = message_id
             yield (event.model_dump_json() + "\n").encode()
     except asyncio.CancelledError:
         raise
@@ -173,20 +189,6 @@ async def _ndjson_event_stream(
         err = Error(message=f"chat failed: {exc}", retryable=False)
         yield (err.model_dump_json() + "\n").encode()
         return
-
-    # After the agent's stream is fully consumed, persist the assistant message.
-    # This runs after the client has already received the done event.
-    if assistant_buffer:
-        async with AsyncSession(engine) as stream_db:
-            thread = (await stream_db.exec(
-                select(ChatThread).where(ChatThread.id == thread_id)
-            )).first()
-            if thread is not None:
-                await append_message(
-                    stream_db, thread, role="assistant",
-                    content="".join(assistant_buffer),
-                )
-                await stream_db.commit()
 
 
 def _http_for_chat_session_error(exc: ChatSessionError) -> HTTPException:

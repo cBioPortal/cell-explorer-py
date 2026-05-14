@@ -48,6 +48,10 @@ class TokenUsage(BaseModel):
 class Done(BaseModel):
     type: Literal["done"] = "done"
     usage: TokenUsage = TokenUsage()
+    # Server-assigned id of the persisted assistant message. The agent itself
+    # does not persist, so this is None at agent emit time; the API layer fills
+    # it in just before yielding the event to the client.
+    message_id: str | None = None
 
 
 class ThreadOpen(BaseModel):
