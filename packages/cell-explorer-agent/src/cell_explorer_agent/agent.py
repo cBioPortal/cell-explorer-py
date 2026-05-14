@@ -155,7 +155,13 @@ class ChatAgent:
                         args=call.args,
                         tool_call_id=call.id,
                     )
-                    result = await tool.func(**call.args)
+                    if tool.wants_context:
+                        result = await tool.func(
+                            **call.args,
+                            _context={"view_state": view_state or {}},
+                        )
+                    else:
+                        result = await tool.func(**call.args)
                 except Exception as exc:
                     duration_ms = int((time.monotonic() - start_ts) * 1000)
                     correlation = uuid.uuid4().hex

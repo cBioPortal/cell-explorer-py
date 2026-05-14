@@ -308,11 +308,17 @@ async def test_set_selection_display_mode_invalid_value():
     assert "error" in r
 
 
+# `set_category_labels` opts into _context so it can refuse no-op toggles
+# (value=True with neither obs_column nor a resolvable color column).
+_CTX_CATEGORY_LEIDEN = {"view_state": {"colorMode": "category", "category": "leiden"}}
+
+
 async def test_set_category_labels_true():
     tool = set_category_labels_tool()
-    r = await tool.func(value=True)
+    r = await tool.func(value=True, _context=_CTX_CATEGORY_LEIDEN)
     assert r == {"payload": {"showCategoryLabels": True}}
     assert tool.kind == "ui_action"
+    assert tool.wants_context is True
 
 
 async def test_set_category_labels_false():
@@ -331,7 +337,7 @@ async def test_set_category_labels_with_obs_column():
 
 async def test_set_category_labels_without_obs_column_omits_field():
     tool = set_category_labels_tool()
-    r = await tool.func(value=True)
+    r = await tool.func(value=True, _context=_CTX_CATEGORY_LEIDEN)
     assert r == {"payload": {"showCategoryLabels": True}}
     assert "categoryLabelsObsColumn" not in r["payload"]
 
@@ -342,6 +348,39 @@ async def test_set_category_labels_false_with_obs_column_still_sets_field():
     assert r == {
         "payload": {"showCategoryLabels": False, "categoryLabelsObsColumn": "leiden"}
     }
+
+
+async def test_set_category_labels_true_no_obs_no_context_errors():
+    """value=True without an obs_column and without view_state must error
+    rather than emit a payload that the frontend silently no-ops."""
+    tool = set_category_labels_tool()
+    r = await tool.func(value=True)
+    assert "error" in r
+    assert "obs_column" in r["error"]
+
+
+async def test_set_category_labels_true_no_obs_gene_mode_errors():
+    """Same when the user is coloring by gene — labels wouldn't render."""
+    tool = set_category_labels_tool()
+    ctx = {"view_state": {"colorMode": "gene", "gene": "CD8A"}}
+    r = await tool.func(value=True, _context=ctx)
+    assert "error" in r
+
+
+async def test_set_category_labels_true_no_obs_falls_back_to_sticky_column():
+    """When categoryLabelsObsColumn is already set (sticky from a prior
+    turn), the toggle is allowed without passing obs_column explicitly."""
+    tool = set_category_labels_tool()
+    ctx = {"view_state": {"categoryLabelsObsColumn": "cell_type"}}
+    r = await tool.func(value=True, _context=ctx)
+    assert r == {"payload": {"showCategoryLabels": True}}
+
+
+async def test_set_category_labels_false_does_not_require_context():
+    """Turning labels OFF is always safe — no validation needed."""
+    tool = set_category_labels_tool()
+    r = await tool.func(value=False)
+    assert r == {"payload": {"showCategoryLabels": False}}
 
 
 async def test_clear_color_by_emits_null():
