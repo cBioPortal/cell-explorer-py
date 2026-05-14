@@ -3,7 +3,7 @@
 import asyncio
 import uuid as _uuid
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -19,7 +19,13 @@ from cell_explorer_api.auth.models import User
 from cell_explorer_api.auth.optional import optional_auth
 from cell_explorer_api.config import Settings
 from cell_explorer_api.db import get_db
-from cell_explorer_api.db.models import ChatFeedback, ChatMessageRow, ChatThread, Dataset
+from cell_explorer_api.db.models import (
+    ChatFeedback,
+    ChatMessageRow,
+    ChatThread,
+    Dataset,
+    _utcnow,
+)
 from cell_explorer_api.services.access import compute_chat_permission
 from cell_explorer_api.services.chat_session import (
     AccessDeniedError,
@@ -468,7 +474,7 @@ async def put_message_feedback(
             )
         )
     ).first()
-    now = datetime.now(timezone.utc)
+    now = _utcnow()
     if existing is None:
         fb = ChatFeedback(
             message_id=message_id,
@@ -481,7 +487,6 @@ async def put_message_feedback(
         existing.rating = body.rating
         existing.comment = body.comment
         existing.updated_at = now
-        db.add(existing)
         fb = existing
     await db.commit()
     await db.refresh(fb)
