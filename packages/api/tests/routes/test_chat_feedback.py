@@ -274,7 +274,7 @@ def test_thread_detail_isolates_feedback_per_user(seeded_app):
     assert res.status_code == 200
     fb = res.json()["messages"][0]["feedback"]
     assert fb["rating"] == "up"
-    assert fb.get("comment") in (None, "")
+    assert fb["comment"] is None
 
 
 def test_thread_detail_includes_message_id(seeded_app):
