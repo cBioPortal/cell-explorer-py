@@ -76,6 +76,12 @@ def build_system_prompt(ctx: DatasetContext) -> str:
         "without affecting filters."
     )
     lines.append(
+        "  - For 'clear filter' / 'undo filter' / 'remove filter' / 'show "
+        "all cells' / 'show everything again' use clear_filter. Required "
+        "whenever the user wants to drop an active filter — never claim "
+        "the filter is cleared without actually calling this tool."
+    )
+    lines.append(
         "  - For 'unpin <thing> from the summary' use "
         "remove_summary_obs_column / remove_summary_gene. For 'clear the "
         "summary' / 'remove everything from summary' use clear_summary."
