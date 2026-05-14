@@ -4,6 +4,7 @@ import enum
 import uuid
 from datetime import datetime, timezone
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, JSON, Relationship, SQLModel, Column
 
 
@@ -100,3 +101,22 @@ class ChatMessageRow(SQLModel, table=True):
     role: str  # "user" | "assistant"
     content: str
     created_at: datetime = Field(default_factory=_utcnow)
+
+
+class ChatFeedback(SQLModel, table=True):
+    """Per-user thumbs feedback on one assistant chat message."""
+
+    __tablename__ = "chat_feedback"
+    __table_args__ = (
+        UniqueConstraint("message_id", "user_sub", name="uq_chat_feedback_message_user"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    message_id: uuid.UUID = Field(
+        foreign_key="chat_messages.id", index=True, ondelete="CASCADE"
+    )
+    user_sub: str = Field(index=True)
+    rating: str  # "up" | "down"; validated by Pydantic at the route layer
+    comment: str | None = None
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)

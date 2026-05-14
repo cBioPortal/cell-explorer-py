@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import pytest
 from sqlmodel import SQLModel
 
-from cell_explorer_api.db.models import Datasource, DatasourceType, Dataset
+from cell_explorer_api.db.models import ChatFeedback, Datasource, DatasourceType, Dataset
 
 
 def test_datasource_create():
@@ -103,3 +103,27 @@ def test_dataset_url_property():
 def test_datasource_type_enum():
     assert DatasourceType.S3_CLOUDFRONT == "s3_cloudfront"
     assert DatasourceType.HTTP_TOKEN == "http_token"
+
+
+def test_chat_feedback_create():
+    f = ChatFeedback(
+        message_id=uuid.uuid4(),
+        user_sub="user-1",
+        rating="up",
+    )
+    assert f.rating == "up"
+    assert f.comment is None
+    assert f.id is not None
+    assert isinstance(f.created_at, datetime)
+    assert isinstance(f.updated_at, datetime)
+
+
+def test_chat_feedback_accepts_comment():
+    f = ChatFeedback(
+        message_id=uuid.uuid4(),
+        user_sub="user-1",
+        rating="down",
+        comment="off-topic",
+    )
+    assert f.rating == "down"
+    assert f.comment == "off-topic"
