@@ -321,6 +321,29 @@ async def test_set_category_labels_false():
     assert r == {"payload": {"showCategoryLabels": False}}
 
 
+async def test_set_category_labels_with_obs_column():
+    tool = set_category_labels_tool()
+    r = await tool.func(value=True, obs_column="leiden")
+    assert r == {
+        "payload": {"showCategoryLabels": True, "categoryLabelsObsColumn": "leiden"}
+    }
+
+
+async def test_set_category_labels_without_obs_column_omits_field():
+    tool = set_category_labels_tool()
+    r = await tool.func(value=True)
+    assert r == {"payload": {"showCategoryLabels": True}}
+    assert "categoryLabelsObsColumn" not in r["payload"]
+
+
+async def test_set_category_labels_false_with_obs_column_still_sets_field():
+    tool = set_category_labels_tool()
+    r = await tool.func(value=False, obs_column="leiden")
+    assert r == {
+        "payload": {"showCategoryLabels": False, "categoryLabelsObsColumn": "leiden"}
+    }
+
+
 async def test_clear_color_by_emits_null():
     tool = clear_color_by_tool()
     r = await tool.func()

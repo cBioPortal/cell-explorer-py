@@ -94,8 +94,13 @@ def build_system_prompt(ctx: DatasetContext) -> str:
     lines.append(
         "  - For 'show cluster labels' / 'label the clusters' / 'turn off "
         "labels' / 'hide labels', use set_category_labels(value=True|False). "
-        "Labels only render in category color mode (set_color_by_category "
-        "first if needed). The toggle persists across color-mode switches."
+        "Pass an optional obs_column arg to label by a specific obs column "
+        "independent of color mode (e.g. set_category_labels(True, "
+        "obs_column='leiden') to label by leiden while coloring by a gene). "
+        "Without obs_column, labels follow the current color obs column in "
+        "category color mode, or render nothing in gene mode. The view-state "
+        "snapshot's showCategoryLabels and categoryLabelsObsColumn fields "
+        "tell you the current state."
     )
     lines.append(
         "  - Do not pan/zoom (set_viewport) or change rendering (set_render_controls) "
