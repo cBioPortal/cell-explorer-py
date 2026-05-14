@@ -59,6 +59,7 @@ class Model(BaseModel):
     summaryContext: Literal['overall', 'selections'] | None = None
     selectionDisplayMode: Literal['dim', 'hide'] | None = None
     showCategoryLabels: bool | None = None
+    categoryLabelsObsColumn: str | None = None
     showHeader: bool | None = None
     showLeftSidebar: bool | None = None
     showRightSidebar: bool | None = None
