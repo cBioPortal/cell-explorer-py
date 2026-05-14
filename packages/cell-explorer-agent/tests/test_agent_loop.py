@@ -422,3 +422,87 @@ async def test_run_view_state_block_sent_on_every_iteration(fake_zarr):
     assert s1.called_with_view_state_block is not None
     assert "X_umap" in s1.called_with_view_state_block
     assert s2.called_with_view_state_block == s1.called_with_view_state_block
+
+
+async def test_tool_with_wants_context_receives_view_state(fake_zarr):
+    """A tool that declares wants_context=True must receive the current
+    view_state via the private _context kwarg at dispatch time."""
+    captured: dict[str, Any] = {}
+
+    async def _peek_context(**kwargs):
+        captured.update(kwargs)
+        return {"ok": True}
+
+    llm = FakeLLMClient(
+        scripts=[
+            Script(events=[
+                LLMToolCall(id="t1", name="peek", args={"x": 1}),
+                LLMStop(reason="tool_use", usage=LLMUsage()),
+            ]),
+            Script(events=[
+                LLMTextDelta(text="ok"),
+                LLMStop(reason="end_turn", usage=LLMUsage()),
+            ]),
+        ]
+    )
+    ctx = await build_dataset_context(fake_zarr, slug="d", name="D", description="")
+    cat = ToolCatalog()
+    cat.register(Tool(
+        name="peek", kind="data", description="",
+        args_schema={
+            "type": "object",
+            "properties": {"x": {"type": "number"}},
+            "required": ["x"],
+        },
+        func=_peek_context,
+        wants_context=True,
+    ))
+    agent = ChatAgent(llm=llm, catalog=cat, dataset_ctx=ctx, config=AgentConfig())
+    async for _ in agent.run(
+        messages=[UserMessage(content="hi")],
+        view_state={"colorMode": "category", "category": "leiden"},
+    ):
+        pass
+
+    assert captured.get("x") == 1
+    assert captured.get("_context") == {
+        "view_state": {"colorMode": "category", "category": "leiden"}
+    }
+
+
+async def test_tool_without_wants_context_does_not_get_context(fake_zarr):
+    """The default (wants_context=False) means _context is NOT injected —
+    tools must opt in explicitly."""
+    captured: dict[str, Any] = {}
+
+    async def _peek_no_context(**kwargs):
+        captured.update(kwargs)
+        return {"ok": True}
+
+    llm = FakeLLMClient(
+        scripts=[
+            Script(events=[
+                LLMToolCall(id="t1", name="peek", args={}),
+                LLMStop(reason="tool_use", usage=LLMUsage()),
+            ]),
+            Script(events=[
+                LLMTextDelta(text="ok"),
+                LLMStop(reason="end_turn", usage=LLMUsage()),
+            ]),
+        ]
+    )
+    ctx = await build_dataset_context(fake_zarr, slug="d", name="D", description="")
+    cat = ToolCatalog()
+    cat.register(Tool(
+        name="peek", kind="data", description="",
+        args_schema={"type": "object", "properties": {}},
+        func=_peek_no_context,
+    ))
+    agent = ChatAgent(llm=llm, catalog=cat, dataset_ctx=ctx, config=AgentConfig())
+    async for _ in agent.run(
+        messages=[UserMessage(content="hi")],
+        view_state={"colorMode": "gene"},
+    ):
+        pass
+
+    assert "_context" not in captured

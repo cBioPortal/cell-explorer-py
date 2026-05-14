@@ -15,6 +15,11 @@ class Tool:
     description: str
     args_schema: dict[str, Any]  # JSON Schema for args
     func: ToolFunc
+    # If True, the agent passes `_context={"view_state": ...}` as an extra
+    # kwarg when invoking `func`. The LLM-visible `args_schema` is unaffected;
+    # `_context` is a private channel so tools can validate against the
+    # current UI snapshot without making the LLM aware of it.
+    wants_context: bool = False
 
 
 @dataclass
