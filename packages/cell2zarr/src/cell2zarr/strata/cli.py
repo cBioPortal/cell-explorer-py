@@ -78,6 +78,16 @@ def _parse_coarse_spec(spec: str) -> list[str]:
     default=False,
     help="Overwrite existing uns/strata/* groups.",
 )
+@click.option(
+    "--add-coarse-only",
+    "add_coarse_only",
+    is_flag=True,
+    default=False,
+    help=(
+        "Add new coarse tables to an existing atomic without re-reading X. "
+        "Requires an already-built uns/strata/atomic/."
+    ),
+)
 def build_strata_command(
     dataset_zarr: Path,
     config_path: Path | None,
@@ -85,6 +95,7 @@ def build_strata_command(
     coarse: tuple[str, ...],
     max_atomic_cardinality: int | None,
     force: bool,
+    add_coarse_only: bool,
 ):
     """Build precomputed strata tables for an AnnData zarr store."""
     # Start from YAML defaults (if any), then layer CLI flags on top.
@@ -101,9 +112,14 @@ def build_strata_command(
         config_dict["max_atomic_cardinality"] = max_atomic_cardinality
     if force:
         config_dict["force"] = True
+    if add_coarse_only:
+        config_dict["add_coarse_only"] = True
 
-    if not config_dict.get("atomic_axes"):
-        msg = "Error: --atomic-axes is required (or set atomic_axes in --config)."
+    if not config_dict.get("atomic_axes") and not config_dict.get("add_coarse_only"):
+        msg = (
+            "Error: --atomic-axes is required (or set atomic_axes in --config, "
+            "or pass --add-coarse-only to derive coarse tables from an existing atomic)."
+        )
         click.echo(msg)
         click.echo(_format_categorical_help(dataset_zarr))
         sys.exit(2)

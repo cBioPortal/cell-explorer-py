@@ -57,8 +57,10 @@ def compute_strata_mapping(
     for axis_idx, col in enumerate(columns):
         categories = np.asarray(col.categories)
         stratum_keys[:, axis_idx] = categories[unique_codes[:, axis_idx]]
-    # Convert object dtype to a fixed-width string dtype for stable zarr storage.
-    stratum_keys = stratum_keys.astype("<U32")
+    # Convert object dtype to fixed-width unicode sized to the longest value
+    # so labels like "fallopian tube secretory epithelial cell" are preserved.
+    max_len = max((len(str(s)) for s in stratum_keys.ravel()), default=1)
+    stratum_keys = stratum_keys.astype(f"<U{max_len}")
 
     # Cell count per stratum.
     n_cells = np.bincount(cell_to_stratum, minlength=n_strata).astype(np.int32)
@@ -125,8 +127,18 @@ def build_atomic(root: zarr.Group, config: StrataConfig) -> AtomicTable:
 from pathlib import Path  # noqa: E402
 
 from cell2zarr.strata.derive import derive_coarse  # noqa: E402
-from cell2zarr.strata.io import open_dataset, write_atomic, write_coarse, has_strata  # noqa: E402
-from cell2zarr.strata.exceptions import StrataExistsError  # noqa: E402
+from cell2zarr.strata.io import (  # noqa: E402
+    consolidate_strata_metadata,
+    has_strata,
+    open_dataset,
+    read_atomic,
+    write_atomic,
+    write_coarse,
+)
+from cell2zarr.strata.exceptions import (  # noqa: E402
+    StrataConfigError,
+    StrataExistsError,
+)
 from cell2zarr.strata.validate import (  # noqa: E402
     validate_obs_columns,
     estimate_atomic_cardinality,
@@ -140,15 +152,48 @@ def _coarse_slug(axes: list[str]) -> str:
 def build_strata(dataset_path: Path, config: StrataConfig) -> None:
     """End-to-end: validate, build atomic, derive coarse tables, write back to zarr.
 
-    Idempotent under --force; raises StrataExistsError on already-built input
-    otherwise.
+    Modes:
+      - normal: validate → build atomic → write atomic → derive+write coarse → consolidate
+      - --force: same, but overwrites existing strata
+      - --add-coarse-only: load existing atomic → derive+write new coarse → consolidate
+        (no X read; no atomic rewrite)
+
+    Raises StrataExistsError if atomic exists and neither --force nor
+    --add-coarse-only is set, OR if --add-coarse-only is set but no atomic
+    exists. Raises StrataConfigError if --add-coarse-only requests a coarse
+    axis that the existing atomic doesn't carry.
     """
     root = open_dataset(dataset_path)
+
+    if config.add_coarse_only:
+        if not has_strata(root):
+            raise StrataExistsError(
+                f"--add-coarse-only requires an existing uns/strata/atomic/ in "
+                f"{dataset_path}; found no atomic. Run a full build first."
+            )
+        atomic = read_atomic(root)
+        unknown = [
+            ax for axes in config.coarse for ax in axes
+            if ax not in atomic.axis_names
+        ]
+        if unknown:
+            raise StrataConfigError(
+                f"--add-coarse-only: coarse axes {sorted(set(unknown))} are not "
+                f"in the existing atomic's axes {atomic.axis_names}. "
+                f"Full rebuild required to widen atomic."
+            )
+        for coarse_axes in config.coarse:
+            coarse = derive_coarse(atomic, list(coarse_axes))
+            write_coarse(root, _coarse_slug(coarse_axes), coarse, force=True)
+        consolidate_strata_metadata(root)
+        return
 
     # Pre-build gate: detect already-built strata BEFORE doing the work.
     if has_strata(root) and not config.force:
         raise StrataExistsError(
-            f"uns/strata/atomic already exists in {dataset_path}. Pass --force to overwrite."
+            f"uns/strata/atomic already exists in {dataset_path}. "
+            f"Pass --force to rebuild, or --add-coarse-only to add coarse tables "
+            f"without re-reading X."
         )
 
     validate_obs_columns(root, config.atomic_axes)
@@ -162,3 +207,6 @@ def build_strata(dataset_path: Path, config: StrataConfig) -> None:
     for coarse_axes in config.coarse:
         coarse = derive_coarse(atomic, list(coarse_axes))
         write_coarse(root, _coarse_slug(coarse_axes), coarse, force=config.force)
+
+    # Refresh consolidated metadata so production readers see the new groups.
+    consolidate_strata_metadata(root)

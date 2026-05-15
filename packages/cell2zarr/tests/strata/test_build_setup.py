@@ -1,7 +1,10 @@
 """Tests for build.py setup-phase helpers."""
 from pathlib import Path
 
+import anndata as ad
 import numpy as np
+import pandas as pd
+import pytest
 
 from cell2zarr.strata.io import open_dataset
 from cell2zarr.strata.build import (
@@ -50,6 +53,40 @@ class TestComputeStrataMapping:
         cell_types = set(stratum_keys[:, 1])
         assert donors <= {"d1", "d2"}
         assert cell_types <= {"A", "B", "C"}
+
+
+class TestStratumKeyWidth:
+    """Stratum keys must preserve full string content — no truncation regardless of length."""
+
+    @pytest.fixture
+    def long_label_zarr(self, tmp_path: Path) -> Path:
+        # 40 chars — longer than the old hardcoded <U32 limit.
+        long_name = "fallopian tube secretory epithelial cell"
+        X = np.array([[1.0], [2.0]], dtype=np.float16)
+        obs = pd.DataFrame({
+            "cell_type": pd.Categorical([long_name, "B cell"]),
+        })
+        var = pd.DataFrame(index=["gene1"])
+        adata = ad.AnnData(X=X, obs=obs, var=var)
+        path = tmp_path / "long.zarr"
+        adata.write_zarr(path)
+        return path
+
+    def test_long_label_not_truncated(self, long_label_zarr: Path):
+        root = open_dataset(long_label_zarr)
+        stratum_keys, _, _ = compute_strata_mapping(root, ["cell_type"])
+        labels = set(stratum_keys[:, 0].tolist())
+        assert "fallopian tube secretory epithelial cell" in labels, (
+            f"long label was truncated; got {labels}"
+        )
+        assert "B cell" in labels
+
+    def test_stratum_keys_dtype_width_sized_to_max(self, long_label_zarr: Path):
+        root = open_dataset(long_label_zarr)
+        stratum_keys, _, _ = compute_strata_mapping(root, ["cell_type"])
+        # Dtype is fixed-width unicode wide enough for the longest label.
+        assert stratum_keys.dtype.kind == "U"
+        assert stratum_keys.dtype.itemsize // 4 >= 40  # U-dtype itemsize is bytes (4 per char in UCS-4)
 
 
 class TestAtomicTableShape:

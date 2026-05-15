@@ -175,6 +175,42 @@ def write_atomic(root: zarr.Group, atomic: AtomicTable, *, force: bool) -> None:
     )
 
 
+def read_atomic(root: zarr.Group) -> AtomicTable:
+    """Load an already-written AtomicTable back from zarr.
+
+    Raises KeyError if uns/strata/atomic/ is missing or incomplete (no
+    schema_version marker).
+    """
+    # Lazy import to avoid build.py ↔ io.py circular at module load time.
+    from cell2zarr.strata.build import AtomicTable
+
+    if not has_strata(root):
+        raise KeyError("no completed uns/strata/atomic/ found in dataset")
+    atomic = root["uns"]["strata"]["atomic"]
+    return AtomicTable(
+        axis_names=list(atomic.attrs["axes"]),
+        stratum_keys=np.asarray(atomic["stratum_keys"]),
+        sum_x=np.asarray(atomic["sum_x"]),
+        sum_xx=np.asarray(atomic["sum_xx"]),
+        nnz=np.asarray(atomic["nnz"]),
+        n_cells=np.asarray(atomic["n_cells"]),
+    )
+
+
+def consolidate_strata_metadata(root: zarr.Group) -> None:
+    """Re-write the consolidated metadata index so newly-added uns/strata/* groups
+    are visible to readers that open with `use_consolidated=True` (the default).
+
+    On zarr v3 stores, consolidated metadata is stored *inline* in the root
+    `zarr.json` under the `consolidated_metadata` key (not in a separate
+    `.zmetadata` file as in v2). It's a snapshot of every child node's
+    metadata, so any additions after the snapshot was taken are invisible to
+    readers that trust it. Calling `zarr.consolidate_metadata(store)` rewrites
+    the snapshot to include whatever we just added.
+    """
+    zarr.consolidate_metadata(root.store)
+
+
 def write_coarse(
     root: zarr.Group,
     name: str,
