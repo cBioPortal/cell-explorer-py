@@ -175,6 +175,28 @@ def write_atomic(root: zarr.Group, atomic: AtomicTable, *, force: bool) -> None:
     )
 
 
+def read_atomic(root: zarr.Group) -> AtomicTable:
+    """Load an already-written AtomicTable back from zarr.
+
+    Raises KeyError if uns/strata/atomic/ is missing or incomplete (no
+    schema_version marker).
+    """
+    # Lazy import to avoid build.py ↔ io.py circular at module load time.
+    from cell2zarr.strata.build import AtomicTable
+
+    if not has_strata(root):
+        raise KeyError("no completed uns/strata/atomic/ found in dataset")
+    atomic = root["uns"]["strata"]["atomic"]
+    return AtomicTable(
+        axis_names=list(atomic.attrs["axes"]),
+        stratum_keys=np.asarray(atomic["stratum_keys"]),
+        sum_x=np.asarray(atomic["sum_x"]),
+        sum_xx=np.asarray(atomic["sum_xx"]),
+        nnz=np.asarray(atomic["nnz"]),
+        n_cells=np.asarray(atomic["n_cells"]),
+    )
+
+
 def consolidate_strata_metadata(root: zarr.Group) -> None:
     """Re-write the consolidated metadata index so newly-added uns/strata/* groups
     are visible to readers that open with `use_consolidated=True` (the default).

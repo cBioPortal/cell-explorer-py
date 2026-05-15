@@ -69,6 +69,85 @@ class TestBuildStrataValidation:
         assert list(root["uns"]["strata"]["atomic"].attrs["axes"]) == ["donor"]
 
 
+class TestBuildStrataAddCoarseOnly:
+    """`--add-coarse-only` reuses the existing atomic instead of re-reading X."""
+
+    def test_adds_coarse_without_rebuilding_atomic(self, tiny_anndata_zarr: Path):
+        # Initial build.
+        build_strata(
+            tiny_anndata_zarr,
+            StrataConfig(
+                atomic_axes=["cell_type", "donor"],
+                coarse=[["cell_type"]],
+            ),
+        )
+        root = open_dataset(tiny_anndata_zarr)
+        atomic_before = {
+            "axes": list(root["uns"]["strata"]["atomic"].attrs["axes"]),
+            "sum_x": np.asarray(root["uns"]["strata"]["atomic"]["sum_x"]).copy(),
+        }
+
+        # Add a new coarse table without --force; atomic must be untouched.
+        build_strata(
+            tiny_anndata_zarr,
+            StrataConfig(
+                atomic_axes=["cell_type", "donor"],
+                coarse=[["donor"]],
+                add_coarse_only=True,
+            ),
+        )
+
+        root = open_dataset(tiny_anndata_zarr)
+        # New coarse is present, original coarse still present.
+        assert "coarse_donor" in root["uns"]["strata"]
+        assert "coarse_cell_type" in root["uns"]["strata"]
+        # Atomic was not rebuilt.
+        atomic_after = root["uns"]["strata"]["atomic"]
+        assert list(atomic_after.attrs["axes"]) == atomic_before["axes"]
+        np.testing.assert_array_equal(np.asarray(atomic_after["sum_x"]), atomic_before["sum_x"])
+
+    def test_add_coarse_only_requires_existing_atomic(self, tiny_anndata_zarr: Path):
+        # No prior build; add-coarse-only must fail rather than silently rebuilding.
+        with pytest.raises(StrataExistsError, match="no atomic"):
+            build_strata(
+                tiny_anndata_zarr,
+                StrataConfig(
+                    coarse=[["cell_type"]],
+                    add_coarse_only=True,
+                ),
+            )
+
+    def test_add_coarse_only_rejects_unknown_axis(self, tiny_anndata_zarr: Path):
+        # Existing atomic has only cell_type; deriving a coarse on donor is impossible.
+        build_strata(
+            tiny_anndata_zarr,
+            StrataConfig(atomic_axes=["cell_type"]),
+        )
+        with pytest.raises(StrataConfigError, match="donor"):
+            build_strata(
+                tiny_anndata_zarr,
+                StrataConfig(
+                    coarse=[["donor"]],
+                    add_coarse_only=True,
+                ),
+            )
+
+    def test_add_coarse_only_works_without_atomic_axes_in_config(
+        self, tiny_anndata_zarr: Path,
+    ):
+        # User shouldn't need to re-state atomic axes; the on-disk atomic carries them.
+        build_strata(
+            tiny_anndata_zarr,
+            StrataConfig(atomic_axes=["cell_type", "donor"]),
+        )
+        build_strata(
+            tiny_anndata_zarr,
+            StrataConfig(coarse=[["cell_type"]], add_coarse_only=True),
+        )
+        root = open_dataset(tiny_anndata_zarr)
+        assert "coarse_cell_type" in root["uns"]["strata"]
+
+
 class TestBuildStrataConsolidation:
     """After build_strata finishes, the consolidated metadata index must reflect
     the new uns/strata/* groups so production readers (which open with
