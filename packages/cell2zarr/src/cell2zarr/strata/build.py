@@ -127,7 +127,13 @@ def build_atomic(root: zarr.Group, config: StrataConfig) -> AtomicTable:
 from pathlib import Path  # noqa: E402
 
 from cell2zarr.strata.derive import derive_coarse  # noqa: E402
-from cell2zarr.strata.io import open_dataset, write_atomic, write_coarse, has_strata  # noqa: E402
+from cell2zarr.strata.io import (  # noqa: E402
+    consolidate_strata_metadata,
+    has_strata,
+    open_dataset,
+    write_atomic,
+    write_coarse,
+)
 from cell2zarr.strata.exceptions import StrataExistsError  # noqa: E402
 from cell2zarr.strata.validate import (  # noqa: E402
     validate_obs_columns,
@@ -164,3 +170,6 @@ def build_strata(dataset_path: Path, config: StrataConfig) -> None:
     for coarse_axes in config.coarse:
         coarse = derive_coarse(atomic, list(coarse_axes))
         write_coarse(root, _coarse_slug(coarse_axes), coarse, force=config.force)
+
+    # Refresh .zmetadata so production readers see the new groups.
+    consolidate_strata_metadata(root)

@@ -175,6 +175,18 @@ def write_atomic(root: zarr.Group, atomic: AtomicTable, *, force: bool) -> None:
     )
 
 
+def consolidate_strata_metadata(root: zarr.Group) -> None:
+    """Re-write the consolidated metadata index so newly-added uns/strata/* groups
+    are visible to readers that open with `use_consolidated=True` (the default).
+
+    AnnData's `write_zarr` produces a `.zmetadata` index at write time; subsequent
+    additions to the tree (like strata) don't update it. Without this call, a
+    production reader (`zarr.open_group(path)` or `ad.read_zarr(path)`) wouldn't
+    see anything we wrote.
+    """
+    zarr.consolidate_metadata(root.store)
+
+
 def write_coarse(
     root: zarr.Group,
     name: str,
