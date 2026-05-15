@@ -120,3 +120,45 @@ def build_atomic(root: zarr.Group, config: StrataConfig) -> AtomicTable:
         nnz=nnz,
         n_cells=n_cells,
     )
+
+
+from pathlib import Path  # noqa: E402
+
+from cell2zarr.strata.derive import derive_coarse  # noqa: E402
+from cell2zarr.strata.io import open_dataset, write_atomic, write_coarse, has_strata  # noqa: E402
+from cell2zarr.strata.exceptions import StrataExistsError  # noqa: E402
+from cell2zarr.strata.validate import (  # noqa: E402
+    validate_obs_columns,
+    estimate_atomic_cardinality,
+)
+
+
+def _coarse_slug(axes: list[str]) -> str:
+    return "_".join(axes)
+
+
+def build_strata(dataset_path: Path, config: StrataConfig) -> None:
+    """End-to-end: validate, build atomic, derive coarse tables, write back to zarr.
+
+    Idempotent under --force; raises StrataExistsError on already-built input
+    otherwise.
+    """
+    root = open_dataset(dataset_path)
+
+    # Pre-build gate: detect already-built strata BEFORE doing the work.
+    if has_strata(root) and not config.force:
+        raise StrataExistsError(
+            f"uns/strata/atomic already exists in {dataset_path}. Pass --force to overwrite."
+        )
+
+    validate_obs_columns(root, config.atomic_axes)
+    estimate_atomic_cardinality(
+        root, config.atomic_axes, max_cardinality=config.max_atomic_cardinality
+    )
+
+    atomic = build_atomic(root, config)
+    write_atomic(root, atomic, force=config.force)
+
+    for coarse_axes in config.coarse:
+        coarse = derive_coarse(atomic, list(coarse_axes))
+        write_coarse(root, _coarse_slug(coarse_axes), coarse, force=config.force)

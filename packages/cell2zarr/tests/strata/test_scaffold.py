@@ -5,8 +5,8 @@ class TestStrataSubmodule:
     def test_strata_package_imports(self):
         from cell2zarr import strata  # noqa: F401
 
-    def test_strata_package_re_exports_nothing_yet(self):
+    def test_strata_package_re_exports_build_strata(self):
         from cell2zarr import strata
-        # No public symbols (like build_strata) are exposed yet — those come
-        # in later tasks. This guards against accidental premature exports.
-        assert not hasattr(strata, "build_strata")
+        # build_strata is the top-level orchestrator entry point.
+        assert hasattr(strata, "build_strata")
+        assert callable(strata.build_strata)
