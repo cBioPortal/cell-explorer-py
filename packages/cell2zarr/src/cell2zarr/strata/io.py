@@ -201,10 +201,12 @@ def consolidate_strata_metadata(root: zarr.Group) -> None:
     """Re-write the consolidated metadata index so newly-added uns/strata/* groups
     are visible to readers that open with `use_consolidated=True` (the default).
 
-    AnnData's `write_zarr` produces a `.zmetadata` index at write time; subsequent
-    additions to the tree (like strata) don't update it. Without this call, a
-    production reader (`zarr.open_group(path)` or `ad.read_zarr(path)`) wouldn't
-    see anything we wrote.
+    On zarr v3 stores, consolidated metadata is stored *inline* in the root
+    `zarr.json` under the `consolidated_metadata` key (not in a separate
+    `.zmetadata` file as in v2). It's a snapshot of every child node's
+    metadata, so any additions after the snapshot was taken are invisible to
+    readers that trust it. Calling `zarr.consolidate_metadata(store)` rewrites
+    the snapshot to include whatever we just added.
     """
     zarr.consolidate_metadata(root.store)
 

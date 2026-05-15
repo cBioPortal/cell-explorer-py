@@ -208,5 +208,5 @@ def build_strata(dataset_path: Path, config: StrataConfig) -> None:
         coarse = derive_coarse(atomic, list(coarse_axes))
         write_coarse(root, _coarse_slug(coarse_axes), coarse, force=config.force)
 
-    # Refresh .zmetadata so production readers see the new groups.
+    # Refresh consolidated metadata so production readers see the new groups.
     consolidate_strata_metadata(root)
