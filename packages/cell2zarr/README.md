@@ -100,6 +100,49 @@ cell2zarr convert input.h5ad output.zarr --two-phase --run-db docs/conversion-ru
 | `--log-level CHOICE` | Log level: DEBUG, INFO, WARNING, ERROR. Default: INFO. |
 | `--temp-dir PATH` | Temp directory for large keys (X, layers). |
 
+## `build-strata` — precompute aggregate tables (optional)
+
+After `convert`, the column-chunked Zarr is already fast for single-gene reads. `build-strata` adds a second precomputed surface for **per-group aggregate queries** (dotplot, cluster DE, marker discovery, pseudobulk DE) — it writes `sum_x`, `sum_xx`, `nnz`, `n_cells` per `(stratum, gene)` into `uns/strata/atomic/` and any requested coarse tables under `uns/strata/coarse_<axes>/`.
+
+**Default: off.** Most everyday conversion / exploration doesn't need strata. Run it when preparing a dataset for production use.
+
+### Examples
+
+Build atomic only:
+
+```bash
+uv run cell2zarr build-strata dataset.zarr --atomic-axes cell_type donor condition
+```
+
+Atomic + a coarse cell-type table (for browser-side dotplots / cluster DE):
+
+```bash
+uv run cell2zarr build-strata dataset.zarr \
+  --atomic-axes cell_type donor condition \
+  --coarse cell_type \
+  --coarse cell_type,treatment
+```
+
+YAML config:
+
+```yaml
+# strata.yaml
+atomic_axes: [cell_type, donor, condition]
+coarse:
+  - cell_type
+  - [cell_type, treatment]
+```
+
+```bash
+uv run cell2zarr build-strata dataset.zarr --config strata.yaml
+```
+
+Rebuild after re-clustering (overwrites existing tables):
+
+```bash
+uv run cell2zarr build-strata dataset.zarr --atomic-axes leiden_res10 donor --force
+```
+
 ## Run dashboard
 
 View conversion run history, configs, performance metrics, and logs in a web dashboard:
