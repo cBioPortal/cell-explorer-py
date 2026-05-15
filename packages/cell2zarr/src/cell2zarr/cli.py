@@ -290,3 +290,8 @@ def dashboard(run_db, host, port, reload):
 
     os.environ["CELL2ZARR_RUN_DB"] = str(run_db.resolve())
     uvicorn.run("cell2zarr.dashboard.main:app", host=host, port=port, reload=reload)
+
+
+from cell2zarr.strata.cli import build_strata_command as _build_strata_command
+
+cli.add_command(_build_strata_command)

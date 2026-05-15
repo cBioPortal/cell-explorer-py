@@ -1,0 +1,218 @@
+"""Zarr read + write helpers for cell2zarr.strata.
+
+Read primitives operate on a `zarr.Group` (the AnnData zarr root).
+Write primitives (write_atomic, write_coarse) use a completion-marker pattern:
+schema_version is written LAST so partial writes are detectable.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import numpy as np
+import pandas as pd
+import zarr
+
+if TYPE_CHECKING:
+    from cell2zarr.strata.build import AtomicTable
+    from cell2zarr.strata.derive import CoarseTable
+
+# AnnData encodes a categorical obs column as a group with two arrays:
+#   <col>/codes      int32  cell -> category index
+#   <col>/categories <T>    one entry per category (string or int)
+# This matches AnnData's "categorical" encoding-type. We don't depend on
+# anndata at runtime here; we read the codes + categories directly.
+
+
+def open_dataset(path: Path) -> zarr.Group:
+    """Open an AnnData zarr store for read/write.
+
+    use_consolidated=False bypasses the consolidated metadata cache written by
+    AnnData so that new groups added at uns/strata/ are immediately visible
+    without rewriting the consolidated metadata file.
+
+    Raises FileNotFoundError if the path doesn't exist.
+    """
+    return zarr.open_group(str(path), mode="r+", use_consolidated=False)
+
+
+def read_obs_categorical(root: zarr.Group, column: str) -> pd.Categorical:
+    """Read an obs categorical column from an AnnData zarr group.
+
+    Raises KeyError if the column is missing under obs/.
+    """
+    if "obs" not in root:
+        raise KeyError("no obs/ group in zarr root")
+    obs = root["obs"]
+    if column not in obs:
+        raise KeyError(f"obs column '{column}' not found")
+
+    col = obs[column]
+    if "codes" in col and "categories" in col:
+        codes = np.asarray(col["codes"])
+        categories = np.asarray(col["categories"])
+        return pd.Categorical.from_codes(codes=codes, categories=categories.tolist())
+
+    # Plain (non-categorical) column — wrap as Categorical for uniform handling
+    values = np.asarray(col)
+    return pd.Categorical(values)
+
+
+def read_x_block(root: zarr.Group, gene_slice: slice) -> np.ndarray:
+    """Read a contiguous gene-column block from X as float32.
+
+    Returns array of shape (n_obs, k) where k = gene_slice.stop - gene_slice.start.
+    Upcasts to float32 regardless of underlying dtype.
+    """
+    if "X" not in root:
+        raise KeyError("no X/ array in zarr root")
+    X = root["X"]
+    block = np.asarray(X[:, gene_slice])
+    return block.astype(np.float32, copy=False)
+
+
+def has_strata(root: zarr.Group) -> bool:
+    """True iff a *fully-written* uns/strata/atomic/ exists (schema_version present)."""
+    try:
+        atomic = root["uns"]["strata"]["atomic"]
+    except KeyError:
+        return False
+    return "schema_version" in atomic.attrs
+
+
+def existing_strata_summary(root: zarr.Group) -> dict | None:
+    """Return {axes, n_strata, schema_version} for an existing atomic table, or None.
+
+    Partial / mid-build writes (no schema_version yet) return None.
+    """
+    try:
+        atomic = root["uns"]["strata"]["atomic"]
+    except KeyError:
+        return None
+    if "schema_version" not in atomic.attrs:
+        return None
+    return {
+        "schema_version": atomic.attrs["schema_version"],
+        "axes": list(atomic.attrs.get("axes", [])),
+        "n_strata": int(atomic.attrs.get("n_strata", 0)),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Write primitives
+# ---------------------------------------------------------------------------
+
+SCHEMA_VERSION = "1.0"
+
+from cell2zarr.strata.exceptions import StrataExistsError  # noqa: E402
+
+
+def _strata_group(root: zarr.Group) -> zarr.Group:
+    """Get-or-create uns/strata/ on the AnnData zarr root."""
+    return root.require_group("uns").require_group("strata")
+
+
+def _write_arrays_with_marker(
+    parent: zarr.Group,
+    name: str,
+    arrays: dict[str, np.ndarray],
+    attrs: dict,
+) -> None:
+    """Atomicity helper: write all arrays, then attach the schema_version marker LAST.
+
+    A reader that finds the group without schema_version treats it as a
+    partial / aborted write.
+    """
+    # Drop any existing group (called only when we're already authorized to overwrite).
+    if name in parent:
+        del parent[name]
+    group = parent.create_group(name)
+
+    for array_name, data in arrays.items():
+        group.create_array(array_name, data=data)
+
+    # Attach non-marker attrs first.
+    for key, value in attrs.items():
+        if key == "schema_version":
+            continue
+        group.attrs[key] = value
+    # Marker LAST — the "this group is complete" flag.
+    group.attrs["schema_version"] = SCHEMA_VERSION
+
+
+def write_atomic(root: zarr.Group, atomic: AtomicTable, *, force: bool) -> None:
+    """Write an AtomicTable to uns/strata/atomic/.
+
+    Raises StrataExistsError if a finished atomic table is already present and
+    force is False. Partial / husk groups (no schema_version) are silently
+    overwritten regardless of force.
+    """
+    strata = _strata_group(root)
+
+    if has_strata(root) and not force:
+        existing_axes = list(strata["atomic"].attrs.get("axes", []))
+        raise StrataExistsError(
+            f"uns/strata/atomic already exists (axes={existing_axes}). "
+            f"Pass --force to overwrite."
+        )
+
+    _write_arrays_with_marker(
+        parent=strata,
+        name="atomic",
+        arrays={
+            "stratum_keys": atomic.stratum_keys,
+            "sum_x": atomic.sum_x,
+            "sum_xx": atomic.sum_xx,
+            "nnz": atomic.nnz,
+            "n_cells": atomic.n_cells,
+        },
+        attrs={
+            "axes": atomic.axis_names,
+            "n_strata": int(len(atomic.stratum_keys)),
+            "derived_from": None,
+            "collapsed_axes": [],
+        },
+    )
+
+
+def write_coarse(
+    root: zarr.Group,
+    name: str,
+    coarse: CoarseTable,
+    *,
+    force: bool,
+) -> None:
+    """Write a CoarseTable to uns/strata/coarse_<name>/.
+
+    `name` is used directly as the group name slug (the caller decides the
+    slug, typically by joining axis names with underscores).
+    """
+    strata = _strata_group(root)
+    group_name = f"coarse_{name}"
+
+    if (
+        group_name in strata
+        and "schema_version" in strata[group_name].attrs
+        and not force
+    ):
+        raise StrataExistsError(
+            f"uns/strata/{group_name} already exists. Pass --force to overwrite."
+        )
+
+    _write_arrays_with_marker(
+        parent=strata,
+        name=group_name,
+        arrays={
+            "stratum_keys": coarse.stratum_keys,
+            "sum_x": coarse.sum_x,
+            "sum_xx": coarse.sum_xx,
+            "nnz": coarse.nnz,
+            "n_cells": coarse.n_cells,
+        },
+        attrs={
+            "axes": coarse.axis_names,
+            "n_strata": int(len(coarse.stratum_keys)),
+            "derived_from": "atomic",
+            "collapsed_axes": [],
+        },
+    )
