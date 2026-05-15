@@ -57,8 +57,10 @@ def compute_strata_mapping(
     for axis_idx, col in enumerate(columns):
         categories = np.asarray(col.categories)
         stratum_keys[:, axis_idx] = categories[unique_codes[:, axis_idx]]
-    # Convert object dtype to a fixed-width string dtype for stable zarr storage.
-    stratum_keys = stratum_keys.astype("<U32")
+    # Convert object dtype to fixed-width unicode sized to the longest value
+    # so labels like "fallopian tube secretory epithelial cell" are preserved.
+    max_len = max((len(str(s)) for s in stratum_keys.ravel()), default=1)
+    stratum_keys = stratum_keys.astype(f"<U{max_len}")
 
     # Cell count per stratum.
     n_cells = np.bincount(cell_to_stratum, minlength=n_strata).astype(np.int32)
