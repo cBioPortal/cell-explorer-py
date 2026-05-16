@@ -17,7 +17,11 @@ dependencies = [
 test = [
     "pytest>=9.0.2",
     "pytest-asyncio>=0.25.0",
+    "cell2zarr",
 ]
+
+[tool.uv.sources]
+cell2zarr = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

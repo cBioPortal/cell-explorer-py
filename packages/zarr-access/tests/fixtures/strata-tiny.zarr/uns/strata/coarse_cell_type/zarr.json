@@ -1,0 +1,13 @@
+{
+  "attributes": {
+    "axes": [
+      "cell_type"
+    ],
+    "n_strata": 3,
+    "derived_from": "atomic",
+    "collapsed_axes": [],
+    "schema_version": "1.0"
+  },
+  "zarr_format": 3,
+  "node_type": "group"
+}
