@@ -182,6 +182,61 @@ class StrataStore:
             schema_version=schema_version,
         )
 
+    async def read_atomic_genes(self, gene_indices: list[int]) -> AtomicStrataTable:
+        """Read the atomic table restricted to the requested gene columns.
+
+        Empty list → returns a valid table with empty sum_x/sum_xx/nnz but
+        populated stratum_keys + n_cells (no gene-data fetches).
+
+        Raises ValueError if the dataset has no atomic table.
+        """
+        if not self.has_atomic():
+            raise ValueError("no atomic table in this dataset")
+
+        group_path = "uns/strata/atomic"
+        group = await self._zarr.get_group(group_path)
+        schema_version = str(dict(group.attrs).get("schema_version", "1.0"))
+
+        stratum_keys = await self._read_array_2d_str(f"{group_path}/stratum_keys")
+        n_cells = await self._read_array_1d(f"{group_path}/n_cells", np.int32)
+        axes = self.atomic_axes() or []
+
+        if not gene_indices:
+            n_strata = stratum_keys.shape[0]
+            return AtomicStrataTable(
+                kind="atomic",
+                axes=axes,
+                stratum_keys=stratum_keys,
+                gene_indices=[],
+                sum_x=np.zeros((n_strata, 0), dtype=np.float32),
+                sum_xx=np.zeros((n_strata, 0), dtype=np.float32),
+                nnz=np.zeros((n_strata, 0), dtype=np.int32),
+                n_cells=n_cells,
+                schema_version=schema_version,
+            )
+
+        sum_x = await self._read_array_2d_genes_sliced(
+            f"{group_path}/sum_x", gene_indices, np.float32
+        )
+        sum_xx = await self._read_array_2d_genes_sliced(
+            f"{group_path}/sum_xx", gene_indices, np.float32
+        )
+        nnz = await self._read_array_2d_genes_sliced(
+            f"{group_path}/nnz", gene_indices, np.int32
+        )
+
+        return AtomicStrataTable(
+            kind="atomic",
+            axes=axes,
+            stratum_keys=stratum_keys,
+            gene_indices=list(gene_indices),
+            sum_x=sum_x,
+            sum_xx=sum_xx,
+            nnz=nnz,
+            n_cells=n_cells,
+            schema_version=schema_version,
+        )
+
     # --- Read primitives ---
 
     async def _read_array_2d(self, path: str, dtype) -> np.ndarray:
@@ -198,3 +253,22 @@ class StrataStore:
         arr = await self._zarr.get_array(path)
         data = await arr.getitem((slice(None), slice(None)))
         return np.asarray(data)
+
+    async def _read_array_2d_genes_sliced(
+        self,
+        path: str,
+        gene_indices: list[int],
+        dtype,
+    ) -> np.ndarray:
+        """Read all rows of an array, restricted to selected gene columns.
+
+        v1 simplification: fetch the whole array then slice in numpy. zarr-python
+        supports fancy indexing but this keeps the read path simple for the
+        small atomic tables we operate on. Switch to fancy indexing when atlas
+        sizes make whole-array fetches expensive.
+        """
+        arr = await self._zarr.get_array(path)
+        data = await arr.getitem((slice(None), slice(None)))
+        full = np.asarray(data)
+        sliced = full[:, gene_indices]
+        return sliced.astype(dtype, copy=False)

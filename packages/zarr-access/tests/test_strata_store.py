@@ -120,3 +120,33 @@ async def test_read_coarse_unknown_slug_raises(strata_store):
     import pytest
     with pytest.raises(KeyError, match="no_such_slug"):
         await strata_store.read_coarse("no_such_slug")
+
+
+async def test_read_atomic_genes_slice(strata_store):
+    atomic = await strata_store.read_atomic_genes([0, 5, 9])
+    assert atomic.kind == "atomic"
+    assert atomic.axes == ["cell_type", "donor"]
+    assert atomic.gene_indices == [0, 5, 9]
+    # 6 strata × 3 selected genes
+    assert atomic.sum_x.shape == (6, 3)
+    assert atomic.n_cells.shape == (6,)
+    assert atomic.stratum_keys.shape == (6, 2)
+
+
+async def test_read_atomic_genes_empty(strata_store):
+    atomic = await strata_store.read_atomic_genes([])
+    assert atomic.kind == "atomic"
+    assert atomic.gene_indices == []
+    # Gene-data arrays are empty
+    assert atomic.sum_x.size == 0
+    assert atomic.sum_xx.size == 0
+    assert atomic.nnz.size == 0
+    # But stratum_keys + n_cells are still populated
+    assert atomic.stratum_keys.shape == (6, 2)
+    assert atomic.n_cells.shape == (6,)
+
+
+async def test_read_atomic_genes_no_atomic_raises(no_strata_store):
+    import pytest
+    with pytest.raises(ValueError, match="no atomic"):
+        await no_strata_store.read_atomic_genes([0])
