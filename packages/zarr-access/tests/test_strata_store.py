@@ -150,3 +150,20 @@ async def test_read_atomic_genes_no_atomic_raises(no_strata_store):
     import pytest
     with pytest.raises(ValueError, match="no atomic"):
         await no_strata_store.read_atomic_genes([0])
+
+
+async def test_read_atomic_full(strata_store):
+    atomic = await strata_store.read_atomic()
+    assert atomic.kind == "atomic"
+    assert atomic.gene_indices is None
+    assert atomic.axes == ["cell_type", "donor"]
+    # 6 strata × 10 genes
+    assert atomic.sum_x.shape == (6, 10)
+    assert atomic.n_cells.shape == (6,)
+    assert int(atomic.n_cells.sum()) == 50
+
+
+async def test_read_atomic_no_atomic_raises(no_strata_store):
+    import pytest
+    with pytest.raises(ValueError, match="no atomic"):
+        await no_strata_store.read_atomic()

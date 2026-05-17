@@ -237,6 +237,36 @@ class StrataStore:
             schema_version=schema_version,
         )
 
+    async def read_atomic(self) -> AtomicStrataTable:
+        """Read the full atomic table.
+
+        Raises ValueError if the dataset has no atomic table.
+        """
+        if not self.has_atomic():
+            raise ValueError("no atomic table in this dataset")
+
+        group_path = "uns/strata/atomic"
+        group = await self._zarr.get_group(group_path)
+        schema_version = str(dict(group.attrs).get("schema_version", "1.0"))
+
+        sum_x = await self._read_array_2d(f"{group_path}/sum_x", np.float32)
+        sum_xx = await self._read_array_2d(f"{group_path}/sum_xx", np.float32)
+        nnz = await self._read_array_2d(f"{group_path}/nnz", np.int32)
+        n_cells = await self._read_array_1d(f"{group_path}/n_cells", np.int32)
+        stratum_keys = await self._read_array_2d_str(f"{group_path}/stratum_keys")
+
+        return AtomicStrataTable(
+            kind="atomic",
+            axes=self.atomic_axes() or [],
+            stratum_keys=stratum_keys,
+            gene_indices=None,
+            sum_x=sum_x,
+            sum_xx=sum_xx,
+            nnz=nnz,
+            n_cells=n_cells,
+            schema_version=schema_version,
+        )
+
     # --- Read primitives ---
 
     async def _read_array_2d(self, path: str, dtype) -> np.ndarray:
