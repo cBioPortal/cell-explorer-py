@@ -302,3 +302,31 @@ class StrataStore:
         full = np.asarray(data)
         sliced = full[:, gene_indices]
         return sliced.astype(dtype, copy=False)
+
+
+def find_coarse_by_axes(strata: StrataStore, axes: list[str]) -> str | None:
+    """Find a coarse slug whose axes match the given set exactly (order-insensitive).
+
+    Returns None if no coarse table has exactly these axes.
+    """
+    target = set(axes)
+    for slug in strata.coarse_slugs():
+        if set(strata.coarse_axes(slug)) == target:
+            return slug
+    return None
+
+
+def find_coarse_covering(strata: StrataStore, required_axes: list[str]) -> str | None:
+    """Find the smallest coarse table whose axes are a superset of required_axes.
+
+    Returns None if no coarse covers all the requested axes.
+    """
+    required = set(required_axes)
+    best: tuple[str, int] | None = None  # (slug, axis_count)
+    for slug in strata.coarse_slugs():
+        slug_axes = set(strata.coarse_axes(slug))
+        if not required.issubset(slug_axes):
+            continue
+        if best is None or len(slug_axes) < best[1]:
+            best = (slug, len(slug_axes))
+    return best[0] if best else None

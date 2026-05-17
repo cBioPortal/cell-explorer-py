@@ -7,6 +7,8 @@ from zarr_access.strata_store import (
     CoarseStrataTable,
     AtomicStrataTable,
     StrataTable,
+    find_coarse_by_axes,
+    find_coarse_covering,
 )
 
 __all__ = [
@@ -16,4 +18,6 @@ __all__ = [
     "CoarseStrataTable",
     "AtomicStrataTable",
     "StrataTable",
+    "find_coarse_by_axes",
+    "find_coarse_covering",
 ]

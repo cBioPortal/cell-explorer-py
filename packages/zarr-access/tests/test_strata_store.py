@@ -167,3 +167,20 @@ async def test_read_atomic_no_atomic_raises(no_strata_store):
     import pytest
     with pytest.raises(ValueError, match="no atomic"):
         await no_strata_store.read_atomic()
+
+
+from zarr_access import find_coarse_by_axes, find_coarse_covering
+
+
+async def test_find_coarse_by_axes_exact_match(strata_store):
+    assert find_coarse_by_axes(strata_store, ["cell_type"]) == "cell_type"
+    # No coarse covers both axes — only ['cell_type'] exists
+    assert find_coarse_by_axes(strata_store, ["cell_type", "donor"]) is None
+    assert find_coarse_by_axes(strata_store, ["nope"]) is None
+
+
+async def test_find_coarse_covering(strata_store):
+    # The only coarse table covers ['cell_type'] — request for that returns it
+    assert find_coarse_covering(strata_store, ["cell_type"]) == "cell_type"
+    # No coarse covers ['donor']
+    assert find_coarse_covering(strata_store, ["donor"]) is None
