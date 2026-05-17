@@ -91,3 +91,32 @@ async def test_no_strata_returns_empty(no_strata_store):
     assert no_strata_store.atomic_axes() is None
     assert no_strata_store.atomic_strata_count() is None
     assert no_strata_store.coarse_slugs() == []
+
+
+async def test_read_coarse_round_trip(strata_store):
+    coarse = await strata_store.read_coarse("cell_type")
+    assert coarse.kind == "coarse"
+    assert coarse.slug == "cell_type"
+    assert coarse.axes == ["cell_type"]
+    assert coarse.gene_indices is None
+    assert coarse.schema_version == "1.0"
+
+    # 3 strata × 10 genes
+    assert coarse.stratum_keys.shape == (3, 1)
+    assert coarse.sum_x.shape == (3, 10)
+    assert coarse.sum_xx.shape == (3, 10)
+    assert coarse.nnz.shape == (3, 10)
+    assert coarse.n_cells.shape == (3,)
+
+    # Cell counts: 20 (A) + 20 (B) + 10 (C) = 50
+    assert int(coarse.n_cells.sum()) == 50
+
+    # Stratum keys are 1-axis -> each row is a 1-element entry
+    flat_keys = sorted(coarse.stratum_keys[:, 0].tolist())
+    assert flat_keys == ["A", "B", "C"]
+
+
+async def test_read_coarse_unknown_slug_raises(strata_store):
+    import pytest
+    with pytest.raises(KeyError, match="no_such_slug"):
+        await strata_store.read_coarse("no_such_slug")

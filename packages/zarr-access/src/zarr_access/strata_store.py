@@ -148,3 +148,53 @@ class StrataStore:
         if slug not in self._coarse_strata_count_map:
             raise KeyError(slug)
         return self._coarse_strata_count_map[slug]
+
+    # --- Reads ---
+
+    async def read_coarse(self, slug: str) -> CoarseStrataTable:
+        """Read the full coarse table for `slug`.
+
+        Raises KeyError synchronously if the slug is unknown.
+        """
+        if slug not in self._coarse_axes_map:
+            raise KeyError(slug)
+
+        group_path = f"uns/strata/coarse_{slug}"
+        group = await self._zarr.get_group(group_path)
+        schema_version = str(dict(group.attrs).get("schema_version", "1.0"))
+
+        sum_x = await self._read_array_2d(f"{group_path}/sum_x", np.float32)
+        sum_xx = await self._read_array_2d(f"{group_path}/sum_xx", np.float32)
+        nnz = await self._read_array_2d(f"{group_path}/nnz", np.int32)
+        n_cells = await self._read_array_1d(f"{group_path}/n_cells", np.int32)
+        stratum_keys = await self._read_array_2d_str(f"{group_path}/stratum_keys")
+
+        return CoarseStrataTable(
+            kind="coarse",
+            slug=slug,
+            axes=self.coarse_axes(slug),
+            stratum_keys=stratum_keys,
+            gene_indices=None,
+            sum_x=sum_x,
+            sum_xx=sum_xx,
+            nnz=nnz,
+            n_cells=n_cells,
+            schema_version=schema_version,
+        )
+
+    # --- Read primitives ---
+
+    async def _read_array_2d(self, path: str, dtype) -> np.ndarray:
+        arr = await self._zarr.get_array(path)
+        data = await arr.getitem((slice(None), slice(None)))
+        return np.asarray(data).astype(dtype, copy=False)
+
+    async def _read_array_1d(self, path: str, dtype) -> np.ndarray:
+        arr = await self._zarr.get_array(path)
+        data = await arr.getitem(slice(None))
+        return np.asarray(data).astype(dtype, copy=False)
+
+    async def _read_array_2d_str(self, path: str) -> np.ndarray:
+        arr = await self._zarr.get_array(path)
+        data = await arr.getitem((slice(None), slice(None)))
+        return np.asarray(data)
