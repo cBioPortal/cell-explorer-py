@@ -49,3 +49,45 @@ def test_strata_store_class_exists():
     """StrataStore is exported from zarr_access."""
     assert StrataStore is not None
     assert callable(StrataStore)
+
+
+import pytest_asyncio
+from zarr_access import ZarrStore
+
+
+@pytest_asyncio.fixture
+async def strata_store(fixture_server):
+    zarr_store = await ZarrStore.open(f"{fixture_server}/strata-tiny.zarr")
+    return await StrataStore.open(zarr_store)
+
+
+@pytest_asyncio.fixture
+async def no_strata_store(fixture_server):
+    """pbmc3k.zarr has no uns/strata/ group — discovery should return empties."""
+    zarr_store = await ZarrStore.open(f"{fixture_server}/pbmc3k.zarr")
+    return await StrataStore.open(zarr_store)
+
+
+async def test_discovery_atomic(strata_store):
+    assert strata_store.has_atomic() is True
+    assert strata_store.atomic_axes() == ["cell_type", "donor"]
+    assert strata_store.atomic_strata_count() == 6
+
+
+async def test_discovery_coarse(strata_store):
+    assert strata_store.coarse_slugs() == ["cell_type"]
+    assert strata_store.coarse_axes("cell_type") == ["cell_type"]
+    assert strata_store.coarse_strata_count("cell_type") == 3
+
+
+async def test_coarse_axes_unknown_slug_raises(strata_store):
+    import pytest
+    with pytest.raises(KeyError, match="no_such_slug"):
+        strata_store.coarse_axes("no_such_slug")
+
+
+async def test_no_strata_returns_empty(no_strata_store):
+    assert no_strata_store.has_atomic() is False
+    assert no_strata_store.atomic_axes() is None
+    assert no_strata_store.atomic_strata_count() is None
+    assert no_strata_store.coarse_slugs() == []
