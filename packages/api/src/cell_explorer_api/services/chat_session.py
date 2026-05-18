@@ -20,10 +20,13 @@ from cell_explorer_api.config import Settings
 from cell_explorer_api.db.models import Dataset, Datasource
 from cell_explorer_api.services.access import user_can_access
 from cell_explorer_api.services.credentials import CredentialError, mint_credentials
-from cell_explorer_api.services.zarr_adapter import AnnDataZarrAccess
+from cell_explorer_api.services.zarr_adapter import (
+    AnnDataZarrAccess,
+    StrataZarrAccess,
+)
 
 # Heavy imports deferred to call time (via module-level import that can be patched in tests)
-from zarr_access import AnnDataStore, ZarrStore
+from zarr_access import AnnDataStore, StrataStore, ZarrStore
 
 
 class ChatSessionError(Exception):
@@ -142,10 +145,12 @@ async def make_chat_agent(
     try:
         zarr_store = await ZarrStore.open(url, headers=headers)
         anndata = await AnnDataStore.open(zarr_store)
+        strata_store = await StrataStore.open(zarr_store)
     except Exception as exc:
         raise ZarrUnreachableError(str(exc)) from exc
 
     adapter = AnnDataZarrAccess(anndata)
+    strata_adapter = StrataZarrAccess(strata_store)
 
     # 5. Build DatasetContext + tool catalog
     ctx = await build_dataset_context(
@@ -154,7 +159,10 @@ async def make_chat_agent(
         name=dataset.name,
         description=dataset.description or "",
     )
-    catalog = build_v1_catalog(adapter, config=agent_config)
+    # Only register the strata-powered tool if the dataset has coarse tables.
+    # Empty -> pass None so the LLM only sees the X-scan compare_groups.
+    strata_for_catalog = strata_adapter if strata_adapter.coarse_slugs() else None
+    catalog = build_v1_catalog(adapter, config=agent_config, strata=strata_for_catalog)
 
     # 6. Construct LLMClient if not provided
     if llm is None:
