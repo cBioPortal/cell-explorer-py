@@ -1,4 +1,4 @@
-.PHONY: help install dev dev-docker test test-cell2zarr test-zarr-auth-proxy test-zarr-access test-all db-migrate db-revision db-seed seed-spectrum openapi generate-app-config dev-keys chat-login chat-logout chat-datasets chat-ask chat-ask-traced chat-repl
+.PHONY: help install dev dev-docker test test-cell2zarr test-zarr-auth-proxy test-zarr-access test-cell-explorer-agent test-all db-migrate db-revision db-seed seed-spectrum openapi generate-app-config dev-keys chat-login chat-logout chat-datasets chat-ask chat-ask-traced chat-repl
 
 # chat-* targets auto-source .env so the CLI picks up KEYCLOAK_*, CELL_EXPLORER_API_URL, etc.
 WITH_ENV = set -a; [ -f .env ] && . ./.env; set +a;
@@ -55,11 +55,20 @@ test-zarr-auth-proxy: ## Run zarr-auth-proxy tests
 test-zarr-access: ## Run zarr-access tests
 	uv run --project packages/zarr-access pytest packages/zarr-access/tests/ -v
 
-test-all: ## Run all tests across all packages
+test-cell-explorer-agent: ## Run cell-explorer-agent tests
+	uv run --project packages/cell-explorer-agent pytest packages/cell-explorer-agent/tests/ -v
+
+# Why per-package not `pytest packages/`: each package's pyproject sets
+# session-scoped pytest-asyncio defaults. Cross-package pytest invocation
+# creates ONE shared event loop across all packages, and some test's
+# teardown closes it before later tests run — see follow-up issue tracking
+# the deeper async-test scoping fix.
+test-all: ## Run all tests across all packages (per-package, matches CI)
 	uv run --project packages/api pytest packages/api/tests/ -v
 	uv run --project packages/cell2zarr pytest packages/cell2zarr/tests/ -v
 	uv run --project packages/zarr-auth-proxy pytest packages/zarr-auth-proxy/tests/ -v
 	uv run --project packages/zarr-access pytest packages/zarr-access/tests/ -v
+	uv run --project packages/cell-explorer-agent pytest packages/cell-explorer-agent/tests/ -v
 
 dev-keys: ## Generate RSA key pair for local dev
 	mkdir -p dev-keys
