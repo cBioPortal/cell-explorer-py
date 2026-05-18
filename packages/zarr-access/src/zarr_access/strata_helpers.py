@@ -52,3 +52,39 @@ def strata_variances(table: StrataTable) -> np.ndarray:
         sxx = table.sum_xx[has_two]
         out[has_two] = (sxx - (sx * sx) / n) / (n - 1)
     return out
+
+
+def dotplot_data(
+    table: StrataTable,
+    gene_indices: list[int],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return (means, frac_expressing) for the requested gene columns.
+
+    Each returned array is (n_strata, len(gene_indices)) float32. For slicing
+    an already-loaded StrataTable; does NOT re-fetch the underlying data.
+    """
+    if not gene_indices:
+        n_strata = table.n_cells.shape[0]
+        empty = np.zeros((n_strata, 0), dtype=np.float32)
+        return empty, empty
+
+    indices = np.asarray(gene_indices, dtype=np.int64)
+    n = table.n_cells.astype(np.float32)[:, None]
+    nonzero = n > 0
+
+    means = np.zeros((table.sum_x.shape[0], len(gene_indices)), dtype=np.float32)
+    frac = np.zeros((table.nnz.shape[0], len(gene_indices)), dtype=np.float32)
+
+    means_full = np.divide(
+        table.sum_x[:, indices],
+        n,
+        out=means,
+        where=nonzero,
+    )
+    frac_full = np.divide(
+        table.nnz[:, indices].astype(np.float32),
+        n,
+        out=frac,
+        where=nonzero,
+    )
+    return means_full, frac_full

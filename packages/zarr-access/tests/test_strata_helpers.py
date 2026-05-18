@@ -130,3 +130,36 @@ def test_strata_variances_edge_cases():
     )
     assert strata_variances(table0)[0, 0] == 0.0
     assert strata_variances(table1)[0, 0] == 0.0
+
+
+from zarr_access.strata_helpers import dotplot_data
+
+
+def test_dotplot_data_basic():
+    # 2 strata × 3 genes, select columns [0, 2]
+    table = CoarseStrataTable(
+        kind="coarse",
+        slug="test",
+        axes=["axis"],
+        stratum_keys=np.array([["s0"], ["s1"]]),
+        gene_indices=None,
+        sum_x=np.array([[10.0, 20.0, 30.0], [8.0, 12.0, 16.0]], dtype=np.float32),
+        sum_xx=np.zeros((2, 3), dtype=np.float32),
+        nnz=np.array([[10, 5, 8], [4, 2, 4]], dtype=np.int32),
+        n_cells=np.array([10, 4], dtype=np.int32),
+        schema_version="1.0",
+    )
+    means, frac = dotplot_data(table, [0, 2])
+    # means stratum 0: [10/10, 30/10] = [1, 3]
+    # means stratum 1: [8/4,   16/4]  = [2, 4]
+    np.testing.assert_array_equal(means, np.array([[1.0, 3.0], [2.0, 4.0]], dtype=np.float32))
+    # frac stratum 0: [10/10, 8/10] = [1, 0.8]
+    # frac stratum 1: [4/4,   4/4]  = [1, 1]
+    np.testing.assert_array_equal(frac, np.array([[1.0, 0.8], [1.0, 1.0]], dtype=np.float32))
+
+
+def test_dotplot_data_empty_gene_indices():
+    table = make_table(n_strata=2, sum_x_rows=[[1.0, 2.0], [3.0, 4.0]], n_cells=[1, 1])
+    means, frac = dotplot_data(table, [])
+    assert means.shape == (2, 0)
+    assert frac.shape == (2, 0)
