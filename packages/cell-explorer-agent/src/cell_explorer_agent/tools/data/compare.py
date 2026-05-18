@@ -60,13 +60,15 @@ def compare_groups_tool(
         except Exception as exc:
             return {"error": f"failed to read expression data: {exc}"}
 
-        # np.argsort sorts NaN to the end, so genes with undefined LFC
-        # (negative ratio after pseudocount on scaled data) cannot displace
-        # finite top-magnitude entries. Python's list.sort with NaN keys is
-        # undefined and silently corrupted the ranking.
+        # Sort by |LFC| desc. Non-finite LFC values (NaN from log2 of a
+        # negative ratio on scaled data; ±Inf from log2(0) when mean cancels
+        # the pseudocount) get a sort key of +inf so they fall to the end and
+        # cannot displace genes with real, computable LFC. Python's list.sort
+        # with NaN keys was undefined and silently corrupted the ranking.
         lfc_arr = np.array([r[1] for r in results], dtype="float64")
-        order = np.argsort(-np.abs(lfc_arr))
-        top = [results[int(i)] for i in order[:n]]
+        keys = np.where(np.isfinite(lfc_arr), -np.abs(lfc_arr), np.inf)
+        order = np.argsort(keys, kind="stable")[:n]
+        top = [results[int(i)] for i in order]
 
         return cap_json_bytes(
             {

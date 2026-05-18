@@ -69,9 +69,13 @@ def compare_groups_via_strata_tool(
         means_b = coarse.sum_x[b_idx] / n_b
         lfc = np.log2((means_a + PSEUDO) / (means_b + PSEUDO))
 
-        # 5. Top-n by absolute LFC, resolve gene symbols
+        # 5. Top-n by absolute LFC, resolve gene symbols. Non-finite LFC
+        # values (NaN from negative ratio on scaled data; ±Inf from log2(0))
+        # get a sort key of +inf so they fall to the end and cannot displace
+        # genes with real, computable LFC. Matches compare_groups.
         names = await z.var_names()
-        order = np.argsort(-np.abs(lfc))[:n]
+        keys = np.where(np.isfinite(lfc), -np.abs(lfc), np.inf)
+        order = np.argsort(keys, kind="stable")[:n]
         top_genes = [
             {
                 "symbol": str(names[int(i)]),
