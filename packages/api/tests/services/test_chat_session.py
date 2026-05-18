@@ -66,9 +66,11 @@ async def test_public_dataset_returns_agent_without_minting():
 
     with patch("cell_explorer_api.services.chat_session.ZarrStore") as MockZS, \
          patch("cell_explorer_api.services.chat_session.AnnDataStore") as MockADS, \
+         patch("cell_explorer_api.services.chat_session.StrataStore") as MockSS, \
          patch("cell_explorer_api.services.chat_session.mint_credentials") as mock_mint:
         MockZS.open = AsyncMock(return_value=MagicMock())
         MockADS.open = AsyncMock(return_value=fake_anndata)
+        MockSS.open = AsyncMock(return_value=MagicMock())
 
         agent = await make_chat_agent(
             user=user, dataset_slug="pbmc3k", db=db, settings=settings, llm=llm
@@ -152,6 +154,7 @@ async def test_private_dataset_with_role_mints_credentials():
 
     with patch("cell_explorer_api.services.chat_session.ZarrStore") as MockZS, \
          patch("cell_explorer_api.services.chat_session.AnnDataStore") as MockADS, \
+         patch("cell_explorer_api.services.chat_session.StrataStore") as MockSS, \
          patch("cell_explorer_api.services.chat_session.mint_credentials") as mock_mint:
         mock_mint.return_value = {
             "credential_type": "bearer_token",
@@ -160,6 +163,7 @@ async def test_private_dataset_with_role_mints_credentials():
         }
         MockZS.open = AsyncMock(return_value=MagicMock())
         MockADS.open = AsyncMock(return_value=fake_anndata)
+        MockSS.open = AsyncMock(return_value=MagicMock())
 
         agent = await make_chat_agent(
             user=user, dataset_slug="brca", db=db, settings=settings, llm=llm
@@ -227,9 +231,11 @@ async def test_chat_enabled_dataset_passes_gate():
     fake_anndata.obsm_keys = []
     fake_anndata.obs_columns = []
     with patch("cell_explorer_api.services.chat_session.ZarrStore") as MockZS, \
-         patch("cell_explorer_api.services.chat_session.AnnDataStore") as MockADS:
+         patch("cell_explorer_api.services.chat_session.AnnDataStore") as MockADS, \
+         patch("cell_explorer_api.services.chat_session.StrataStore") as MockSS:
         MockZS.open = AsyncMock(return_value=MagicMock())
         MockADS.open = AsyncMock(return_value=fake_anndata)
+        MockSS.open = AsyncMock(return_value=MagicMock())
         agent = await make_chat_agent(
             user=user, dataset_slug="open", db=db, settings=settings, llm=llm
         )

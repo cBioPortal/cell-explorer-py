@@ -2,6 +2,10 @@
 
 from cell_explorer_agent.config import AgentConfig
 from cell_explorer_agent.tools.data.compare import compare_groups_tool
+from cell_explorer_agent.tools.data.compare_via_strata import (
+    compare_groups_via_strata_tool,
+)
+from cell_explorer_agent.tools.strata_protocol import StrataAccess
 from cell_explorer_agent.tools.data.genes import (
     gene_expression_summary_tool,
     search_genes_tool,
@@ -54,7 +58,12 @@ from cell_explorer_agent.tools.ui_action.viewport import (
 from cell_explorer_agent.tools.zarr_protocol import ZarrAccess
 
 
-def build_v1_catalog(z: ZarrAccess, *, config: AgentConfig) -> ToolCatalog:
+def build_v1_catalog(
+    z: ZarrAccess,
+    *,
+    config: AgentConfig,
+    strata: StrataAccess | None = None,
+) -> ToolCatalog:
     cat = ToolCatalog()
     lim = config.tool_result_max_bytes
 
@@ -83,6 +92,13 @@ def build_v1_catalog(z: ZarrAccess, *, config: AgentConfig) -> ToolCatalog:
     cat.register(remove_summary_obs_column_tool())
     cat.register(remove_summary_gene_tool())
     cat.register(clear_summary_tool())
+
+    if strata is not None:
+        cat.register(
+            compare_groups_via_strata_tool(
+                z, strata, limit_bytes=config.tool_result_max_bytes,
+            )
+        )
 
     # Experimental ui_action tools (Plan 2 view-config redesign).
     # Plan 3 will flip the flag default to True.
