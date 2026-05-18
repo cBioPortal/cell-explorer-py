@@ -429,6 +429,7 @@ dependencies = [
 test = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "zarr-access" },
 ]
 
 [package.dev-dependencies]
@@ -446,6 +447,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.8" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.25.0" },
+    { name = "zarr-access", marker = "extra == 'test'", editable = "packages/zarr-access" },
 ]
 provides-extras = ["test"]
 
