@@ -86,6 +86,46 @@ class FakeStrataAccess:
             ),
         })
 
+    @classmethod
+    def from_zarr_data(cls, fake_zarr) -> "FakeStrataAccess":
+        """Build a coarse strata for 'cell_type' whose sums match fake_zarr.expression
+        exactly. Used by cross-path equivalence tests.
+        """
+        col = fake_zarr.obs["cell_type"]
+        cats = list(col.categories)
+        codes = col.values
+
+        n_strata = len(cats)
+        n_genes = len(fake_zarr.var)
+        # Use float64 so the stored sums exactly match what the X-scan path
+        # accumulates in float64. float32 storage would introduce ~1e-7 drift.
+        sum_x = np.zeros((n_strata, n_genes), dtype="float64")
+        sum_xx = np.zeros((n_strata, n_genes), dtype="float64")
+        nnz = np.zeros((n_strata, n_genes), dtype="int32")
+        n_cells = np.zeros(n_strata, dtype="int32")
+
+        for s_idx, _cat_name in enumerate(cats):
+            mask = codes == s_idx
+            n_cells[s_idx] = int(mask.sum())
+            for g_idx, gene in enumerate(fake_zarr.var):
+                expr = fake_zarr.expression[gene]
+                sub = expr[mask].astype("float64", copy=False)
+                sum_x[s_idx, g_idx] = float(sub.sum())
+                sum_xx[s_idx, g_idx] = float((sub * sub).sum())
+                nnz[s_idx, g_idx] = int((sub != 0).sum())
+
+        stratum_keys = np.array([[c] for c in cats], dtype=object)
+        return cls(coarse_tables={
+            "cell_type": CoarseStrataResult(
+                axes=["cell_type"],
+                stratum_keys=stratum_keys,
+                sum_x=sum_x,
+                sum_xx=sum_xx,
+                nnz=nnz,
+                n_cells=n_cells,
+            ),
+        })
+
     def coarse_slugs(self) -> list[str]:
         return sorted(self.coarse_tables.keys())
 

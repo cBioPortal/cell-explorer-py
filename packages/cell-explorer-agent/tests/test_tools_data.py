@@ -344,3 +344,48 @@ async def test_compare_groups_falls_back_to_xscan_when_no_strata(fake_zarr):
         obs_column="cell_type", group_a="T cell", group_b="B cell", n=3
     )
     assert result["method"] == "via_xscan"
+
+
+async def test_compare_groups_strata_and_xscan_produce_identical_stats(fake_zarr):
+    """Same query through both paths must produce the same per-gene stats.
+
+    Forces the strata table to have sums computed from the SAME data the
+    X-scan sees. Without this, drift between paths is invisible until a
+    real-world A/B eval catches it (see #121's eval).
+    """
+    import numpy as np
+
+    from tests.fakes.fake_strata import FakeStrataAccess
+
+    # Build a strata where sum_x / sum_xx for each stratum row are derived
+    # directly from fake_zarr.expression, so by construction the two paths
+    # are computing the same thing.
+    strata = FakeStrataAccess.from_zarr_data(fake_zarr)
+
+    tool_with = compare_groups_tool(
+        fake_zarr, limit_bytes=32_768, concurrency=4, strata=strata,
+    )
+    tool_without = compare_groups_tool(
+        fake_zarr, limit_bytes=32_768, concurrency=4, strata=None,
+    )
+    args = dict(obs_column="cell_type", group_a="T cell", group_b="B cell", n=10)
+
+    result_strata = await tool_with.func(**args)
+    result_xscan = await tool_without.func(**args)
+
+    assert result_strata["method"] == "via_coarse_strata"
+    assert result_xscan["method"] == "via_xscan"
+
+    # Same top-N genes in the same order.
+    strata_syms = [g["symbol"] for g in result_strata["genes"]]
+    xscan_syms = [g["symbol"] for g in result_xscan["genes"]]
+    assert strata_syms == xscan_syms
+
+    # Per-gene stats match to within float tolerance.
+    for gs, gx in zip(result_strata["genes"], result_xscan["genes"]):
+        np.testing.assert_allclose(gs["cohens_d"], gx["cohens_d"], atol=1e-9)
+        np.testing.assert_allclose(gs["t_statistic"], gx["t_statistic"], atol=1e-9)
+        np.testing.assert_allclose(gs["mean_a"], gx["mean_a"], atol=1e-9)
+        np.testing.assert_allclose(gs["mean_b"], gx["mean_b"], atol=1e-9)
+        np.testing.assert_allclose(gs["var_a"], gx["var_a"], atol=1e-9)
+        np.testing.assert_allclose(gs["var_b"], gx["var_b"], atol=1e-9)
