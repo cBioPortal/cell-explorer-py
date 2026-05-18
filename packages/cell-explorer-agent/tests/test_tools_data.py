@@ -143,3 +143,90 @@ async def test_compare_groups_unknown_group(fake_zarr):
         obs_column="cell_type", group_a="T cell", group_b="Nope", n=5
     )
     assert "error" in result
+
+
+async def test_compare_groups_ranks_finite_above_non_finite_lfc():
+    """Regression for #121: NaN and ±Inf LFC values must not displace finite
+    top-magnitude entries in the ranking.
+
+    Scaled expression (negative means) produces NaN LFC whenever
+    (mean_a + PSEUDO) / (mean_b + PSEUDO) is negative. Means that exactly
+    cancel the pseudocount produce ±Inf (log2(0)). Python's list.sort with
+    NaN keys is undefined and was scattering NaN through the sorted list,
+    burying the real top genes. The fix uses np.argsort with non-finite
+    values mapped to a sort key of +inf so they always fall to the end.
+    """
+    import numpy as np
+
+    from cell_explorer_agent.tools.zarr_protocol import ObsColumn
+    from tests.fakes.fake_zarr import FakeZarrAccess
+
+    n_obs = 40
+    cats = ["T cell", "B cell"]
+    codes = np.array([0] * 20 + [1] * 20, dtype=np.int8)
+    obs_index = np.array([f"c{i}" for i in range(n_obs)])
+
+    # 8 "NaN-producing" genes: opposite-sign means after pseudocount.
+    expression: dict[str, np.ndarray] = {}
+    nan_genes = [f"nan_gene_{i}" for i in range(8)]
+    for g in nan_genes:
+        arr = np.empty(n_obs, dtype="float32")
+        arr[:20] = -0.5  # T cell
+        arr[20:] = 0.5  # B cell
+        expression[g] = arr
+
+    # 2 "Inf-producing" genes: mean_a + PSEUDO == 0 exactly. We use float64
+    # because float32(-1e-3) doesn't exactly round-trip to cancel PSEUDO=1e-3
+    # in float64 arithmetic, so we'd get a tiny non-zero value instead of Inf.
+    inf_genes = ["inf_gene_0", "inf_gene_1"]
+    for g in inf_genes:
+        expression[g] = np.concatenate([
+            np.full(20, -1e-3, dtype="float64"),  # mean_a + PSEUDO == 0
+            np.full(20, 0.5, dtype="float64"),
+        ])
+
+    # One "real top" gene with a clear large finite |LFC|
+    expression["real_top"] = np.concatenate([
+        np.full(20, -0.001, dtype="float32"),
+        np.full(20, -0.142, dtype="float32"),
+    ])
+
+    # Three "background" genes with finite low |LFC|. They must rank above
+    # any non-finite-LFC gene even though their |LFC| is small.
+    background_genes = ["bg_0", "bg_1", "bg_2"]
+    for i, g in enumerate(background_genes):
+        expression[g] = np.concatenate([
+            np.full(20, 0.10 + 0.01 * i, dtype="float32"),
+            np.full(20, 0.12 + 0.01 * i, dtype="float32"),
+        ])
+
+    var = nan_genes + inf_genes + ["real_top"] + background_genes
+    fake = FakeZarrAccess(
+        n_obs=n_obs,
+        n_var=len(var),
+        obs={
+            "cell_type": ObsColumn(
+                name="cell_type",
+                dtype="categorical",
+                values=codes,
+                categories=cats,
+                index=obs_index,
+            ),
+        },
+        var=var,
+        expression=expression,
+    )
+
+    tool = compare_groups_tool(fake, limit_bytes=32_768, concurrency=4)
+    result = await tool.func(
+        obs_column="cell_type", group_a="T cell", group_b="B cell", n=4
+    )
+
+    symbols = [g["symbol"] for g in result["genes"]]
+    # 'real_top' has the largest finite |LFC| and must rank #1
+    assert symbols[0] == "real_top", symbols
+    # No non-finite-LFC gene should appear — there are 4 finite entries
+    # available (real_top + 3 backgrounds), so n=4 must not include any
+    # NaN- or Inf-LFC gene.
+    assert not any(s.startswith("nan_gene_") for s in symbols), symbols
+    assert not any(s.startswith("inf_gene_") for s in symbols), symbols
