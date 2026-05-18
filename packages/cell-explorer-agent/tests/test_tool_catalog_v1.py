@@ -73,3 +73,25 @@ async def test_existing_tools_present_with_or_without_flag(fake_zarr):
     assert "set_embedding" in names_off
     assert "set_color_by_gene" in names_off
     assert "set_color_by_category" in names_off
+
+
+from tests.fakes.fake_strata import FakeStrataAccess
+
+
+def test_strata_tool_registered_when_strata_passed(fake_zarr):
+    from cell_explorer_agent.config import AgentConfig
+    from cell_explorer_agent.tools import build_v1_catalog
+    strata = FakeStrataAccess.default()
+    catalog = build_v1_catalog(fake_zarr, config=AgentConfig(), strata=strata)
+    assert catalog.get("compare_groups_via_strata") is not None
+    # Existing tool also still present
+    assert catalog.get("compare_groups") is not None
+
+
+def test_strata_tool_not_registered_when_strata_omitted(fake_zarr):
+    from cell_explorer_agent.config import AgentConfig
+    from cell_explorer_agent.tools import build_v1_catalog
+    catalog = build_v1_catalog(fake_zarr, config=AgentConfig())
+    assert catalog.get("compare_groups_via_strata") is None
+    # Existing tool still present
+    assert catalog.get("compare_groups") is not None
