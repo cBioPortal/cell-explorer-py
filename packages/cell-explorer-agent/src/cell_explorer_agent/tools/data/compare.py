@@ -68,9 +68,14 @@ def compare_groups_tool(
         # Task 3 will check strata here. For Task 2, always X-scan.
         method = "via_xscan"
         names = await z.var_names()
-        sum_x_a, sum_xx_a, sum_x_b, sum_xx_b = await _xscan_sums(
-            z, names, a_mask, b_mask, concurrency=concurrency,
-        )
+        try:
+            sum_x_a, sum_xx_a, sum_x_b, sum_xx_b = await _xscan_sums(
+                z, names, a_mask, b_mask, concurrency=concurrency,
+            )
+        except KeyError as exc:
+            return {"error": f"gene {exc!s} not found"}
+        except Exception as exc:
+            return {"error": f"failed to read expression data: {exc}"}
 
         return _assemble_result(
             obs_column=obs_column,

@@ -61,7 +61,12 @@ async def two_adapters(fixture_server):
 
 
 async def test_strata_path_matches_xscan_path_top_ranked_genes(two_adapters):
-    """Both tools, identical args, should agree on the TOP gene by absolute LFC.
+    """Both tools, identical args, should agree on the top gene.
+
+    compare_groups now ranks by Cohen's d (Task 2 of #123); compare_groups_via_strata
+    still ranks by |LFC|. On this fixture both metrics happen to surface the same
+    top gene, which is the only invariant this test asserts. Task 6 of the same
+    issue rewrites this whole test file against the unified compare_groups tool.
 
     Fixture: 50 cells × 10 genes. cell_type A=20, B=20, C=10. Same query
     through both code paths should pick the same most-divergent gene.
