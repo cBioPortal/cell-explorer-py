@@ -284,8 +284,9 @@ async def test_compare_groups_handles_zero_variance_genes(fake_zarr):
     """
     import numpy as np
 
-    # mutate the default fake: replace gene2 (MS4A1) with a constant-per-group
-    # expression so it produces non-finite Cohen's d
+    # fake_zarr is function-scoped so this mutation doesn't leak between tests.
+    # Replace MS4A1's expression with a constant-per-group array so it
+    # produces non-finite Cohen's d (var = 0 within each group).
     arr = np.empty(fake_zarr.n_obs, dtype="float32")
     codes = fake_zarr.obs["cell_type"].values
     arr[codes == 0] = 1.0  # T cell
