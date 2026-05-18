@@ -13,8 +13,6 @@ Two internal paths:
     inline. Both paths funnel through compare_stats.compute_stats for
     byte-identical math.
 
-Task 3 wires the strata path; Task 2 only implements the X-scan path
-and the new output schema.
 """
 
 from __future__ import annotations
@@ -74,10 +72,11 @@ def compare_groups_tool(
         if strata_inputs is not None:
             method = "via_coarse_strata"
             sum_x_a, sum_xx_a, sum_x_b, sum_xx_b = strata_inputs
-            # n_a/n_b from the obs mask above are the reported group sizes —
-            # we don't read coarse.n_cells[idx], so both paths report the
-            # same denominator even if the strata table and the obs mask
-            # could in principle diverge.
+            # Use n_a/n_b from the obs mask, not coarse.n_cells[idx], so both
+            # paths report the same denominator. Precondition: strata were
+            # built from the same cell population reflected in this obs column;
+            # if they diverge (e.g., stale strata) the strata means/variances
+            # silently drift from the X-scan path's.
         else:
             method = "via_xscan"
             try:
