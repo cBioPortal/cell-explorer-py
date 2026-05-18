@@ -83,7 +83,7 @@ async def test_strata_path_matches_xscan_path_top_ranked_genes(two_adapters):
     assert "error" not in result_s, result_s
 
     # method label distinguishes the two paths
-    assert result_x["method"] == "log2_fold_change_fast_heuristic"
+    assert result_x["method"] == "via_xscan"
     assert result_s["method"] == "log2_fold_change_via_coarse_strata"
 
     # Both paths agree on the top gene
