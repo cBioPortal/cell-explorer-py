@@ -2,9 +2,6 @@
 
 from cell_explorer_agent.config import AgentConfig
 from cell_explorer_agent.tools.data.compare import compare_groups_tool
-from cell_explorer_agent.tools.data.compare_via_strata import (
-    compare_groups_via_strata_tool,
-)
 from cell_explorer_agent.tools.strata_protocol import StrataAccess
 from cell_explorer_agent.tools.data.genes import (
     gene_expression_summary_tool,
@@ -74,7 +71,14 @@ def build_v1_catalog(
     cat.register(search_genes_tool(z, limit_bytes=lim))
     cat.register(gene_expression_summary_tool(z, limit_bytes=lim))
     cat.register(top_expressed_genes_tool(z, limit_bytes=lim, concurrency=config.gene_scan_concurrency))
-    cat.register(compare_groups_tool(z, limit_bytes=lim, concurrency=config.gene_scan_concurrency))
+    cat.register(
+        compare_groups_tool(
+            z,
+            limit_bytes=lim,
+            concurrency=config.gene_scan_concurrency,
+            strata=strata,
+        )
+    )
 
     # ui_action
     cat.register(set_embedding_tool(z))
@@ -92,13 +96,6 @@ def build_v1_catalog(
     cat.register(remove_summary_obs_column_tool())
     cat.register(remove_summary_gene_tool())
     cat.register(clear_summary_tool())
-
-    if strata is not None:
-        cat.register(
-            compare_groups_via_strata_tool(
-                z, strata, limit_bytes=config.tool_result_max_bytes,
-            )
-        )
 
     # Experimental ui_action tools (Plan 2 view-config redesign).
     # Plan 3 will flip the flag default to True.

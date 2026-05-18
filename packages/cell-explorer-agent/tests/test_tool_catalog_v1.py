@@ -78,20 +78,20 @@ async def test_existing_tools_present_with_or_without_flag(fake_zarr):
 from tests.fakes.fake_strata import FakeStrataAccess
 
 
-def test_strata_tool_registered_when_strata_passed(fake_zarr):
+def test_compare_groups_registered_once_with_strata(fake_zarr):
     from cell_explorer_agent.config import AgentConfig
     from cell_explorer_agent.tools import build_v1_catalog
     strata = FakeStrataAccess.default()
     catalog = build_v1_catalog(fake_zarr, config=AgentConfig(), strata=strata)
-    assert catalog.get("compare_groups_via_strata") is not None
-    # Existing tool also still present
-    assert catalog.get("compare_groups") is not None
+    names = [t.name for t in catalog.all()]
+    assert names.count("compare_groups") == 1
+    assert "compare_groups_via_strata" not in names
 
 
-def test_strata_tool_not_registered_when_strata_omitted(fake_zarr):
+def test_compare_groups_registered_once_without_strata(fake_zarr):
     from cell_explorer_agent.config import AgentConfig
     from cell_explorer_agent.tools import build_v1_catalog
-    catalog = build_v1_catalog(fake_zarr, config=AgentConfig())
-    assert catalog.get("compare_groups_via_strata") is None
-    # Existing tool still present
-    assert catalog.get("compare_groups") is not None
+    catalog = build_v1_catalog(fake_zarr, config=AgentConfig(), strata=None)
+    names = [t.name for t in catalog.all()]
+    assert names.count("compare_groups") == 1
+    assert "compare_groups_via_strata" not in names
