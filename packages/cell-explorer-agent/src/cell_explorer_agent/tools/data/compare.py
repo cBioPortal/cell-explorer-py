@@ -75,8 +75,9 @@ def compare_groups_tool(
             method = "via_coarse_strata"
             sum_x_a, sum_xx_a, sum_x_b, sum_xx_b = strata_inputs
             # n_a/n_b from the obs mask above are the reported group sizes —
-            # we don't read coarse.n_cells[idx] so both paths use the same
-            # denominator. (Old compare_via_strata.py used coarse.n_cells.)
+            # we don't read coarse.n_cells[idx], so both paths report the
+            # same denominator even if the strata table and the obs mask
+            # could in principle diverge.
         else:
             method = "via_xscan"
             try:
