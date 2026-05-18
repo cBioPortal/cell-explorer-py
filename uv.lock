@@ -4202,6 +4202,7 @@ dependencies = [
 
 [package.optional-dependencies]
 test = [
+    { name = "cell2zarr" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
@@ -4210,6 +4211,7 @@ test = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9" },
     { name = "anndata", specifier = ">=0.11" },
+    { name = "cell2zarr", marker = "extra == 'test'", editable = "packages/cell2zarr" },
     { name = "fsspec", specifier = ">=2024.0" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pandas", specifier = ">=2.0" },

@@ -1,0 +1,14 @@
+{
+  "attributes": {
+    "axes": [
+      "cell_type",
+      "donor"
+    ],
+    "n_strata": 6,
+    "derived_from": null,
+    "collapsed_axes": [],
+    "schema_version": "1.0"
+  },
+  "zarr_format": 3,
+  "node_type": "group"
+}
