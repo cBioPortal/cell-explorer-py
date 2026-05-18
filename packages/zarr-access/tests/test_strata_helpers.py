@@ -87,3 +87,46 @@ def test_strata_frac_expressing_zero_cells():
     )
     frac = strata_frac_expressing(table)
     np.testing.assert_array_equal(frac, np.zeros((1, 2), dtype=np.float32))
+
+
+from zarr_access.strata_helpers import strata_variances
+
+
+def test_strata_variances_basic():
+    # stratum 0: 4 cells, gene 0 values [1, 2, 3, 4]
+    #   sum_x=10, sum_xx=30, n=4 -> var = (30 - 100/4) / 3 = 5/3 ≈ 1.6667
+    table = CoarseStrataTable(
+        kind="coarse",
+        slug="test",
+        axes=["axis"],
+        stratum_keys=np.array([["s0"]]),
+        gene_indices=None,
+        sum_x=np.array([[10.0]], dtype=np.float32),
+        sum_xx=np.array([[30.0]], dtype=np.float32),
+        nnz=np.array([[4]], dtype=np.int32),
+        n_cells=np.array([4], dtype=np.int32),
+        schema_version="1.0",
+    )
+    variances = strata_variances(table)
+    np.testing.assert_allclose(variances, [[5 / 3]], rtol=1e-6)
+
+
+def test_strata_variances_edge_cases():
+    # n=0 -> variance=0 (undefined)
+    # n=1 -> variance=0 (sample variance is undefined for n=1)
+    table0 = make_table(n_strata=1, sum_x_rows=[[0.0]], n_cells=[0])
+    table1 = make_table(n_strata=1, sum_x_rows=[[5.0]], n_cells=[1])
+    table1 = CoarseStrataTable(
+        kind="coarse",
+        slug="test",
+        axes=["axis"],
+        stratum_keys=table1.stratum_keys,
+        gene_indices=None,
+        sum_x=table1.sum_x,
+        sum_xx=np.array([[25.0]], dtype=np.float32),
+        nnz=np.array([[1]], dtype=np.int32),
+        n_cells=table1.n_cells,
+        schema_version="1.0",
+    )
+    assert strata_variances(table0)[0, 0] == 0.0
+    assert strata_variances(table1)[0, 0] == 0.0
