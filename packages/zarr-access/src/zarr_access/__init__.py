@@ -10,7 +10,7 @@ from zarr_access.strata_store import (
     find_coarse_by_axes,
     find_coarse_covering,
 )
-from zarr_access.strata_helpers import strata_means
+from zarr_access.strata_helpers import strata_means, strata_frac_expressing
 
 __all__ = [
     "AnnDataStore",
@@ -22,4 +22,5 @@ __all__ = [
     "find_coarse_by_axes",
     "find_coarse_covering",
     "strata_means",
+    "strata_frac_expressing",
 ]

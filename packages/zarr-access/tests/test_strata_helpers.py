@@ -43,3 +43,47 @@ def test_strata_means_zero_cells():
     table = make_table(n_strata=1, sum_x_rows=[[0.0, 0.0]], n_cells=[0])
     means = strata_means(table)
     np.testing.assert_array_equal(means, np.zeros((1, 2), dtype=np.float32))
+
+
+from zarr_access.strata_helpers import strata_frac_expressing
+
+
+def test_strata_frac_expressing_basic():
+    # stratum 0: n_cells=10, nnz=[5, 0, 10]   -> frac=[0.5, 0, 1]
+    # stratum 1: n_cells=4,  nnz=[1, 2, 4]    -> frac=[0.25, 0.5, 1]
+    sum_x = np.zeros((2, 3), dtype=np.float32)
+    table = CoarseStrataTable(
+        kind="coarse",
+        slug="test",
+        axes=["axis"],
+        stratum_keys=np.array([["s0"], ["s1"]]),
+        gene_indices=None,
+        sum_x=sum_x,
+        sum_xx=sum_x.copy(),
+        nnz=np.array([[5, 0, 10], [1, 2, 4]], dtype=np.int32),
+        n_cells=np.array([10, 4], dtype=np.int32),
+        schema_version="1.0",
+    )
+    frac = strata_frac_expressing(table)
+    np.testing.assert_array_equal(
+        frac,
+        np.array([[0.5, 0.0, 1.0], [0.25, 0.5, 1.0]], dtype=np.float32),
+    )
+
+
+def test_strata_frac_expressing_zero_cells():
+    table = make_table(n_strata=1, sum_x_rows=[[0.0, 0.0]], n_cells=[0])
+    table = CoarseStrataTable(
+        kind="coarse",
+        slug="test",
+        axes=["axis"],
+        stratum_keys=table.stratum_keys,
+        gene_indices=None,
+        sum_x=table.sum_x,
+        sum_xx=table.sum_xx,
+        nnz=np.zeros((1, 2), dtype=np.int32),
+        n_cells=table.n_cells,
+        schema_version=table.schema_version,
+    )
+    frac = strata_frac_expressing(table)
+    np.testing.assert_array_equal(frac, np.zeros((1, 2), dtype=np.float32))
