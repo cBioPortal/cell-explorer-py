@@ -6,6 +6,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from cell_explorer_agent.tools.strata_protocol import (
+    CoarseStrataResult,
+    StrataAccess,
+)
 from cell_explorer_agent.tools.zarr_protocol import ObsColumn, ObsColumnSpec
 
 
@@ -146,6 +150,33 @@ class AnnDataZarrAccess:
                 ))
             self._obs_columns_cache = specs
         return list(self._obs_columns_cache)
+
+
+@dataclass
+class StrataZarrAccess:
+    """Wraps a zarr_access.StrataStore to satisfy the StrataAccess Protocol.
+
+    Pure translation — no business logic. Mirrors AnnDataZarrAccess's shape.
+    """
+
+    store: Any  # zarr_access.StrataStore; Any to avoid importing here
+
+    def coarse_slugs(self) -> list[str]:
+        return self.store.coarse_slugs()
+
+    def coarse_axes(self, slug: str) -> list[str]:
+        return self.store.coarse_axes(slug)
+
+    async def read_coarse(self, slug: str) -> CoarseStrataResult:
+        table = await self.store.read_coarse(slug)
+        return CoarseStrataResult(
+            axes=table.axes,
+            stratum_keys=table.stratum_keys,
+            sum_x=table.sum_x,
+            sum_xx=table.sum_xx,
+            nnz=table.nnz,
+            n_cells=table.n_cells,
+        )
 
 
 def _decode_col_to_obs_column(name: str, data) -> ObsColumn:
