@@ -65,17 +65,25 @@ def compare_groups_tool(
         if n_a < 2 or n_b < 2:
             return {"error": "at least one group has < 2 cells; variance is undefined"}
 
-        # Task 3 will check strata here. For Task 2, always X-scan.
-        method = "via_xscan"
         names = await z.var_names()
-        try:
-            sum_x_a, sum_xx_a, sum_x_b, sum_xx_b = await _xscan_sums(
-                z, names, a_mask, b_mask, concurrency=concurrency,
-            )
-        except KeyError as exc:
-            return {"error": f"gene {exc!s} not found"}
-        except Exception as exc:
-            return {"error": f"failed to read expression data: {exc}"}
+
+        # Try strata fast path first.
+        strata_inputs = await _maybe_strata_sums(
+            strata, obs_column, group_a, group_b,
+        )
+        if strata_inputs is not None:
+            method = "via_coarse_strata"
+            sum_x_a, sum_xx_a, sum_x_b, sum_xx_b = strata_inputs
+        else:
+            method = "via_xscan"
+            try:
+                sum_x_a, sum_xx_a, sum_x_b, sum_xx_b = await _xscan_sums(
+                    z, names, a_mask, b_mask, concurrency=concurrency,
+                )
+            except KeyError as exc:
+                return {"error": f"gene {exc!s} not found"}
+            except Exception as exc:
+                return {"error": f"failed to read expression data: {exc}"}
 
         return _assemble_result(
             obs_column=obs_column,
@@ -198,4 +206,40 @@ def _assemble_result(
             "genes": genes,
         },
         limit_bytes=limit_bytes,
+    )
+
+
+async def _maybe_strata_sums(
+    strata: StrataAccess | None,
+    obs_column: str,
+    group_a: str,
+    group_b: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
+    """Return per-group (sum_x_a, sum_xx_a, sum_x_b, sum_xx_b) from the
+    first coarse strata table whose axes == [obs_column], or None if no
+    matching coarse table exists or the groups aren't present in it.
+    """
+    if strata is None:
+        return None
+    matching_slug: str | None = None
+    for slug in strata.coarse_slugs():
+        if strata.coarse_axes(slug) == [obs_column]:
+            matching_slug = slug
+            break
+    if matching_slug is None:
+        return None
+
+    coarse = await strata.read_coarse(matching_slug)
+    keys_col0 = coarse.stratum_keys[:, 0]
+    a_rows = np.where(keys_col0 == group_a)[0]
+    b_rows = np.where(keys_col0 == group_b)[0]
+    if len(a_rows) == 0 or len(b_rows) == 0:
+        # Group not present in the coarse table — fall back to X-scan.
+        return None
+    a_idx, b_idx = int(a_rows[0]), int(b_rows[0])
+    return (
+        coarse.sum_x[a_idx],
+        coarse.sum_xx[a_idx],
+        coarse.sum_x[b_idx],
+        coarse.sum_xx[b_idx],
     )

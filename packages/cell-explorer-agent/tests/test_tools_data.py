@@ -300,3 +300,46 @@ async def test_compare_groups_handles_zero_variance_genes(fake_zarr):
     # CD8A should still be the top marker (T cell boost is finite + large d)
     symbols = [g["symbol"] for g in result["genes"]]
     assert symbols[0] == "CD8A", symbols
+
+
+async def test_compare_groups_uses_strata_when_available(fake_zarr):
+    """When a coarse table covers obs_column, the strata fast path is used."""
+    from tests.fakes.fake_strata import FakeStrataAccess
+
+    strata = FakeStrataAccess.default(var_names=fake_zarr.var)
+    tool = compare_groups_tool(
+        fake_zarr, limit_bytes=32_768, concurrency=4, strata=strata,
+    )
+    result = await tool.func(
+        obs_column="cell_type", group_a="T cell", group_b="B cell", n=3
+    )
+    assert "error" not in result, result
+    assert result["method"] == "via_coarse_strata"
+    assert len(result["genes"]) == 3
+
+
+async def test_compare_groups_falls_back_to_xscan_when_no_matching_coarse(fake_zarr):
+    """Strata exists but covers a different axis -> X-scan fallback."""
+    from tests.fakes.fake_strata import FakeStrataAccess
+
+    # Build a strata where the only coarse axis is 'donor_id', not 'cell_type'.
+    strata = FakeStrataAccess.with_axis(axis="donor_id", var_names=fake_zarr.var)
+    tool = compare_groups_tool(
+        fake_zarr, limit_bytes=32_768, concurrency=4, strata=strata,
+    )
+    result = await tool.func(
+        obs_column="cell_type", group_a="T cell", group_b="B cell", n=3
+    )
+    assert "error" not in result, result
+    assert result["method"] == "via_xscan"
+
+
+async def test_compare_groups_falls_back_to_xscan_when_no_strata(fake_zarr):
+    """No strata wired in at all -> X-scan."""
+    tool = compare_groups_tool(
+        fake_zarr, limit_bytes=32_768, concurrency=4, strata=None,
+    )
+    result = await tool.func(
+        obs_column="cell_type", group_a="T cell", group_b="B cell", n=3
+    )
+    assert result["method"] == "via_xscan"

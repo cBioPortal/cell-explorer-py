@@ -26,32 +26,58 @@ class FakeStrataAccess:
     coarse_tables: dict[str, CoarseStrataResult] = field(default_factory=dict)
 
     @classmethod
-    def default(cls) -> "FakeStrataAccess":
+    def default(cls, var_names: list[str] | None = None) -> "FakeStrataAccess":
         n_strata = 3
-        n_genes = 50
+        n_genes = len(var_names) if var_names is not None else 50
         stratum_keys = np.array([["T cell"], ["B cell"], ["Monocyte"]])
         # cell_type cardinalities: arbitrary-but-fixed split summing to 100
         n_cells = np.array([34, 33, 33], dtype=np.int32)
         # Deterministic sums: each stratum gets distinct per-gene patterns
         sum_x = np.zeros((n_strata, n_genes), dtype=np.float32)
-        # T-cell stratum: CD8A (gene 0) elevated so log-fold tests can rank it
-        sum_x[0, 0] = 200.0   # T cell CD8A
-        sum_x[1, 0] = 20.0    # B cell CD8A
-        sum_x[2, 0] = 20.0    # Monocyte CD8A
-        # MS4A1 (gene 2): elevated in B cells
-        sum_x[0, 2] = 10.0
-        sum_x[1, 2] = 150.0
-        sum_x[2, 2] = 10.0
+        # T-cell stratum: gene 0 elevated so compare_groups can rank it
+        sum_x[0, 0] = 200.0   # T cell gene 0
+        sum_x[1, 0] = 20.0    # B cell gene 0
+        sum_x[2, 0] = 20.0    # Monocyte gene 0
+        if n_genes > 2:
+            # gene 2: elevated in B cells
+            sum_x[0, 2] = 10.0
+            sum_x[1, 2] = 150.0
+            sum_x[2, 2] = 10.0
         # Background expression for the other genes
         for j in range(n_genes):
             if j in (0, 2):
                 continue
             sum_x[:, j] = [50.0, 50.0, 50.0]
-        sum_xx = sum_x * sum_x  # rough placeholder, not used by compare_groups path
+        sum_xx = sum_x * sum_x  # rough placeholder
         nnz = np.full((n_strata, n_genes), 20, dtype=np.int32)
         return cls(coarse_tables={
             "cell_type": CoarseStrataResult(
                 axes=["cell_type"],
+                stratum_keys=stratum_keys,
+                sum_x=sum_x,
+                sum_xx=sum_xx,
+                nnz=nnz,
+                n_cells=n_cells,
+            ),
+        })
+
+    @classmethod
+    def with_axis(cls, axis: str, var_names: list[str] | None = None) -> "FakeStrataAccess":
+        """Return a strata with one coarse table whose single axis is `axis`.
+
+        The stratum_keys use generic labels (donor_1, donor_2, …) since
+        callers of this factory only test routing (no group is fetched).
+        """
+        n_strata = 3
+        n_genes = len(var_names) if var_names is not None else 50
+        stratum_keys = np.array([[f"{axis}_1"], [f"{axis}_2"], [f"{axis}_3"]])
+        n_cells = np.array([34, 33, 33], dtype=np.int32)
+        sum_x = np.full((n_strata, n_genes), 10.0, dtype=np.float32)
+        sum_xx = sum_x * sum_x
+        nnz = np.full((n_strata, n_genes), 5, dtype=np.int32)
+        return cls(coarse_tables={
+            axis: CoarseStrataResult(
+                axes=[axis],
                 stratum_keys=stratum_keys,
                 sum_x=sum_x,
                 sum_xx=sum_xx,
