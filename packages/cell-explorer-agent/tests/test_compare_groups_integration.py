@@ -35,8 +35,9 @@ def _find_free_port() -> int:
         return s.getsockname()[1]
 
 
-@pytest_asyncio.fixture
+@pytest_asyncio.fixture(scope="module")
 async def fixture_server():
+    """Serve packages/zarr-access/tests/fixtures over HTTP on a random port."""
     app = web.Application()
     app.router.add_static("/", FIXTURE_DIR, show_index=True)
     port = _find_free_port()
@@ -50,8 +51,9 @@ async def fixture_server():
         await runner.cleanup()
 
 
-@pytest_asyncio.fixture
+@pytest_asyncio.fixture(scope="module")
 async def adapters(fixture_server):
+    """Open AnnData + Strata adapters against the strata-tiny.zarr fixture."""
     url = f"{fixture_server}/strata-tiny.zarr"
     zarr_store = await ZarrStore.open(url)
     anndata = await AnnDataStore.open(zarr_store)
@@ -75,10 +77,12 @@ async def test_compare_groups_uses_strata_on_fixture(adapters):
 
 
 async def test_compare_groups_falls_back_when_obs_column_not_in_strata(adapters):
-    """An obs_column not covered by the fixture's coarse tables -> via_xscan
-    OR an obs-column-not-found error (depending on whether the fixture has
-    a 'donor' column at all). Both outcomes are acceptable; the test verifies
-    that the unified tool's behavior is one of those two — not a crash.
+    """'donor' is in the fixture's obs but has no coarse strata table -> via_xscan.
+
+    The fixture carries 'cell_type' (covered by a coarse table) and 'donor'
+    (not covered). Querying on 'donor' should skip the strata fast-path and
+    fall back to the X-scan path. If the fixture is ever extended to add a
+    coarse table for 'donor', this test should be updated accordingly.
     """
     adapter, strata = adapters
     catalog = build_v1_catalog(adapter, config=AgentConfig(), strata=strata)
@@ -88,7 +92,8 @@ async def test_compare_groups_falls_back_when_obs_column_not_in_strata(adapters)
     result = await tool.func(
         obs_column="donor", group_a="d1", group_b="d2"
     )
-    assert ("error" in result) or (result["method"] == "via_xscan"), result
+    assert "error" not in result, result
+    assert result["method"] == "via_xscan", result
 
 
 async def test_compare_groups_paths_agree_on_fixture(adapters):
