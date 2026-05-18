@@ -1,7 +1,6 @@
 """Unit tests for the shared compute_stats helper."""
 
 import numpy as np
-import pytest
 
 from cell_explorer_agent.tools.data.compare_stats import compute_stats
 
@@ -59,14 +58,18 @@ def test_compute_stats_clips_negative_variance_from_float_noise():
     cancellation when stored sums are large and means are large vs variance.
     Must clip to 0 so sqrt(var) doesn't produce NaN downstream.
     """
-    # Construct a near-zero-variance scenario where float32 cancellation
-    # produces a tiny negative residual. Use sum_x = 5000 over n=5 (mean=1000)
-    # with sum_xx exactly matching the squared-mean case.
-    n = 5
-    sum_x = np.array([5000.0], dtype="float32")
-    # sum_xx = sum_x^2 / n exactly = 5000000.0; storing in float32 may
-    # round-trip imperfectly, but the function should clip negatives anyway.
-    sum_xx = np.array([5000000.0], dtype="float32")
+    # n=100 cells each at mean=100_000: sums are large enough that storing
+    # them in float32 causes catastrophic cancellation in sum_xx - sum_x**2/n.
+    n = 100
+    mean = 100_000.0
+    sum_x = np.array([n * mean], dtype="float32")    # 10_000_000
+    sum_xx = np.array([n * mean**2], dtype="float32")  # 1e12, truncated in float32
+
+    # Verify this test setup actually triggers the cancellation: compute the
+    # raw (unclipped) sample variance in float64 from the float32 sums and
+    # confirm it is negative before the np.maximum clamp fires.
+    raw = (sum_xx.astype("float64") - sum_x.astype("float64") ** 2 / n) / (n - 1)
+    assert raw[0] < 0, f"test setup didn't trigger cancellation, raw={raw[0]}"
 
     out = compute_stats(sum_x, sum_xx, n, sum_x, sum_xx, n)
 
