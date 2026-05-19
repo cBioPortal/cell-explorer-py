@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from cell_explorer_agent.tools.strata_protocol import (
+    AtomicStrataResult,
     CoarseStrataResult,
     StrataAccess,
 )
@@ -170,6 +171,23 @@ class StrataZarrAccess:
     async def read_coarse(self, slug: str) -> CoarseStrataResult:
         table = await self.store.read_coarse(slug)
         return CoarseStrataResult(
+            axes=table.axes,
+            stratum_keys=table.stratum_keys,
+            sum_x=table.sum_x,
+            sum_xx=table.sum_xx,
+            nnz=table.nnz,
+            n_cells=table.n_cells,
+        )
+
+    def has_atomic(self) -> bool:
+        return self.store.has_atomic()
+
+    def atomic_axes(self) -> list[str] | None:
+        return self.store.atomic_axes()
+
+    async def read_atomic(self) -> AtomicStrataResult:
+        table = await self.store.read_atomic()
+        return AtomicStrataResult(
             axes=table.axes,
             stratum_keys=table.stratum_keys,
             sum_x=table.sum_x,

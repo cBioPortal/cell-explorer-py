@@ -389,3 +389,90 @@ async def test_compare_groups_strata_and_xscan_produce_identical_stats(fake_zarr
         np.testing.assert_allclose(gs["mean_b"], gx["mean_b"], atol=1e-9)
         np.testing.assert_allclose(gs["var_a"], gx["var_a"], atol=1e-9)
         np.testing.assert_allclose(gs["var_b"], gx["var_b"], atol=1e-9)
+
+
+async def test_compare_groups_uses_atomic_when_no_coarse_matches(fake_zarr):
+    """When no coarse covers obs_column but atomic does, the atomic
+    fast path engages (method='via_atomic_strata') and aggregation across
+    the atomic table's other axes produces a result.
+    """
+    from tests.fakes.fake_strata import FakeStrataAccess
+
+    # Atomic covers (cell_type, synth) but there is NO coarse for cell_type.
+    strata = FakeStrataAccess.with_atomic(
+        axes=["cell_type", "synth"],
+        stratum_values={
+            "cell_type": ["T cell", "B cell", "Monocyte"],
+            "synth": ["p", "q"],
+        },
+        var_names=fake_zarr.var,
+    )
+    tool = compare_groups_tool(
+        fake_zarr, limit_bytes=32_768, concurrency=4, strata=strata,
+    )
+    result = await tool.func(
+        obs_column="cell_type", group_a="T cell", group_b="B cell", n=3
+    )
+    assert "error" not in result, result
+    assert result["method"] == "via_atomic_strata"
+    assert len(result["genes"]) == 3
+
+
+async def test_compare_groups_falls_back_to_xscan_when_atomic_doesnt_cover_obs_column(fake_zarr):
+    """Atomic exists but doesn't include obs_column -> X-scan fallback."""
+    from tests.fakes.fake_strata import FakeStrataAccess
+
+    # Atomic covers ('donor', 'phase') only; the query is on 'cell_type'.
+    strata = FakeStrataAccess.with_atomic(
+        axes=["donor", "phase"],
+        var_names=fake_zarr.var,
+    )
+    tool = compare_groups_tool(
+        fake_zarr, limit_bytes=32_768, concurrency=4, strata=strata,
+    )
+    result = await tool.func(
+        obs_column="cell_type", group_a="T cell", group_b="B cell", n=3
+    )
+    assert "error" not in result, result
+    assert result["method"] == "via_xscan"
+
+
+async def test_compare_groups_atomic_and_xscan_produce_identical_stats(fake_zarr):
+    """The atomic-aggregation path must produce stats identical to X-scan
+    on the same data. Catches drift between atomic-aggregation and the
+    direct expression scan.
+    """
+    import numpy as np
+
+    from tests.fakes.fake_strata import FakeStrataAccess
+
+    # Build an atomic strata whose sums come directly from fake_zarr.expression,
+    # partitioned by (cell_type, synth) — so aggregation across the synth
+    # axis is exercised, not skipped.
+    strata = FakeStrataAccess.from_zarr_data_atomic(fake_zarr)
+
+    tool_with = compare_groups_tool(
+        fake_zarr, limit_bytes=32_768, concurrency=4, strata=strata,
+    )
+    tool_without = compare_groups_tool(
+        fake_zarr, limit_bytes=32_768, concurrency=4, strata=None,
+    )
+    args = dict(obs_column="cell_type", group_a="T cell", group_b="B cell", n=10)
+
+    result_atomic = await tool_with.func(**args)
+    result_xscan = await tool_without.func(**args)
+
+    assert result_atomic["method"] == "via_atomic_strata"
+    assert result_xscan["method"] == "via_xscan"
+
+    atomic_syms = [g["symbol"] for g in result_atomic["genes"]]
+    xscan_syms = [g["symbol"] for g in result_xscan["genes"]]
+    assert atomic_syms == xscan_syms
+
+    for ga, gx in zip(result_atomic["genes"], result_xscan["genes"]):
+        np.testing.assert_allclose(ga["cohens_d"], gx["cohens_d"], atol=1e-9)
+        np.testing.assert_allclose(ga["t_statistic"], gx["t_statistic"], atol=1e-9)
+        np.testing.assert_allclose(ga["mean_a"], gx["mean_a"], atol=1e-9)
+        np.testing.assert_allclose(ga["mean_b"], gx["mean_b"], atol=1e-9)
+        np.testing.assert_allclose(ga["var_a"], gx["var_a"], atol=1e-9)
+        np.testing.assert_allclose(ga["var_b"], gx["var_b"], atol=1e-9)

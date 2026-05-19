@@ -8,7 +8,10 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from cell_explorer_agent.tools.strata_protocol import CoarseStrataResult
+from cell_explorer_agent.tools.strata_protocol import (
+    AtomicStrataResult,
+    CoarseStrataResult,
+)
 
 
 @dataclass
@@ -24,6 +27,7 @@ class FakeStrataAccess:
     """
 
     coarse_tables: dict[str, CoarseStrataResult] = field(default_factory=dict)
+    atomic_table: AtomicStrataResult | None = None
 
     @classmethod
     def default(cls, var_names: list[str] | None = None) -> "FakeStrataAccess":
@@ -126,6 +130,98 @@ class FakeStrataAccess:
             ),
         })
 
+    @classmethod
+    def with_atomic(
+        cls,
+        axes: list[str],
+        stratum_values: dict[str, list[str]] | None = None,
+        var_names: list[str] | None = None,
+    ) -> "FakeStrataAccess":
+        """Atomic-only fixture with the given axes.
+
+        Stratum values per axis come from `stratum_values` when provided.
+        Axes without explicit values get synthetic `<axis>_a` / `<axis>_b`
+        labels — fine for routing tests that just assert `method ==
+        "via_atomic_strata"` and don't query real-looking groups on that axis.
+
+        For routing tests that query real group values (e.g. "T cell" vs
+        "B cell" on the `cell_type` axis), pass them via stratum_values
+        so the atomic table actually contains matching rows.
+        """
+        if not axes:
+            raise ValueError("axes must be non-empty")
+        n_genes = len(var_names) if var_names is not None else 50
+        stratum_values = stratum_values or {}
+        per_axis_values = [
+            stratum_values.get(a, [f"{a}_a", f"{a}_b"]) for a in axes
+        ]
+        rows = _cartesian_product(per_axis_values)
+        stratum_keys = np.array(rows, dtype=object)
+        n_strata = stratum_keys.shape[0]
+        n_cells = np.full(n_strata, 10, dtype=np.int32)
+        sum_x = np.full((n_strata, n_genes), 1.0, dtype=np.float32)
+        sum_xx = np.full((n_strata, n_genes), 1.0, dtype=np.float32)
+        nnz = np.full((n_strata, n_genes), 5, dtype=np.int32)
+        return cls(atomic_table=AtomicStrataResult(
+            axes=list(axes),
+            stratum_keys=stratum_keys,
+            sum_x=sum_x,
+            sum_xx=sum_xx,
+            nnz=nnz,
+            n_cells=n_cells,
+        ))
+
+    @classmethod
+    def from_zarr_data_atomic(cls, fake_zarr, extra_axis: str = "synth") -> "FakeStrataAccess":
+        """Build an atomic strata (cell_type × extra_axis) whose sums match
+        fake_zarr.expression exactly, partitioned by a synthetic axis.
+
+        Used by cross-path equivalence tests for the atomic fallback: the
+        atomic table has MORE rows than a coarse on cell_type (because of
+        the extra axis), so aggregation across the extra axis is exercised
+        — and the aggregated result must match what X-scan produces.
+        """
+        col = fake_zarr.obs["cell_type"]
+        cats = list(col.categories)
+        codes = col.values
+        n_obs = fake_zarr.n_obs
+        # Synthetic axis: first half of cells = 'p', second half = 'q'.
+        synth = np.array(["p"] * (n_obs // 2) + ["q"] * (n_obs - n_obs // 2))
+
+        # Enumerate non-empty (cell_type, synth) buckets.
+        buckets: list[tuple[str, str, np.ndarray]] = []
+        for s_idx, cat_name in enumerate(cats):
+            for synth_val in ("p", "q"):
+                mask = (codes == s_idx) & (synth == synth_val)
+                if mask.any():
+                    buckets.append((cat_name, synth_val, mask))
+
+        n_strata = len(buckets)
+        n_genes = len(fake_zarr.var)
+        sum_x = np.zeros((n_strata, n_genes), dtype="float64")
+        sum_xx = np.zeros((n_strata, n_genes), dtype="float64")
+        nnz = np.zeros((n_strata, n_genes), dtype="int32")
+        n_cells = np.zeros(n_strata, dtype="int32")
+        for s_idx, (_ct, _synth, mask) in enumerate(buckets):
+            n_cells[s_idx] = int(mask.sum())
+            for g_idx, gene in enumerate(fake_zarr.var):
+                sub = fake_zarr.expression[gene][mask].astype("float64", copy=False)
+                sum_x[s_idx, g_idx] = float(sub.sum())
+                sum_xx[s_idx, g_idx] = float((sub * sub).sum())
+                nnz[s_idx, g_idx] = int((sub != 0).sum())
+
+        stratum_keys = np.array(
+            [[ct, synth_val] for ct, synth_val, _ in buckets], dtype=object,
+        )
+        return cls(atomic_table=AtomicStrataResult(
+            axes=["cell_type", extra_axis],
+            stratum_keys=stratum_keys,
+            sum_x=sum_x,
+            sum_xx=sum_xx,
+            nnz=nnz,
+            n_cells=n_cells,
+        ))
+
     def coarse_slugs(self) -> list[str]:
         return sorted(self.coarse_tables.keys())
 
@@ -138,3 +234,22 @@ class FakeStrataAccess:
         if slug not in self.coarse_tables:
             raise KeyError(slug)
         return self.coarse_tables[slug]
+
+    def has_atomic(self) -> bool:
+        return self.atomic_table is not None
+
+    def atomic_axes(self) -> list[str] | None:
+        return list(self.atomic_table.axes) if self.atomic_table else None
+
+    async def read_atomic(self) -> AtomicStrataResult:
+        if self.atomic_table is None:
+            raise ValueError("no atomic table")
+        return self.atomic_table
+
+
+def _cartesian_product(per_axis_values: list[list[str]]) -> list[list[str]]:
+    """Return all combinations of values across the given axes."""
+    rows: list[list[str]] = [[]]
+    for values in per_axis_values:
+        rows = [r + [v] for r in rows for v in values]
+    return rows

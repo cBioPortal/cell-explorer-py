@@ -65,28 +65,34 @@ def compare_groups_tool(
 
         names = await z.var_names()
 
-        # Try strata fast path first.
+        # Try fast paths in order of preference. n_a/n_b are always from the
+        # obs mask above so all paths report the same denominator (precondition:
+        # strata were built from the same cell population reflected in this obs
+        # column; if they diverge — e.g., stale strata — the strata means and
+        # variances silently drift from the X-scan path's).
         strata_inputs = await _maybe_strata_sums(
             strata, obs_column, group_a, group_b,
         )
         if strata_inputs is not None:
             method = "via_coarse_strata"
             sum_x_a, sum_xx_a, sum_x_b, sum_xx_b = strata_inputs
-            # Use n_a/n_b from the obs mask, not coarse.n_cells[idx], so both
-            # paths report the same denominator. Precondition: strata were
-            # built from the same cell population reflected in this obs column;
-            # if they diverge (e.g., stale strata) the strata means/variances
-            # silently drift from the X-scan path's.
         else:
-            method = "via_xscan"
-            try:
-                sum_x_a, sum_xx_a, sum_x_b, sum_xx_b = await _xscan_sums(
-                    z, names, a_mask, b_mask, concurrency=concurrency,
-                )
-            except KeyError as exc:
-                return {"error": f"gene {exc!s} not found"}
-            except Exception as exc:
-                return {"error": f"failed to read expression data: {exc}"}
+            atomic_inputs = await _maybe_atomic_sums(
+                strata, obs_column, group_a, group_b,
+            )
+            if atomic_inputs is not None:
+                method = "via_atomic_strata"
+                sum_x_a, sum_xx_a, sum_x_b, sum_xx_b = atomic_inputs
+            else:
+                method = "via_xscan"
+                try:
+                    sum_x_a, sum_xx_a, sum_x_b, sum_xx_b = await _xscan_sums(
+                        z, names, a_mask, b_mask, concurrency=concurrency,
+                    )
+                except KeyError as exc:
+                    return {"error": f"gene {exc!s} not found"}
+                except Exception as exc:
+                    return {"error": f"failed to read expression data: {exc}"}
 
         return _assemble_result(
             obs_column=obs_column,
@@ -245,4 +251,44 @@ async def _maybe_strata_sums(
         coarse.sum_xx[a_idx],
         coarse.sum_x[b_idx],
         coarse.sum_xx[b_idx],
+    )
+
+
+async def _maybe_atomic_sums(
+    strata: StrataAccess | None,
+    obs_column: str,
+    group_a: str,
+    group_b: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
+    """Aggregate atomic strata rows by an axis value to derive per-group sums.
+
+    The atomic table stores sums per (cell_type, donor, ...) tuple; for a
+    single-axis query we sum across all rows where the relevant axis column
+    matches group_a / group_b. Sums are additive so the result is numerically
+    identical to a coarse table on that axis.
+
+    Returns None when:
+      - no strata wired in
+      - dataset has no atomic table
+      - obs_column is not one of the atomic axes
+      - neither group has any matching atomic rows
+    """
+    if strata is None or not strata.has_atomic():
+        return None
+    axes = strata.atomic_axes() or []
+    if obs_column not in axes:
+        return None
+    axis_idx = axes.index(obs_column)
+
+    atomic = await strata.read_atomic()
+    keys_col = atomic.stratum_keys[:, axis_idx]
+    a_rows = np.where(keys_col == group_a)[0]
+    b_rows = np.where(keys_col == group_b)[0]
+    if len(a_rows) == 0 or len(b_rows) == 0:
+        return None
+    return (
+        atomic.sum_x[a_rows].sum(axis=0),
+        atomic.sum_xx[a_rows].sum(axis=0),
+        atomic.sum_x[b_rows].sum(axis=0),
+        atomic.sum_xx[b_rows].sum(axis=0),
     )

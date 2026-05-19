@@ -76,13 +76,12 @@ async def test_compare_groups_uses_strata_on_fixture(adapters):
     assert len(result["genes"]) <= 5
 
 
-async def test_compare_groups_falls_back_when_obs_column_not_in_strata(adapters):
-    """'donor' is in the fixture's obs but has no coarse strata table -> via_xscan.
+async def test_compare_groups_uses_atomic_when_donor_only_in_atomic(adapters):
+    """'donor' has no coarse table but IS one of the atomic axes -> via_atomic_strata.
 
-    The fixture carries 'cell_type' (covered by a coarse table) and 'donor'
-    (not covered). Querying on 'donor' should skip the strata fast-path and
-    fall back to the X-scan path. If the fixture is ever extended to add a
-    coarse table for 'donor', this test should be updated accordingly.
+    The fixture's coarse table covers only 'cell_type'. Its atomic table covers
+    ['cell_type', 'donor']. Querying on 'donor' should skip the coarse lookup
+    (no match) and engage the atomic fallback, aggregating across cell_type.
     """
     adapter, strata = adapters
     catalog = build_v1_catalog(adapter, config=AgentConfig(), strata=strata)
@@ -93,7 +92,7 @@ async def test_compare_groups_falls_back_when_obs_column_not_in_strata(adapters)
         obs_column="donor", group_a="d1", group_b="d2"
     )
     assert "error" not in result, result
-    assert result["method"] == "via_xscan", result
+    assert result["method"] == "via_atomic_strata", result
 
 
 async def test_compare_groups_paths_agree_on_fixture(adapters):
