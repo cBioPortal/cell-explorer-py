@@ -1,20 +1,13 @@
-"""End-to-end smoke test: real Langfuse SDK → local stub HTTP server.
+"""End-to-end smoke test: real Langfuse v3 SDK → local stub HTTP server.
 
-Verifies two acceptance criteria from the spec:
+Verifies:
   1. The SDK actually emits HTTP requests when configured.
-  2. Chat works end-to-end when Langfuse Cloud is unreachable
-     (we simulate this by pointing at a closed port — no request lands
-      but the agent must not error).
+  2. Chat works end-to-end when Langfuse Cloud is unreachable.
 
-Not run by default in unit-test sweeps; tagged 'integration' for opt-in.
-
-Implementation note: Langfuse 3.x uses OpenTelemetry OTLP (binary protobuf)
-to ship traces, so the stub server receives binary bodies, not JSON.
-The handler stores the raw path; we assert purely on the path being present.
+Not run by default; tagged 'integration' for opt-in.
 """
 
 import asyncio
-import json
 import socket
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -30,17 +23,17 @@ class _CaptureHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):  # noqa: N802
         length = int(self.headers.get("Content-Length", "0"))
-        body_bytes = self.rfile.read(length) if length else b""
-        # Langfuse 3.x sends OTLP binary protobuf — store path + raw length.
-        try:
-            body: object = json.loads(body_bytes.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            body = f"<binary {len(body_bytes)} bytes>"
-        _CaptureHandler.received.append({"path": self.path, "body": body})
+        body = self.rfile.read(length) if length else b""
+        # v3 sends binary OTLP protobuf; we just confirm something arrived.
+        _CaptureHandler.received.append(
+            {"path": self.path, "content_length": length, "body_repr": body[:80]}
+        )
+        # OTLP/HTTP ingestion expects a small protobuf response; an empty
+        # 200 is sufficient to make the SDK think delivery succeeded.
         self.send_response(200)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", "application/x-protobuf")
+        self.send_header("Content-Length", "0")
         self.end_headers()
-        self.wfile.write(b"{}")
 
     def log_message(self, *_args):
         pass
@@ -50,24 +43,6 @@ def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
-
-
-def _emit_observation(client) -> None:
-    """Emit a trace + generation using the Langfuse 3.x API."""
-    from langfuse import Langfuse
-    from langfuse.types import TraceContext
-
-    trace_id = Langfuse.create_trace_id()
-    tc = TraceContext(trace_id=trace_id)
-    obs = client.start_observation(
-        trace_context=tc,
-        name="integration-smoke",
-        as_type="generation",
-        model="m",
-        input="x",
-        output="y",
-    )
-    obs.end()
 
 
 @pytest.mark.integration
@@ -87,17 +62,23 @@ def test_sdk_emits_http_when_configured(monkeypatch):
         client = langfuse_client.get(cfg)
         assert client is not None
 
-        _emit_observation(client)
+        with client.start_as_current_observation(
+            name="integration-smoke", as_type="span"
+        ) as root:
+            gen = client.start_observation(
+                name="g", as_type="generation", model="m", input="x"
+            )
+            gen.update(output="y", usage_details={"input": 1, "output": 1})
+            gen.end()
+            client.update_current_trace(user_id="u")
         client.flush()
 
-        # Give the SDK's background thread a moment.
+        # Give the SDK's background thread a moment to flush.
         for _ in range(100):
             if _CaptureHandler.received:
                 break
             asyncio.run(asyncio.sleep(0.1))
-        assert _CaptureHandler.received, (
-            f"No telemetry HTTP received; got: {_CaptureHandler.received!r}"
-        )
+        assert _CaptureHandler.received, "No telemetry HTTP request landed at the stub server"
     finally:
         server.shutdown()
         langfuse_client._reset_for_tests()
@@ -105,7 +86,6 @@ def test_sdk_emits_http_when_configured(monkeypatch):
 
 @pytest.mark.integration
 def test_chat_survives_langfuse_unreachable(monkeypatch):
-    # Point at a port that's almost certainly closed.
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
     monkeypatch.setenv("LANGFUSE_HOST", "http://127.0.0.1:1")  # closed port
@@ -113,8 +93,15 @@ def test_chat_survives_langfuse_unreachable(monkeypatch):
     cfg = AgentConfig()
     client = langfuse_client.get(cfg)
     assert client is not None
-    # The SDK should not block the caller even when its target is unreachable.
-    _emit_observation(client)
-    # Flush returns even when delivery fails; this is the contract we depend on.
+    # SDK should not raise even when the target is unreachable.
+    with client.start_as_current_observation(
+        name="unreachable-smoke", as_type="span"
+    ) as root:
+        gen = client.start_observation(
+            name="g", as_type="generation", model="m", input="x"
+        )
+        gen.update(output="y", usage_details={"input": 1, "output": 1})
+        gen.end()
+        client.update_current_trace(user_id="u")
     client.flush()
     langfuse_client._reset_for_tests()

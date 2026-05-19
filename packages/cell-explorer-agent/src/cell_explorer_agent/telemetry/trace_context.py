@@ -1,9 +1,12 @@
-"""TurnTrace — async context manager that owns the per-turn Langfuse Trace.
+"""TurnTrace — async context manager that owns the per-turn Langfuse trace.
 
-Wraps the Langfuse SDK so the rest of the agent only sees this protocol.
-All redaction decisions are made once at __aenter__ based on the
-`is_public` flag and applied consistently to every subsequent add_*
-call.
+Wraps the Langfuse v3 SDK so the rest of the agent only sees this protocol.
+All redaction decisions are made once at __aenter__ based on `is_public`
+and applied to every subsequent add_* call.
+
+The root observation is opened via start_as_current_observation so that
+every child observation we create inside __aenter__/__aexit__ auto-attaches
+as a child of the root (and thus shares the trace).
 
 Failure mode: any exception inside the context manager is logged and
 swallowed — chat must never fail because of telemetry.
@@ -26,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 class TurnTrace:
-    """One Langfuse Trace per chat turn.
+    """One Langfuse trace per chat turn (v3 API).
 
     Usage:
         async with TurnTrace(client=..., user_id=..., ...) as trace:
@@ -57,7 +60,9 @@ class TurnTrace:
         self._environment = environment
         self._user_input = user_input
         self._view_state = view_state
-        self._trace: Any | None = None
+        # v3 internals
+        self._root_cm: Any | None = None
+        self._root_obs: Any | None = None
 
     async def __aenter__(self) -> "TurnTrace":
         if self._client is None:
@@ -70,24 +75,41 @@ class TurnTrace:
                 f"model:{self._model}",
                 f"visibility:{visibility}",
             ]
-            self._trace = self._client.trace(
+            # Root observation as current — children created via
+            # start_observation while we're in the with block will
+            # auto-attach as descendants.
+            self._root_cm = self._client.start_as_current_observation(
                 name="chat-turn",
-                user_id=self._user_id,
-                session_id=self._thread_id,
-                tags=tags,
+                as_type="span",
+                input=redact_user_input(self._user_input, public=self._is_public),
                 metadata={
                     "view_state": redact_view_state(self._view_state, public=self._is_public),
                     "dataset_slug": self._dataset_slug,
                 },
+            )
+            self._root_obs = self._root_cm.__enter__()
+            # Set trace-level fields (user/session/tags) once the root span
+            # is active — these belong on the implicit trace, not the span.
+            self._client.update_current_trace(
+                user_id=self._user_id,
+                session_id=self._thread_id,
+                tags=tags,
                 input=redact_user_input(self._user_input, public=self._is_public),
             )
         except Exception:
             logger.exception("TurnTrace: failed to open trace")
-            self._trace = None
+            self._root_cm = None
+            self._root_obs = None
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
-        # We don't suppress exceptions — return None (= False) so caller sees them.
+        # Always release the root context, then propagate the caller's exc.
+        if self._root_cm is not None:
+            try:
+                self._root_cm.__exit__(exc_type, exc, tb)
+            except Exception:
+                logger.exception("TurnTrace: failed to close trace")
+        # Returning None (= falsy) — don't suppress caller exceptions.
         return None
 
     def add_generation(
@@ -97,21 +119,25 @@ class TurnTrace:
         output_text: str,
         usage: dict[str, int],
     ) -> None:
-        if self._trace is None:
+        if self._root_obs is None:
             return
         try:
-            gen_input: Any
-            if self._is_public:
-                gen_input = input_messages
-            else:
-                gen_input = redact_user_input("", public=self._is_public)
-            self._trace.generation(
+            gen_input: Any = (
+                input_messages
+                if self._is_public
+                else redact_user_input("", public=False)
+            )
+            gen = self._client.start_observation(
                 name="llm-call",
-                model=self._model,
+                as_type="generation",
                 input=gen_input,
+                model=self._model,
+            )
+            gen.update(
                 output=redact_assistant_output(output_text, public=self._is_public),
                 usage_details=dict(usage) if isinstance(usage, dict) else None,
             )
+            gen.end()
         except Exception:
             logger.exception("TurnTrace: failed to add generation")
 
@@ -124,30 +150,36 @@ class TurnTrace:
         duration_ms: int,
         status: str,
     ) -> None:
-        if self._trace is None:
+        if self._root_obs is None:
             return
         try:
             level = "ERROR" if status == "error" else "DEFAULT"
             status_message: str | None = None
             if status == "error" and isinstance(result, dict) and "error" in result:
                 status_message = str(result["error"])
-            self._trace.span(
+            sp = self._client.start_observation(
                 name=f"tool:{name}",
+                as_type="span",
                 input=redact_tool_args(name, args, public=self._is_public),
+            )
+            sp.update(
                 output=redact_tool_result(result, public=self._is_public),
                 metadata={"duration_ms": duration_ms, "status": status},
                 level=level,
                 status_message=status_message,
             )
+            sp.end()
         except Exception:
             logger.exception("TurnTrace: failed to add tool span")
 
     def set_output(self, text: str) -> None:
-        if self._trace is None:
+        if self._root_obs is None:
             return
         try:
-            self._trace.update(
-                output=redact_assistant_output(text, public=self._is_public),
-            )
+            redacted = redact_assistant_output(text, public=self._is_public)
+            # Root span's output (visible on the span row).
+            self._root_obs.update(output=redacted)
+            # And the trace-level output (visible on the trace card in the UI).
+            self._client.update_current_trace(output=redacted)
         except Exception:
             logger.exception("TurnTrace: failed to set output")

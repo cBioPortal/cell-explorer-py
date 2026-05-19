@@ -66,16 +66,15 @@ async def test_agent_records_a_trace_per_turn(monkeypatch):
         events.append(ev)
 
     assert any(isinstance(e, Done) for e in events)
-    assert len(fake.traces) == 1
-    t = fake.traces[0]
-    assert t.user_id == "user-1"
-    assert t.session_id == "thread-abc"
-    assert "visibility:public" in t.tags
-    assert len(t.generations) == 1
-    assert t.generations[0].output == "hello"
-    assert t.generations[0].usage_details["input_tokens"] == 10
+    assert fake.root_observation is not None
+    assert fake.trace_field("user_id") == "user-1"
+    assert fake.trace_field("session_id") == "thread-abc"
+    assert "visibility:public" in fake.trace_field("tags")
+    assert len(fake.generations) == 1
+    assert fake.generations[0].output == "hello"
+    assert fake.generations[0].usage_details["input_tokens"] == 10
     # No tool spans this turn.
-    assert t.spans == []
+    assert fake.tool_spans == []
 
 
 async def test_agent_no_telemetry_context_skips_tracing(monkeypatch):
@@ -93,7 +92,7 @@ async def test_agent_no_telemetry_context_skips_tracing(monkeypatch):
 
     async for _ in agent.run(messages=[UserMessage(content="hi")], view_state=None):
         pass
-    assert fake.traces == []
+    assert fake.observations == [] and fake.trace_updates == []
 
 
 async def test_agent_private_dataset_redacts(monkeypatch):
@@ -121,9 +120,8 @@ async def test_agent_private_dataset_redacts(monkeypatch):
     ):
         pass
 
-    t = fake.traces[0]
-    assert "visibility:private" in t.tags
-    assert t.input == "[redacted]"
-    assert any(u.get("output") == "[redacted]" for u in t.updates)
-    assert t.metadata["view_state"] == {"_redacted": "view_state"}
-    assert t.generations[0].output == "[redacted]"
+    assert "visibility:private" in fake.trace_field("tags")
+    assert fake.root_observation.input == "[redacted]"
+    assert fake.trace_field("output") == "[redacted]"
+    assert fake.root_observation.metadata["view_state"] == {"_redacted": "view_state"}
+    assert fake.generations[0].output == "[redacted]"

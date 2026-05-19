@@ -35,24 +35,38 @@ async def test_public_dataset_trace_records_full_content(fake):
         )
         trace.set_output("Final assistant text.")
 
-    assert len(fake.traces) == 1
-    t = fake.traces[0]
-    assert t.name == "chat-turn"
-    assert t.user_id == "user-1"
-    assert t.session_id == "thread-abc"
-    assert "visibility:public" in t.tags
-    assert "dataset:pbmc3k" in t.tags
-    assert "model:claude-sonnet-4-6" in t.tags
-    assert t.input == "what are the top genes?"
-    assert t.metadata["view_state"] == {"embedding": "X_umap"}
-    # Output was set explicitly through set_output, which calls trace.update.
-    assert any(u.get("output") == "Final assistant text." for u in t.updates)
-    assert len(t.generations) == 1
-    assert t.generations[0].output == "Here are the top genes."
-    assert t.generations[0].usage_details["input_tokens"] == 100
-    assert len(t.spans) == 1
-    assert t.spans[0].name == "tool:top_expressed_genes"
-    assert t.spans[0].input == {"gene": "CD8A"}
+    # Root observation captured the user input.
+    root = fake.root_observation
+    assert root is not None
+    assert root.name == "chat-turn"
+    assert root.as_type == "span"
+    assert root.input == "what are the top genes?"
+    assert root.metadata["view_state"] == {"embedding": "X_umap"}
+
+    # Trace-level fields were set via update_current_trace.
+    assert fake.trace_field("user_id") == "user-1"
+    assert fake.trace_field("session_id") == "thread-abc"
+    tags = fake.trace_field("tags")
+    assert "visibility:public" in tags
+    assert "dataset:pbmc3k" in tags
+    assert "model:claude-sonnet-4-6" in tags
+
+    # Generation captured the LLM call.
+    assert len(fake.generations) == 1
+    gen = fake.generations[0]
+    assert gen.output == "Here are the top genes."
+    assert gen.usage_details["input_tokens"] == 100
+    assert gen.ended
+
+    # Tool span captured the dispatch.
+    assert len(fake.tool_spans) == 1
+    sp = fake.tool_spans[0]
+    assert sp.name == "tool:top_expressed_genes"
+    assert sp.input == {"gene": "CD8A"}
+    assert sp.ended
+
+    # Trace-level output was set via update_current_trace.
+    assert fake.trace_field("output") == "Final assistant text."
 
 
 async def test_private_dataset_trace_redacts_content(fake):
@@ -81,17 +95,19 @@ async def test_private_dataset_trace_redacts_content(fake):
         )
         trace.set_output("Sensitive final text.")
 
-    t = fake.traces[0]
-    assert "visibility:private" in t.tags
-    # Content redacted
-    assert t.input == "[redacted]"
-    assert t.metadata["view_state"] == {"_redacted": "view_state"}
-    assert any(u.get("output") == "[redacted]" for u in t.updates)
-    # Structural fields preserved
-    assert t.generations[0].output == "[redacted]"
-    assert t.generations[0].usage_details["input_tokens"] == 100  # structural — kept
-    assert t.spans[0].name == "tool:filter_by_ids"                # structural — kept
-    assert t.spans[0].input == {"_redacted": "tool_args", "tool": "filter_by_ids"}
+    tags = fake.trace_field("tags")
+    assert "visibility:private" in tags
+
+    # Content redacted on root and trace.
+    assert fake.root_observation.input == "[redacted]"
+    assert fake.root_observation.metadata["view_state"] == {"_redacted": "view_state"}
+    assert fake.trace_field("output") == "[redacted]"
+
+    # Structural fields preserved.
+    assert fake.generations[0].output == "[redacted]"
+    assert fake.generations[0].usage_details["input_tokens"] == 100
+    assert fake.tool_spans[0].name == "tool:filter_by_ids"
+    assert fake.tool_spans[0].input == {"_redacted": "tool_args", "tool": "filter_by_ids"}
 
 
 async def test_no_client_is_noop():
@@ -114,7 +130,6 @@ async def test_no_client_is_noop():
         )
         trace.add_tool_span(name="x", args={}, result={}, duration_ms=0, status="ok")
         trace.set_output("done")
-    # Reached here without raising — no-op behavior holds.
 
 
 async def test_anonymous_user_id_fallback(fake):
@@ -130,7 +145,7 @@ async def test_anonymous_user_id_fallback(fake):
         view_state=None,
     ) as trace:
         trace.set_output("done")
-    assert fake.traces[0].user_id == "anonymous"
+    assert fake.trace_field("user_id") == "anonymous"
 
 
 async def test_tool_span_error_sets_level_error(fake):
@@ -152,8 +167,9 @@ async def test_tool_span_error_sets_level_error(fake):
             duration_ms=5,
             status="error",
         )
-    assert fake.traces[0].spans[0].level == "ERROR"
-    assert fake.traces[0].spans[0].status_message == "boom"
+    sp = fake.tool_spans[0]
+    assert sp.level == "ERROR"
+    assert sp.status_message == "boom"
 
 
 async def test_exception_during_use_does_not_propagate_through_telemetry(fake):
@@ -176,4 +192,3 @@ async def test_exception_during_use_does_not_propagate_through_telemetry(fake):
             usage="not a dict",  # type: ignore[arg-type]
         )
         trace.set_output("done")
-    # No exception escaped the context manager.
