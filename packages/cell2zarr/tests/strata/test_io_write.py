@@ -57,6 +57,114 @@ class TestWriteAtomic:
         root2 = open_dataset(tiny_anndata_zarr)
         assert list(root2["uns"]["strata"]["atomic"].attrs["axes"]) == ["donor"]
 
+    def test_uses_configured_chunks_and_shards_for_large_arrays(self, tiny_anndata_zarr: Path):
+        """sum_x / sum_xx / nnz must use chunks=(5, n_genes) and shards=(50, n_genes)
+        when n_strata is large enough. The tiny_anndata_zarr fixture has a small
+        but non-trivial number of strata; the values come from ATOMIC_ROWS_PER_CHUNK
+        and ATOMIC_ROWS_PER_SHARD module constants.
+        """
+        from cell2zarr.strata.io import ATOMIC_ROWS_PER_CHUNK, ATOMIC_ROWS_PER_SHARD
+
+        config = StrataConfig(atomic_axes=["cell_type", "donor"])
+        root = open_dataset(tiny_anndata_zarr)
+        atomic = build_atomic(root, config)
+        write_atomic(root, atomic, force=False)
+
+        root2 = open_dataset(tiny_anndata_zarr)
+        a = root2["uns"]["strata"]["atomic"]
+        n_strata, n_genes = atomic.sum_x.shape
+        expected_chunk_rows = min(ATOMIC_ROWS_PER_CHUNK, n_strata)
+        expected_shard_rows = min(ATOMIC_ROWS_PER_SHARD, n_strata)
+        # Shard must be an integer multiple of chunk
+        expected_shard_rows = (
+            (expected_shard_rows // expected_chunk_rows) * expected_chunk_rows
+            or expected_chunk_rows
+        )
+
+        for name in ("sum_x", "sum_xx", "nnz"):
+            arr = a[name]
+            assert arr.chunks == (expected_chunk_rows, n_genes), (
+                f"{name}.chunks={arr.chunks}, expected ({expected_chunk_rows}, {n_genes})"
+            )
+            assert arr.shards == (expected_shard_rows, n_genes), (
+                f"{name}.shards={arr.shards}, expected ({expected_shard_rows}, {n_genes})"
+            )
+
+    def test_round_trip_arrays_with_new_chunking(self, tiny_anndata_zarr: Path):
+        """Round-trip via the existing reader still produces byte-equivalent
+        values, even with the new chunk/shard/compressor combination.
+        Catches any compressor / shard / encoding regression on read.
+        """
+        config = StrataConfig(atomic_axes=["cell_type", "donor"])
+        root = open_dataset(tiny_anndata_zarr)
+        atomic = build_atomic(root, config)
+        write_atomic(root, atomic, force=False)
+
+        root2 = open_dataset(tiny_anndata_zarr)
+        a = root2["uns"]["strata"]["atomic"]
+        np.testing.assert_array_equal(np.asarray(a["sum_x"]), atomic.sum_x)
+        np.testing.assert_array_equal(np.asarray(a["sum_xx"]), atomic.sum_xx)
+        np.testing.assert_array_equal(np.asarray(a["nnz"]), atomic.nnz)
+        np.testing.assert_array_equal(np.asarray(a["n_cells"]), atomic.n_cells)
+
+    def test_chunks_clamp_when_n_strata_smaller_than_chunk_rows(
+        self, tiny_anndata_zarr: Path
+    ):
+        """If n_strata < ATOMIC_ROWS_PER_CHUNK, both chunks and shards clamp
+        down to n_strata (no error, no oversized shard).
+        """
+        from cell2zarr.strata.io import ATOMIC_ROWS_PER_CHUNK
+
+        # Force a tiny atomic by using axes that yield very few non-empty strata.
+        # If the tiny fixture's axes don't produce a small enough atomic, this
+        # test may need to be skipped or the fixture extended; check n_strata
+        # against ATOMIC_ROWS_PER_CHUNK before asserting the clamp.
+        config = StrataConfig(atomic_axes=["cell_type"])
+        root = open_dataset(tiny_anndata_zarr)
+        atomic = build_atomic(root, config)
+        n_strata, n_genes = atomic.sum_x.shape
+        if n_strata >= ATOMIC_ROWS_PER_CHUNK:
+            pytest.skip(
+                f"tiny fixture has n_strata={n_strata} >= "
+                f"ATOMIC_ROWS_PER_CHUNK={ATOMIC_ROWS_PER_CHUNK}; "
+                "clamping test needs an even smaller atomic"
+            )
+        write_atomic(root, atomic, force=False)
+
+        root2 = open_dataset(tiny_anndata_zarr)
+        a = root2["uns"]["strata"]["atomic"]
+        for name in ("sum_x", "sum_xx", "nnz"):
+            arr = a[name]
+            # Both should clamp to n_strata
+            assert arr.chunks == (n_strata, n_genes)
+            assert arr.shards == (n_strata, n_genes)
+
+    def test_coarse_writes_unaffected_by_atomic_chunking(self, tiny_anndata_zarr: Path):
+        """Coarse table writes must keep their existing (default) chunk shape —
+        the atomic-specific options should not leak to other writers.
+        """
+        from cell2zarr.strata.io import ATOMIC_ROWS_PER_CHUNK
+
+        config = StrataConfig(
+            atomic_axes=["cell_type", "donor"],
+            coarse=[["cell_type"]],
+        )
+        root = open_dataset(tiny_anndata_zarr)
+        atomic = build_atomic(root, config)
+        coarse = derive_coarse(atomic, ["cell_type"])
+        write_atomic(root, atomic, force=False)
+        write_coarse(root, "cell_type", coarse, force=False)
+
+        root2 = open_dataset(tiny_anndata_zarr)
+        c = root2["uns"]["strata"]["coarse_cell_type"]
+        # Coarse should NOT have the atomic-specific chunk shape.
+        n_strata_coarse, n_genes = coarse.sum_x.shape
+        for name in ("sum_x", "sum_xx", "nnz"):
+            arr = c[name]
+            assert arr.chunks != (ATOMIC_ROWS_PER_CHUNK, n_genes), (
+                f"coarse {name}.chunks={arr.chunks} — atomic chunking leaked into coarse"
+            )
+
 
 class TestWriteCoarse:
     def test_round_trip_arrays(self, tiny_anndata_zarr: Path):
