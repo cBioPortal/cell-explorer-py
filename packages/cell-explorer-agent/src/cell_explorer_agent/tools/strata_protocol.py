@@ -69,3 +69,19 @@ class StrataAccess(Protocol):
     async def read_atomic(self) -> AtomicStrataResult:
         """Returns the full atomic table. Raises ValueError if no atomic table."""
         ...
+
+    async def read_atomic_stratum_keys(self) -> tuple[np.ndarray, np.ndarray]:
+        """Returns (stratum_keys, n_cells) for the atomic table without fetching
+        the per-gene sum arrays. Cheap initial read used by callers that compute
+        which row indices match a query value before requesting the row-selective
+        sums. Raises ValueError if no atomic table.
+        """
+        ...
+
+    async def read_atomic_rows(self, row_indices: list[int]) -> AtomicStrataResult:
+        """Returns the atomic table restricted to the given stratum rows (all
+        genes). Under v3 sharding with stratum-major chunks, only the chunks
+        containing the requested rows are fetched. Raises ValueError if no
+        atomic table.
+        """
+        ...

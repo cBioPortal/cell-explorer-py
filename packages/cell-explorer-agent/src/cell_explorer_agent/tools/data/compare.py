@@ -262,10 +262,17 @@ async def _maybe_atomic_sums(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
     """Aggregate atomic strata rows by an axis value to derive per-group sums.
 
-    The atomic table stores sums per (cell_type, donor, ...) tuple; for a
-    single-axis query we sum across all rows where the relevant axis column
-    matches group_a / group_b. Sums are additive so the result is numerically
-    identical to a coarse table on that axis.
+    Two-phase fetch:
+      1. Read just stratum_keys (and n_cells, unused here) to find the row
+         indices matching group_a / group_b on the requested axis. Cheap —
+         these arrays are small bookkeeping data, no per-gene fetches.
+      2. Request only those rows of sum_x / sum_xx. Under v3 sharding with
+         stratum-major chunks the read fetches only the shards/chunks
+         containing the requested rows, so data transfer scales with query
+         selectivity instead of total table size.
+
+    Sums are additive so the result is numerically identical to a coarse
+    table on that axis.
 
     Returns None when:
       - no strata wired in
@@ -280,15 +287,20 @@ async def _maybe_atomic_sums(
         return None
     axis_idx = axes.index(obs_column)
 
-    atomic = await strata.read_atomic()
-    keys_col = atomic.stratum_keys[:, axis_idx]
-    a_rows = np.where(keys_col == group_a)[0]
-    b_rows = np.where(keys_col == group_b)[0]
-    if len(a_rows) == 0 or len(b_rows) == 0:
+    # Phase 1: bookkeeping read — keys only, no per-gene data.
+    keys, _n_cells = await strata.read_atomic_stratum_keys()
+    keys_col = keys[:, axis_idx]
+    a_rows = np.where(keys_col == group_a)[0].tolist()
+    b_rows = np.where(keys_col == group_b)[0].tolist()
+    if not a_rows or not b_rows:
         return None
+
+    # Phase 2: row-selective fetch — only the strata rows we need.
+    slim = await strata.read_atomic_rows(a_rows + b_rows)
+    n_a = len(a_rows)
     return (
-        atomic.sum_x[a_rows].sum(axis=0),
-        atomic.sum_xx[a_rows].sum(axis=0),
-        atomic.sum_x[b_rows].sum(axis=0),
-        atomic.sum_xx[b_rows].sum(axis=0),
+        slim.sum_x[:n_a].sum(axis=0),
+        slim.sum_xx[:n_a].sum(axis=0),
+        slim.sum_x[n_a:].sum(axis=0),
+        slim.sum_xx[n_a:].sum(axis=0),
     )

@@ -246,6 +246,35 @@ class FakeStrataAccess:
             raise ValueError("no atomic table")
         return self.atomic_table
 
+    async def read_atomic_stratum_keys(self):
+        if self.atomic_table is None:
+            raise ValueError("no atomic table")
+        return self.atomic_table.stratum_keys, self.atomic_table.n_cells
+
+    async def read_atomic_rows(self, row_indices: list[int]) -> AtomicStrataResult:
+        if self.atomic_table is None:
+            raise ValueError("no atomic table")
+        t = self.atomic_table
+        if not row_indices:
+            n_genes = t.sum_x.shape[1] if t.sum_x.ndim == 2 else 0
+            return AtomicStrataResult(
+                axes=list(t.axes),
+                stratum_keys=t.stratum_keys[:0],
+                sum_x=np.zeros((0, n_genes), dtype=t.sum_x.dtype),
+                sum_xx=np.zeros((0, n_genes), dtype=t.sum_xx.dtype),
+                nnz=np.zeros((0, n_genes), dtype=t.nnz.dtype),
+                n_cells=t.n_cells[:0],
+            )
+        idx = np.asarray(row_indices, dtype=np.int64)
+        return AtomicStrataResult(
+            axes=list(t.axes),
+            stratum_keys=t.stratum_keys[idx],
+            sum_x=t.sum_x[idx],
+            sum_xx=t.sum_xx[idx],
+            nnz=t.nnz[idx],
+            n_cells=t.n_cells[idx],
+        )
+
 
 def _cartesian_product(per_axis_values: list[list[str]]) -> list[list[str]]:
     """Return all combinations of values across the given axes."""
