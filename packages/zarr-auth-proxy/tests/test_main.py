@@ -148,3 +148,35 @@ def test_directory_traversal_blocked(client, private_pem):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code in (401, 404)
+
+
+@pytest.fixture()
+def cors_client(rsa_keys, data_dir):
+    """Client whose app has CORS configured for a frontend origin."""
+    _, public_file = rsa_keys
+    settings = Settings(
+        public_key_file=public_file,
+        data_dir=data_dir,
+        cors_origins="http://localhost:8001",
+    )
+    app = create_app(settings)
+    return TestClient(app)
+
+
+def test_cors_preflight_allows_head(cors_client):
+    """Zarr clients send HEAD with Authorization header, which triggers an
+    OPTIONS preflight asking for HEAD. The proxy must allow HEAD in its
+    CORS allow_methods or the preflight fails and the browser never sends
+    the real request.
+    """
+    response = cors_client.options(
+        "/datasets/test.zarr/zarr.json",
+        headers={
+            "Origin": "http://localhost:8001",
+            "Access-Control-Request-Method": "HEAD",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["access-control-allow-origin"] == "http://localhost:8001"
+    assert "HEAD" in response.headers["access-control-allow-methods"]
