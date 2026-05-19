@@ -217,6 +217,35 @@ async def logout(request: Request):
     return response
 
 
+@router.post("/refresh")
+async def refresh(request: Request):
+    """Rotate session cookies using the refresh cookie.
+
+    Idempotent endpoint used by the frontend's proactive-refresh timer to
+    keep the access cookie fresh before its TTL expires. Avoids the
+    rotation race that happens when multiple parallel requests all try to
+    refresh after expiry. Returns 401 if no refresh cookie or if Keycloak
+    rejects the refresh.
+    """
+    _require_auth_enabled(request)
+    refresh_token = request.cookies.get("cce_refresh")
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="No refresh cookie")
+    keycloak: KeycloakClient = request.app.state.keycloak
+    try:
+        tokens = await keycloak.refresh_token(refresh_token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Refresh failed")
+    response = Response(status_code=204)
+    _set_token_cookies(
+        request,
+        response,
+        tokens["access_token"],
+        tokens.get("refresh_token", refresh_token),
+    )
+    return response
+
+
 @router.post("/token-exchange", response_model=User)
 async def token_exchange(request: Request):
     """Exchange an external access token for session cookies."""
