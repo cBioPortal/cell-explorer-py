@@ -111,7 +111,7 @@ def test_middleware_sets_cookies_on_json_response_after_refresh(keycloak, rsa_ke
     """JSON endpoint — baseline behavior (also worked with the old impl)."""
     private_key, _ = rsa_keys
     fresh_access = _make_token(private_key)
-    expired_access = _make_token(private_key, exp=int(time.time()) - 10)
+    expired_access = _make_token(private_key, exp=int(time.time()) - 60)
 
     app = _app_with_middleware(keycloak)
     with patch.object(
@@ -138,7 +138,7 @@ def test_middleware_sets_cookies_on_streaming_response_after_refresh(keycloak, r
     """
     private_key, _ = rsa_keys
     fresh_access = _make_token(private_key)
-    expired_access = _make_token(private_key, exp=int(time.time()) - 10)
+    expired_access = _make_token(private_key, exp=int(time.time()) - 60)
 
     app = _app_with_middleware(keycloak)
     with patch.object(
