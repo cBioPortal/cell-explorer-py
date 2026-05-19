@@ -88,6 +88,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if settings.auth_enabled:
             await app.state.keycloak.fetch_jwks()
         yield
+        # Flush any queued Langfuse traces before tearing down. The flush
+        # is a best-effort call that swallows errors; never raises.
+        from cell_explorer_agent.telemetry import langfuse_client
+        langfuse_client.flush()
         await app.state.db_engine.dispose()
 
     app.router.lifespan_context = lifespan
