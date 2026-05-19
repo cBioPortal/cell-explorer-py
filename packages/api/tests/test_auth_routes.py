@@ -121,8 +121,10 @@ def test_me_sets_refreshed_cookies(auth_client, rsa_keys):
     """When the access token is expired but refresh succeeds, /me should set new cookies."""
     private_key, _ = rsa_keys
 
-    # Create an expired access token
-    expired_token = _make_token(private_key, exp=int(time.time()) - 10)
+    # Create an expired access token. Past the JWT decode leeway window
+    # (30s) so the decoder genuinely rejects it instead of tolerating
+    # clock skew.
+    expired_token = _make_token(private_key, exp=int(time.time()) - 60)
 
     # Create a fresh token that the refresh flow will return
     fresh_token = _make_token(private_key)
@@ -153,6 +155,53 @@ def test_me_sets_refreshed_cookies(auth_client, rsa_keys):
     assert cookie_map["cce_access"] == fresh_token, "cce_access should contain the refreshed token"
     assert "cce_refresh" in cookie_map, "Expected cce_refresh cookie to be set after refresh"
     assert cookie_map["cce_refresh"] == "new-refresh-token-value", "cce_refresh should contain the new refresh token"
+
+
+def test_refresh_endpoint_rotates_cookies(auth_client, rsa_keys):
+    """/api/auth/refresh exchanges the refresh cookie for a new pair.
+
+    Used by the frontend's proactive-refresh timer to keep the access
+    cookie fresh before its TTL expires, avoiding the rotation race that
+    happens when many parallel requests all try to refresh after expiry.
+    """
+    private_key, _ = rsa_keys
+    fresh_access = _make_token(private_key)
+
+    keycloak: KeycloakClient = auth_client.app.state.keycloak
+    import unittest.mock as mock
+    keycloak.refresh_token = mock.AsyncMock(return_value={
+        "access_token": fresh_access,
+        "refresh_token": "rotated-refresh",
+    })
+
+    auth_client.cookies.set("cce_refresh", "current-refresh")
+    response = auth_client.post("/api/auth/refresh")
+    assert response.status_code == 204
+
+    set_cookie_headers = response.headers.get_list("set-cookie")
+    cookie_map = {}
+    for header in set_cookie_headers:
+        name, _, rest = header.partition("=")
+        cookie_map[name] = rest.split(";")[0]
+    assert cookie_map.get("cce_access") == fresh_access
+    assert cookie_map.get("cce_refresh") == "rotated-refresh"
+
+
+def test_refresh_endpoint_401_when_no_refresh_cookie(auth_client):
+    """Without cce_refresh, /refresh returns 401 — caller should re-login."""
+    response = auth_client.post("/api/auth/refresh")
+    assert response.status_code == 401
+
+
+def test_refresh_endpoint_401_when_keycloak_rejects(auth_client):
+    """When Keycloak rejects the refresh token, /refresh returns 401."""
+    keycloak: KeycloakClient = auth_client.app.state.keycloak
+    import unittest.mock as mock
+    keycloak.refresh_token = mock.AsyncMock(side_effect=Exception("invalid_grant"))
+
+    auth_client.cookies.set("cce_refresh", "expired-refresh")
+    response = auth_client.post("/api/auth/refresh")
+    assert response.status_code == 401
 
 
 def test_auth_routes_return_401_without_credentials():

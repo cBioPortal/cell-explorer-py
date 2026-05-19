@@ -119,7 +119,8 @@ def test_decode_expired_token_raises(keycloak, rsa_keys):
         "sub": "user-123",
         "iss": "https://auth.example.com/realms/test-realm",
         "aud": "test-client",
-        "exp": int(time.time()) - 10,
+        # Past the 30s leeway window so the decoder genuinely rejects.
+        "exp": int(time.time()) - 60,
         "iat": int(time.time()) - 300,
     }
     token = _encode_token(claims, private_key)

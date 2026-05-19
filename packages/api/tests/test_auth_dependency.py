@@ -94,7 +94,7 @@ def test_expired_token_without_refresh_returns_401(keycloak, rsa_keys):
     private_key, _ = rsa_keys
     app = _make_app_with_protected_route(keycloak)
     client = TestClient(app)
-    token = _make_token(private_key, exp=int(time.time()) - 10)
+    token = _make_token(private_key, exp=int(time.time()) - 60)
     client.cookies.set("cce_access", token)
     response = client.get("/protected")
     assert response.status_code == 401
@@ -148,7 +148,7 @@ def test_missing_access_cookie_without_refresh_returns_401(keycloak):
 def test_expired_token_with_refresh_succeeds(keycloak, rsa_keys):
     """When cce_access is expired but cce_refresh is valid, require_auth refreshes and succeeds."""
     private_key, _ = rsa_keys
-    expired_access = _make_token(private_key, exp=int(time.time()) - 10)
+    expired_access = _make_token(private_key, exp=int(time.time()) - 60)
     fresh_access = _make_token(private_key)
     fresh_refresh = "new-refresh-token"
 
