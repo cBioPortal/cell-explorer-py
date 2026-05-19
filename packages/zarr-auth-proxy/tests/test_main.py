@@ -163,6 +163,27 @@ def cors_client(rsa_keys, data_dir):
     return TestClient(app)
 
 
+def test_head_request_with_valid_token(client, private_pem):
+    """Zarr clients HEAD a chunk before fetching it. The proxy's serve_file
+    route must accept HEAD as well as GET (FastAPI doesn't auto-add HEAD
+    on @app.get like raw Starlette routes do).
+    """
+    token = _sign(private_pem, "datasets/test.zarr")
+    response = client.head(
+        "/datasets/test.zarr/zarr.json",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    # HEAD responses must not include a body.
+    assert response.content == b""
+
+
+def test_head_request_without_auth_rejected(client):
+    """HEAD requests must still go through token validation."""
+    response = client.head("/datasets/test.zarr/zarr.json")
+    assert response.status_code == 401
+
+
 def test_cors_preflight_allows_head(cors_client):
     """Zarr clients send HEAD with Authorization header, which triggers an
     OPTIONS preflight asking for HEAD. The proxy must allow HEAD in its
