@@ -12,6 +12,7 @@ import pytest
 from cell2zarr.strata.config import StrataConfig
 from cell2zarr.strata.io import open_dataset
 from cell2zarr.strata.build import build_atomic, compute_strata_mapping
+from ._v3_fixtures import write_v3_anndata_zarr
 
 
 def _naive_atomic(
@@ -44,10 +45,7 @@ def large_value_anndata_zarr(tmp_path: Path) -> Path:
     X = np.array([[300.0], [400.0], [500.0], [0.0], [100.0]], dtype=np.float16)
     obs = pd.DataFrame({"cell_type": pd.Categorical(["A", "A", "B", "B", "C"])})
     var = pd.DataFrame(index=["gene1"])
-    adata = ad.AnnData(X=X, obs=obs, var=var)
-    path = tmp_path / "large.zarr"
-    adata.write_zarr(path)
-    return path
+    return write_v3_anndata_zarr(tmp_path / "large.zarr", X, obs, var)
 
 
 class TestBuildAtomicCorrectness:

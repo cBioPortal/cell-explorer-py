@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from ._v3_fixtures import write_v3_anndata_zarr
+
 
 @pytest.fixture
 def tiny_anndata_zarr(tmp_path: Path) -> Path:
@@ -41,10 +43,7 @@ def tiny_anndata_zarr(tmp_path: Path) -> Path:
     )
     var = pd.DataFrame(index=["gene1", "gene2", "gene3"])
 
-    adata = ad.AnnData(X=X, obs=obs, var=var)
-    path = tmp_path / "tiny.zarr"
-    adata.write_zarr(path)
-    return path
+    return write_v3_anndata_zarr(tmp_path / "tiny.zarr", X, obs, var)
 
 
 @pytest.fixture(scope="session")
@@ -65,5 +64,4 @@ def pbmc3k_zarr(tmp_path_factory: pytest.TempPathFactory) -> Path:
         adata.obs["louvain"] = pd.Categorical(adata.obs["louvain"].astype(str))
     # Downcast X to float16 to match cell2zarr convention
     adata.X = adata.X.astype(np.float16)
-    adata.write_zarr(path)
-    return path
+    return write_v3_anndata_zarr(path, np.asarray(adata.X), adata.obs, adata.var)

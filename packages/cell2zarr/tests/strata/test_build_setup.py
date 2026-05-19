@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from cell2zarr.strata.io import open_dataset
+from ._v3_fixtures import write_v3_anndata_zarr
 from cell2zarr.strata.build import (
     AtomicTable,
     compute_strata_mapping,
@@ -67,10 +68,7 @@ class TestStratumKeyWidth:
             "cell_type": pd.Categorical([long_name, "B cell"]),
         })
         var = pd.DataFrame(index=["gene1"])
-        adata = ad.AnnData(X=X, obs=obs, var=var)
-        path = tmp_path / "long.zarr"
-        adata.write_zarr(path)
-        return path
+        return write_v3_anndata_zarr(tmp_path / "long.zarr", X, obs, var)
 
     def test_long_label_not_truncated(self, long_label_zarr: Path):
         root = open_dataset(long_label_zarr)
