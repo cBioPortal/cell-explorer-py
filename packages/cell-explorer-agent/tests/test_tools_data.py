@@ -115,10 +115,96 @@ async def test_gene_expression_summary_unknown_gene(fake_zarr):
 async def test_top_expressed_genes(fake_zarr):
     tool = top_expressed_genes_tool(fake_zarr, limit_bytes=32_768, concurrency=4)
     result = await tool.func(obs_column="cell_type", group_value="T cell", n=5)
+    assert result["method"] == "via_xscan"
+    assert result["obs_column"] == "cell_type"
+    assert result["group_value"] == "T cell"
+    assert result["n_cells"] > 0
     assert len(result["genes"]) == 5
     # CD8A should rank highly in T cells
     symbols = [g["symbol"] for g in result["genes"]]
     assert "CD8A" in symbols
+    # New output fields are present per gene
+    for g in result["genes"]:
+        assert set(g) == {"symbol", "mean", "fraction_expressing"}
+        assert 0.0 <= g["fraction_expressing"] <= 1.0
+
+
+async def test_top_expressed_genes_uses_strata_when_available(fake_zarr):
+    """When a coarse table covers obs_column, the strata fast path is used."""
+    from tests.fakes.fake_strata import FakeStrataAccess
+
+    strata = FakeStrataAccess.default(var_names=fake_zarr.var)
+    tool = top_expressed_genes_tool(
+        fake_zarr, limit_bytes=32_768, concurrency=4, strata=strata,
+    )
+    result = await tool.func(obs_column="cell_type", group_value="T cell", n=3)
+    assert "error" not in result, result
+    assert result["method"] == "via_coarse_strata"
+    assert len(result["genes"]) == 3
+
+
+async def test_top_expressed_genes_falls_back_to_xscan_when_no_strata(fake_zarr):
+    tool = top_expressed_genes_tool(
+        fake_zarr, limit_bytes=32_768, concurrency=4, strata=None,
+    )
+    result = await tool.func(obs_column="cell_type", group_value="T cell", n=3)
+    assert result["method"] == "via_xscan"
+
+
+async def test_top_expressed_genes_uses_atomic_when_no_coarse_matches(fake_zarr):
+    """No coarse but atomic covers obs_column -> via_atomic_strata."""
+    from tests.fakes.fake_strata import FakeStrataAccess
+
+    strata = FakeStrataAccess.with_atomic(
+        axes=["cell_type", "synth"],
+        stratum_values={
+            "cell_type": ["T cell", "B cell", "Monocyte"],
+            "synth": ["p", "q"],
+        },
+        var_names=fake_zarr.var,
+    )
+    tool = top_expressed_genes_tool(
+        fake_zarr, limit_bytes=32_768, concurrency=4, strata=strata,
+    )
+    result = await tool.func(obs_column="cell_type", group_value="T cell", n=3)
+    assert "error" not in result, result
+    assert result["method"] == "via_atomic_strata"
+
+
+async def test_top_expressed_genes_strata_and_xscan_produce_identical_means(fake_zarr):
+    """Cross-path equivalence: coarse strata path must produce per-gene means
+    byte-identical to the X-scan path on the same data.
+    """
+    import numpy as np
+
+    from tests.fakes.fake_strata import FakeStrataAccess
+
+    strata = FakeStrataAccess.from_zarr_data(fake_zarr)
+
+    tool_with = top_expressed_genes_tool(
+        fake_zarr, limit_bytes=32_768, concurrency=4, strata=strata,
+    )
+    tool_without = top_expressed_genes_tool(
+        fake_zarr, limit_bytes=32_768, concurrency=4, strata=None,
+    )
+    args = dict(obs_column="cell_type", group_value="T cell", n=10)
+
+    result_strata = await tool_with.func(**args)
+    result_xscan = await tool_without.func(**args)
+
+    assert result_strata["method"] == "via_coarse_strata"
+    assert result_xscan["method"] == "via_xscan"
+    assert result_strata["n_cells"] == result_xscan["n_cells"]
+
+    strata_syms = [g["symbol"] for g in result_strata["genes"]]
+    xscan_syms = [g["symbol"] for g in result_xscan["genes"]]
+    assert strata_syms == xscan_syms
+
+    for gs, gx in zip(result_strata["genes"], result_xscan["genes"]):
+        np.testing.assert_allclose(gs["mean"], gx["mean"], atol=1e-9)
+        np.testing.assert_allclose(
+            gs["fraction_expressing"], gx["fraction_expressing"], atol=1e-9,
+        )
 
 
 from cell_explorer_agent.tools.data.compare import compare_groups_tool

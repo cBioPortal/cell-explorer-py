@@ -70,7 +70,14 @@ def build_v1_catalog(
     cat.register(cluster_stats_tool(z, limit_bytes=lim))
     cat.register(search_genes_tool(z, limit_bytes=lim))
     cat.register(gene_expression_summary_tool(z, limit_bytes=lim))
-    cat.register(top_expressed_genes_tool(z, limit_bytes=lim, concurrency=config.gene_scan_concurrency))
+    cat.register(
+        top_expressed_genes_tool(
+            z,
+            limit_bytes=lim,
+            concurrency=config.gene_scan_concurrency,
+            strata=strata,
+        )
+    )
     cat.register(
         compare_groups_tool(
             z,
