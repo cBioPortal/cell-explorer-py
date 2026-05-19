@@ -13,6 +13,13 @@ import numpy as np
 from zarr_access.zarr_store import ZarrStore
 
 
+# When a row-selective atomic read needs more than this fraction of the table,
+# fall back to a full read + numpy fancy index. Above the threshold, zarr's
+# per-chunk byte-range reads add more overhead than the bytes they save (see
+# #133 for the empirical data). Below it, chunk-aware selection wins.
+ROWS_SLICED_SELECTIVITY_THRESHOLD = 0.5
+
+
 @dataclass(frozen=True)
 class CoarseStrataTable:
     """A coarse strata table — sums aggregated over a subset of atomic axes."""
@@ -385,15 +392,24 @@ class StrataStore:
     ) -> np.ndarray:
         """Read a 2D array restricted to selected row indices (all columns).
 
-        Uses zarr's orthogonal selection on the row axis. Under v3 sharding
-        with stratum-major chunks, only the chunks/shards containing the
-        requested rows are fetched (byte-range reads within each shard).
-        The full gene dimension is kept contiguous since strata callers
-        always want all genes for the rows they request.
+        Selectivity-aware: above ``ROWS_SLICED_SELECTIVITY_THRESHOLD`` of
+        total rows, full read + numpy fancy indexing wins because zarr's
+        per-chunk byte-range reads inside each shard add more overhead than
+        the bytes they save. Below the threshold, zarr's orthogonal
+        selection wins — only the chunks/shards containing the requested
+        rows are byte-range fetched. See #133 for the empirical motivation:
+        Phase=G1 vs S on Spectrum atomic (~71% selectivity) was 10x slower
+        via orthogonal selection than via full read + slice.
         """
         arr = await self._zarr.get_array(path)
         idx = np.asarray(row_indices, dtype=np.int64)
-        data = await arr.get_orthogonal_selection((idx, slice(None)))
+        if len(idx) > arr.shape[0] * ROWS_SLICED_SELECTIVITY_THRESHOLD:
+            # Low selectivity: full read + numpy fancy index.
+            full = np.asarray(await arr.getitem((slice(None), slice(None))))
+            data = full[idx]
+        else:
+            # High selectivity: chunk-aware orthogonal selection.
+            data = await arr.get_orthogonal_selection((idx, slice(None)))
         return np.asarray(data).astype(dtype, copy=False)
 
 
