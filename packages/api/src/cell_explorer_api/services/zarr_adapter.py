@@ -196,6 +196,20 @@ class StrataZarrAccess:
             n_cells=table.n_cells,
         )
 
+    async def read_atomic_stratum_keys(self) -> tuple[np.ndarray, np.ndarray]:
+        return await self.store.read_atomic_stratum_keys()
+
+    async def read_atomic_rows(self, row_indices: list[int]) -> AtomicStrataResult:
+        table = await self.store.read_atomic_rows(row_indices)
+        return AtomicStrataResult(
+            axes=table.axes,
+            stratum_keys=table.stratum_keys,
+            sum_x=table.sum_x,
+            sum_xx=table.sum_xx,
+            nnz=table.nnz,
+            n_cells=table.n_cells,
+        )
+
 
 def _decode_col_to_obs_column(name: str, data) -> ObsColumn:
     """Translate zarr_access.decode_column output into ObsColumn.

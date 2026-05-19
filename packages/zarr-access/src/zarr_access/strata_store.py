@@ -237,6 +237,80 @@ class StrataStore:
             schema_version=schema_version,
         )
 
+    async def read_atomic_stratum_keys(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return (stratum_keys, n_cells) for the atomic table without fetching
+        the per-gene sum arrays.
+
+        Cheap initial read used by callers that compute which row indices match
+        a query value before requesting the row-selective sums.
+
+        Raises ValueError if the dataset has no atomic table.
+        """
+        if not self.has_atomic():
+            raise ValueError("no atomic table in this dataset")
+
+        group_path = "uns/strata/atomic"
+        stratum_keys = await self._read_array_2d_str(f"{group_path}/stratum_keys")
+        n_cells = await self._read_array_1d(f"{group_path}/n_cells", np.int32)
+        return stratum_keys, n_cells
+
+    async def read_atomic_rows(self, row_indices: list[int]) -> AtomicStrataTable:
+        """Read the atomic table restricted to the requested stratum rows.
+
+        Per-array reads use zarr fancy indexing: ``arr[row_indices, :]``. Under
+        v3 sharding, only the chunks containing the requested rows are fetched
+        (via byte-range reads inside each shard). For datasets at the 15M-cell
+        scale where the full atomic table is multiple GB, this is what keeps
+        per-query data transfer scaling with selectivity instead of total
+        table size.
+
+        Empty list returns a valid table with zero rows of gene data but full
+        ``stratum_keys`` / ``n_cells`` for inspection.
+
+        Raises ValueError if the dataset has no atomic table.
+        """
+        if not self.has_atomic():
+            raise ValueError("no atomic table in this dataset")
+
+        group_path = "uns/strata/atomic"
+        group = await self._zarr.get_group(group_path)
+        schema_version = str(dict(group.attrs).get("schema_version", "1.0"))
+
+        stratum_keys = await self._read_array_2d_str(f"{group_path}/stratum_keys")
+        n_cells = await self._read_array_1d(f"{group_path}/n_cells", np.int32)
+        axes = self.atomic_axes() or []
+
+        sliced_keys = stratum_keys[row_indices] if row_indices else stratum_keys[:0]
+        sliced_n_cells = n_cells[row_indices] if row_indices else n_cells[:0]
+
+        if not row_indices:
+            n_genes = 0
+            sum_x = np.zeros((0, n_genes), dtype=np.float32)
+            sum_xx = np.zeros((0, n_genes), dtype=np.float32)
+            nnz = np.zeros((0, n_genes), dtype=np.int32)
+        else:
+            sum_x = await self._read_array_2d_rows_sliced(
+                f"{group_path}/sum_x", row_indices, np.float32
+            )
+            sum_xx = await self._read_array_2d_rows_sliced(
+                f"{group_path}/sum_xx", row_indices, np.float32
+            )
+            nnz = await self._read_array_2d_rows_sliced(
+                f"{group_path}/nnz", row_indices, np.int32
+            )
+
+        return AtomicStrataTable(
+            kind="atomic",
+            axes=axes,
+            stratum_keys=sliced_keys,
+            gene_indices=None,
+            sum_x=sum_x,
+            sum_xx=sum_xx,
+            nnz=nnz,
+            n_cells=sliced_n_cells,
+            schema_version=schema_version,
+        )
+
     async def read_atomic(self) -> AtomicStrataTable:
         """Read the full atomic table.
 
@@ -302,6 +376,25 @@ class StrataStore:
         full = np.asarray(data)
         sliced = full[:, gene_indices]
         return sliced.astype(dtype, copy=False)
+
+    async def _read_array_2d_rows_sliced(
+        self,
+        path: str,
+        row_indices: list[int],
+        dtype,
+    ) -> np.ndarray:
+        """Read a 2D array restricted to selected row indices (all columns).
+
+        Uses zarr's orthogonal selection on the row axis. Under v3 sharding
+        with stratum-major chunks, only the chunks/shards containing the
+        requested rows are fetched (byte-range reads within each shard).
+        The full gene dimension is kept contiguous since strata callers
+        always want all genes for the rows they request.
+        """
+        arr = await self._zarr.get_array(path)
+        idx = np.asarray(row_indices, dtype=np.int64)
+        data = await arr.get_orthogonal_selection((idx, slice(None)))
+        return np.asarray(data).astype(dtype, copy=False)
 
 
 def find_coarse_by_axes(strata: StrataStore, axes: list[str]) -> str | None:

@@ -169,6 +169,68 @@ async def test_read_atomic_no_atomic_raises(no_strata_store):
         await no_strata_store.read_atomic()
 
 
+async def test_read_atomic_stratum_keys_returns_keys_and_n_cells(strata_store):
+    keys, n_cells = await strata_store.read_atomic_stratum_keys()
+    # Fixture: 6 strata x 2 axes
+    assert keys.shape == (6, 2)
+    assert n_cells.shape == (6,)
+    # 50 total cells in the strata-tiny fixture
+    assert int(n_cells.sum()) == 50
+
+
+async def test_read_atomic_stratum_keys_no_atomic_raises(no_strata_store):
+    import pytest
+    with pytest.raises(ValueError, match="no atomic"):
+        await no_strata_store.read_atomic_stratum_keys()
+
+
+async def test_read_atomic_rows_slice(strata_store):
+    # Pick a subset of the 6 fixture strata rows.
+    atomic = await strata_store.read_atomic_rows([0, 2, 5])
+    assert atomic.kind == "atomic"
+    assert atomic.axes == ["cell_type", "donor"]
+    # 3 selected rows, all 10 genes
+    assert atomic.sum_x.shape == (3, 10)
+    assert atomic.sum_xx.shape == (3, 10)
+    assert atomic.nnz.shape == (3, 10)
+    # stratum_keys and n_cells are sliced to the requested rows
+    assert atomic.stratum_keys.shape == (3, 2)
+    assert atomic.n_cells.shape == (3,)
+
+
+async def test_read_atomic_rows_matches_full_table(strata_store):
+    """Row-selective read must produce byte-identical values to slicing
+    the full read. This is the regression guard against drift between
+    the fancy-indexed read path and the bulk read path.
+    """
+    full = await strata_store.read_atomic()
+    rows = [1, 3, 4]
+    slim = await strata_store.read_atomic_rows(rows)
+
+    np.testing.assert_array_equal(slim.sum_x, full.sum_x[rows])
+    np.testing.assert_array_equal(slim.sum_xx, full.sum_xx[rows])
+    np.testing.assert_array_equal(slim.nnz, full.nnz[rows])
+    np.testing.assert_array_equal(slim.n_cells, full.n_cells[rows])
+    np.testing.assert_array_equal(slim.stratum_keys, full.stratum_keys[rows])
+
+
+async def test_read_atomic_rows_empty(strata_store):
+    atomic = await strata_store.read_atomic_rows([])
+    assert atomic.kind == "atomic"
+    # All sliced arrays are empty
+    assert atomic.sum_x.size == 0
+    assert atomic.sum_xx.size == 0
+    assert atomic.nnz.size == 0
+    assert atomic.stratum_keys.shape[0] == 0
+    assert atomic.n_cells.shape[0] == 0
+
+
+async def test_read_atomic_rows_no_atomic_raises(no_strata_store):
+    import pytest
+    with pytest.raises(ValueError, match="no atomic"):
+        await no_strata_store.read_atomic_rows([0])
+
+
 from zarr_access import find_coarse_by_axes, find_coarse_covering
 
 

@@ -64,4 +64,10 @@ def test_strata_access_protocol_is_runtime_checkable():
         async def read_atomic(self) -> AtomicStrataResult:
             raise NotImplementedError
 
+        async def read_atomic_stratum_keys(self):
+            raise NotImplementedError
+
+        async def read_atomic_rows(self, row_indices: list[int]) -> AtomicStrataResult:
+            raise NotImplementedError
+
     assert isinstance(_Fake(), StrataAccess)
