@@ -76,7 +76,7 @@ class _FakeChatAgent:
         self._run_events = run_events or []
         self._run_raises = run_raises  # exception or callable[int -> exception | None]
 
-    async def run(self, *, messages, view_state=None):
+    async def run(self, *, messages, view_state=None, **kwargs):
         self.last_view_state = view_state
         for i, ev in enumerate(self._run_events):
             yield ev
