@@ -95,12 +95,18 @@ class KeycloakClient:
             raise jwt.InvalidTokenError(f"Unknown kid: {kid}")
 
         public_key = load_pem_public_key(self._jwks[kid])
+        # leeway=30s tolerates small clock skew between Keycloak and this
+        # container. Without it, a token Keycloak just issued can be rejected
+        # as "not yet valid (iat)" if Keycloak's clock is even a second ahead
+        # — which manifests as a chronic refresh failure once the access
+        # cookie expires (see issue #131).
         claims = jwt.decode(
             token,
             public_key,
             algorithms=["RS256"],
             audience=self._settings.keycloak_client_id,
             issuer=self._settings.oidc_issuer_url,
+            leeway=30,
         )
 
         realm_roles = claims.get("realm_access", {}).get("roles", [])
