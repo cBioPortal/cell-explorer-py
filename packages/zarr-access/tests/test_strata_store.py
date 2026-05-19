@@ -214,6 +214,23 @@ async def test_read_atomic_rows_matches_full_table(strata_store):
     np.testing.assert_array_equal(slim.stratum_keys, full.stratum_keys[rows])
 
 
+async def test_read_atomic_rows_low_selectivity_branch_matches_full(strata_store):
+    """When the requested row set exceeds the selectivity threshold (>50% of
+    table rows), `_read_array_2d_rows_sliced` falls back to a full read +
+    numpy fancy index. Verify the result is still byte-identical to the
+    slice of a full read. See #133.
+    """
+    # Strata-tiny has 6 atomic rows; selecting 5 puts us in the low-selectivity
+    # branch (5/6 = 83% > 50%).
+    full = await strata_store.read_atomic()
+    rows = [0, 1, 2, 3, 4]
+    slim = await strata_store.read_atomic_rows(rows)
+    np.testing.assert_array_equal(slim.sum_x, full.sum_x[rows])
+    np.testing.assert_array_equal(slim.sum_xx, full.sum_xx[rows])
+    np.testing.assert_array_equal(slim.nnz, full.nnz[rows])
+    np.testing.assert_array_equal(slim.n_cells, full.n_cells[rows])
+
+
 async def test_read_atomic_rows_empty(strata_store):
     atomic = await strata_store.read_atomic_rows([])
     assert atomic.kind == "atomic"
