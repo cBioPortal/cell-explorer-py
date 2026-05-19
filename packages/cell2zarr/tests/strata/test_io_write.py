@@ -63,16 +63,23 @@ class TestWriteAtomic:
         but non-trivial number of strata; the values come from ATOMIC_ROWS_PER_CHUNK
         and ATOMIC_ROWS_PER_SHARD module constants.
         """
+        # In-function import: ATOMIC_ROWS_PER_* are added in Task 2; importing at
+        # module level would break test collection on main.
         from cell2zarr.strata.io import ATOMIC_ROWS_PER_CHUNK, ATOMIC_ROWS_PER_SHARD
 
         config = StrataConfig(atomic_axes=["cell_type", "donor"])
         root = open_dataset(tiny_anndata_zarr)
         atomic = build_atomic(root, config)
+        n_strata, n_genes = atomic.sum_x.shape
+        if n_strata < ATOMIC_ROWS_PER_CHUNK:
+            pytest.skip(
+                f"tiny fixture has n_strata={n_strata} < ATOMIC_ROWS_PER_CHUNK={ATOMIC_ROWS_PER_CHUNK}; "
+                "non-clamped chunk test needs n_strata >= ATOMIC_ROWS_PER_CHUNK"
+            )
         write_atomic(root, atomic, force=False)
 
         root2 = open_dataset(tiny_anndata_zarr)
         a = root2["uns"]["strata"]["atomic"]
-        n_strata, n_genes = atomic.sum_x.shape
         expected_chunk_rows = min(ATOMIC_ROWS_PER_CHUNK, n_strata)
         expected_shard_rows = min(ATOMIC_ROWS_PER_SHARD, n_strata)
         # Shard must be an integer multiple of chunk
@@ -136,8 +143,12 @@ class TestWriteAtomic:
         for name in ("sum_x", "sum_xx", "nnz"):
             arr = a[name]
             # Both should clamp to n_strata
-            assert arr.chunks == (n_strata, n_genes)
-            assert arr.shards == (n_strata, n_genes)
+            assert arr.chunks == (n_strata, n_genes), (
+                f"{name}.chunks={arr.chunks}, expected ({n_strata}, {n_genes})"
+            )
+            assert arr.shards == (n_strata, n_genes), (
+                f"{name}.shards={arr.shards}, expected ({n_strata}, {n_genes})"
+            )
 
     def test_coarse_writes_unaffected_by_atomic_chunking(self, tiny_anndata_zarr: Path):
         """Coarse table writes must keep their existing (default) chunk shape —
@@ -161,6 +172,11 @@ class TestWriteAtomic:
         n_strata_coarse, n_genes = coarse.sum_x.shape
         for name in ("sum_x", "sum_xx", "nnz"):
             arr = c[name]
+            # Strong positive: coarse must not pick up sharding (only atomic gets shards).
+            assert arr.shards is None, (
+                f"coarse {name}.shards={arr.shards} — sharding leaked into coarse"
+            )
+            # Negative: also catches the exact-constant case (kept for clarity).
             assert arr.chunks != (ATOMIC_ROWS_PER_CHUNK, n_genes), (
                 f"coarse {name}.chunks={arr.chunks} — atomic chunking leaked into coarse"
             )
