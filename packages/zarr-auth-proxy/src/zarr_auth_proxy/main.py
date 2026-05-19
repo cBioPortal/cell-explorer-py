@@ -32,7 +32,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             CORSMiddleware,
             allow_origins=settings.cors_origin_list,
             allow_credentials=False,
-            allow_methods=["GET", "OPTIONS"],
+            allow_methods=["GET", "HEAD", "OPTIONS"],
             allow_headers=["Authorization", "Content-Type"],
         )
 
@@ -40,7 +40,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def health():
         return {"status": "ok"}
 
-    @app.get("/{path:path}")
+    # GET + HEAD: zarr clients HEAD a chunk to check existence/range support
+    # before issuing the GET. FastAPI's @app.get registers GET only (unlike
+    # raw Starlette Route which auto-adds HEAD), so list both explicitly.
+    @app.api_route("/{path:path}", methods=["GET", "HEAD"])
     async def serve_file(path: str, request: Request):
         # Extract bearer token
         auth_header = request.headers.get("Authorization", "")
