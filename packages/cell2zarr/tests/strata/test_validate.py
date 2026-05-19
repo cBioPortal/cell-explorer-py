@@ -13,6 +13,7 @@ from cell2zarr.strata.validate import (
     estimate_atomic_cardinality,
     list_categorical_obs_columns,
 )
+from ._v3_fixtures import write_v3_anndata_zarr
 
 
 @pytest.fixture
@@ -24,10 +25,7 @@ def numeric_obs_zarr(tmp_path: Path) -> Path:
         "cell_type": pd.Categorical(["A", "B", "A"]),
     })
     var = pd.DataFrame(index=["gene1"])
-    adata = ad.AnnData(X=X, obs=obs, var=var)
-    path = tmp_path / "numeric.zarr"
-    adata.write_zarr(path)
-    return path
+    return write_v3_anndata_zarr(tmp_path / "numeric.zarr", X, obs, var)
 
 
 @pytest.fixture
@@ -38,10 +36,7 @@ def nullish_obs_zarr(tmp_path: Path) -> Path:
     cats = ["A"] * 90 + [None] * 10  # 10% null
     obs = pd.DataFrame({"sparse_label": pd.Categorical(cats)})
     var = pd.DataFrame(index=["gene1"])
-    adata = ad.AnnData(X=X, obs=obs, var=var)
-    path = tmp_path / "nullish.zarr"
-    adata.write_zarr(path)
-    return path
+    return write_v3_anndata_zarr(tmp_path / "nullish.zarr", X, obs, var)
 
 
 class TestValidateObsColumns:

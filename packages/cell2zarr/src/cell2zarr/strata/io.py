@@ -103,6 +103,10 @@ def existing_strata_summary(root: zarr.Group) -> dict | None:
 # ---------------------------------------------------------------------------
 
 SCHEMA_VERSION = "1.0"
+import zarr.codecs  # noqa: E402
+
+ATOMIC_ROWS_PER_CHUNK = 5
+ATOMIC_ROWS_PER_SHARD = 50
 
 from cell2zarr.strata.exceptions import StrataExistsError  # noqa: E402
 
@@ -117,19 +121,27 @@ def _write_arrays_with_marker(
     name: str,
     arrays: dict[str, np.ndarray],
     attrs: dict,
+    *,
+    array_options: dict[str, dict] | None = None,
 ) -> None:
     """Atomicity helper: write all arrays, then attach the schema_version marker LAST.
 
     A reader that finds the group without schema_version treats it as a
     partial / aborted write.
+
+    Per-array zarr `create_array` kwargs (chunks, shards, compressors, etc.)
+    can be supplied via `array_options`, keyed by array name. Arrays without
+    an entry use zarr's defaults.
     """
     # Drop any existing group (called only when we're already authorized to overwrite).
     if name in parent:
         del parent[name]
     group = parent.create_group(name)
 
+    options = array_options or {}
     for array_name, data in arrays.items():
-        group.create_array(array_name, data=data)
+        kwargs = options.get(array_name, {})
+        group.create_array(array_name, data=data, **kwargs)
 
     # Attach non-marker attrs first.
     for key, value in attrs.items():
@@ -138,6 +150,27 @@ def _write_arrays_with_marker(
         group.attrs[key] = value
     # Marker LAST — the "this group is complete" flag.
     group.attrs["schema_version"] = SCHEMA_VERSION
+
+
+def _atomic_array_options(n_strata: int, n_genes: int) -> dict[str, dict]:
+    """Build the per-array zarr options for the atomic table's large arrays.
+
+    Uses stratum-major chunks bundled into medium shards so future row-selective
+    reads can fetch only the strata a query needs. Clamps to `n_strata` for
+    small datasets and ensures shard is an integer multiple of chunk.
+    """
+    chunk_rows = min(ATOMIC_ROWS_PER_CHUNK, n_strata)
+    shard_rows = min(ATOMIC_ROWS_PER_SHARD, n_strata)
+    shard_rows = (shard_rows // chunk_rows) * chunk_rows or chunk_rows
+    compressors = [zarr.codecs.ZstdCodec(level=3)]
+    return {
+        name: {
+            "chunks": (chunk_rows, n_genes),
+            "shards": (shard_rows, n_genes),
+            "compressors": compressors,
+        }
+        for name in ("sum_x", "sum_xx", "nnz")
+    }
 
 
 def write_atomic(root: zarr.Group, atomic: AtomicTable, *, force: bool) -> None:
@@ -156,6 +189,8 @@ def write_atomic(root: zarr.Group, atomic: AtomicTable, *, force: bool) -> None:
             f"Pass --force to overwrite."
         )
 
+    n_strata, n_genes = atomic.sum_x.shape
+    array_options = _atomic_array_options(n_strata, n_genes)
     _write_arrays_with_marker(
         parent=strata,
         name="atomic",
@@ -172,6 +207,7 @@ def write_atomic(root: zarr.Group, atomic: AtomicTable, *, force: bool) -> None:
             "derived_from": None,
             "collapsed_axes": [],
         },
+        array_options=array_options,
     )
 
 
