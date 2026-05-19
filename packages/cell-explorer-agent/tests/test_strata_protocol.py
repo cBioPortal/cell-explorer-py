@@ -43,6 +43,8 @@ def test_coarse_strata_result_is_frozen():
 
 def test_strata_access_protocol_is_runtime_checkable():
     """isinstance check works for runtime Protocol verification."""
+    from cell_explorer_agent.tools.strata_protocol import AtomicStrataResult
+
     class _Fake:
         def coarse_slugs(self) -> list[str]:
             return []
@@ -51,6 +53,15 @@ def test_strata_access_protocol_is_runtime_checkable():
             return []
 
         async def read_coarse(self, slug: str) -> CoarseStrataResult:
+            raise NotImplementedError
+
+        def has_atomic(self) -> bool:
+            return False
+
+        def atomic_axes(self) -> list[str] | None:
+            return None
+
+        async def read_atomic(self) -> AtomicStrataResult:
             raise NotImplementedError
 
     assert isinstance(_Fake(), StrataAccess)
