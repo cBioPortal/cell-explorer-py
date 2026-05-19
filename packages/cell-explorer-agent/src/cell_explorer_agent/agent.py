@@ -50,6 +50,8 @@ from cell_explorer_agent.messages import (
 from cell_explorer_agent.prompt.dataset_context import DatasetContext
 from cell_explorer_agent.prompt.system import build_system_prompt, format_view_state_block
 from cell_explorer_agent.tools.registry import ToolCatalog
+from cell_explorer_agent.telemetry import langfuse_client
+from cell_explorer_agent.telemetry.trace_context import TurnTrace
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,7 @@ class ChatAgent:
         *,
         messages: list[Message],
         view_state: dict[str, Any] | None = None,
+        telemetry_context: dict[str, Any] | None = None,
     ) -> AsyncIterator[ChatEvent]:
         system = build_system_prompt(self.dataset_ctx)
         view_state_block = (
@@ -77,151 +80,181 @@ class ChatAgent:
         tool_calls_this_turn = 0
         max_calls = self.config.max_tool_calls_per_turn
 
-        while True:
-            assistant_text = ""
-            pending_calls: list[ToolCall] = []
-            stop_reason: str | None = None
+        # Telemetry: open a TurnTrace if the caller supplied context.
+        # Caller-supplied context (vs. agent self-deriving) keeps the agent
+        # decoupled from API-layer concerns like Keycloak user.sub or
+        # Dataset.is_public.
+        client = (
+            langfuse_client.get(self.config)
+            if telemetry_context is not None
+            else None
+        )
+        if telemetry_context is not None and messages and hasattr(messages[-1], "content"):
+            user_text = messages[-1].content
+        else:
+            user_text = ""
+        async with TurnTrace(
+            client=client,
+            user_id=(telemetry_context or {}).get("user_id"),
+            thread_id=(telemetry_context or {}).get("thread_id", "no-thread"),
+            dataset_slug=(telemetry_context or {}).get("dataset_slug", self.dataset_ctx.slug),
+            is_public=(telemetry_context or {}).get("is_public", False),
+            model=self.config.llm_model,
+            environment=(telemetry_context or {}).get("environment", "unknown"),
+            user_input=user_text,
+            view_state=view_state,
+        ) as trace:
+            final_assistant_text_buffer: list[str] = []
+            while True:
+                assistant_text = ""
+                pending_calls: list[ToolCall] = []
+                stop_reason: str | None = None
+                llm_input_snapshot = list(history)
 
-            async for ev in self.llm.stream(
-                system=system,
-                messages=history,
-                tools=tools,
-                model=self.config.llm_model,
-                max_tokens=2048,
-                timeout_s=self.config.llm_timeout_s,
-                view_state_block=view_state_block,
-            ):
-                if isinstance(ev, LLMTextDelta):
-                    assistant_text += ev.text
-                    yield TextDelta(text=ev.text)
-                elif isinstance(ev, LLMToolCall):
-                    pending_calls.append(
-                        ToolCall(id=ev.id, name=ev.name, args=ev.args)
-                    )
-                elif isinstance(ev, LLMStop):
-                    stop_reason = ev.reason
-                    total_usage = TokenUsage(
-                        input_tokens=total_usage.input_tokens + ev.usage.input_tokens,
-                        output_tokens=total_usage.output_tokens + ev.usage.output_tokens,
-                        cache_read_tokens=total_usage.cache_read_tokens
-                        + ev.usage.cache_read_tokens,
-                        cache_write_tokens=total_usage.cache_write_tokens
-                        + ev.usage.cache_write_tokens,
-                    )
-
-            history.append(
-                AssistantMessage(text=assistant_text, tool_calls=pending_calls)
-            )
-
-            if stop_reason == "end_turn" or not pending_calls:
-                yield Done(usage=total_usage)
-                return
-
-            if tool_calls_this_turn + len(pending_calls) > max_calls:
-                yield Error(
-                    message=(
-                        f"Tool-call limit ({max_calls}) reached this turn — stopping."
-                    ),
-                    retryable=False,
-                )
-                yield Done(usage=total_usage)
-                return
-
-            results: list[ToolResult] = []
-            for call in pending_calls:
-                tool_calls_this_turn += 1
-                tool = self.catalog.get(call.name)
-                if tool is None:
-                    results.append(
-                        ToolResult(
-                            tool_call_id=call.id,
-                            content={"error": f"unknown tool {call.name!r}"},
-                            is_error=True,
+                async for ev in self.llm.stream(
+                    system=system,
+                    messages=history,
+                    tools=tools,
+                    model=self.config.llm_model,
+                    max_tokens=2048,
+                    timeout_s=self.config.llm_timeout_s,
+                    view_state_block=view_state_block,
+                ):
+                    if isinstance(ev, LLMTextDelta):
+                        assistant_text += ev.text
+                        yield TextDelta(text=ev.text)
+                    elif isinstance(ev, LLMToolCall):
+                        pending_calls.append(
+                            ToolCall(id=ev.id, name=ev.name, args=ev.args)
                         )
-                    )
-                    continue
-
-                logger.info(
-                    "chat.tool.call.start tool=%s kind=%s args=%s",
-                    tool.name,
-                    tool.kind,
-                    _short_args(call.args),
-                )
-                start_ts = time.monotonic()
-                try:
-                    yield ToolProgress(
-                        tool=tool.name,
-                        status="started",
-                        args=call.args,
-                        tool_call_id=call.id,
-                    )
-                    if tool.wants_context:
-                        result = await tool.func(
-                            **call.args,
-                            _context={"view_state": view_state or {}},
+                    elif isinstance(ev, LLMStop):
+                        stop_reason = ev.reason
+                        total_usage = TokenUsage(
+                            input_tokens=total_usage.input_tokens + ev.usage.input_tokens,
+                            output_tokens=total_usage.output_tokens + ev.usage.output_tokens,
+                            cache_read_tokens=total_usage.cache_read_tokens
+                            + ev.usage.cache_read_tokens,
+                            cache_write_tokens=total_usage.cache_write_tokens
+                            + ev.usage.cache_write_tokens,
                         )
-                    else:
-                        result = await tool.func(**call.args)
-                except Exception as exc:
-                    duration_ms = int((time.monotonic() - start_ts) * 1000)
-                    correlation = uuid.uuid4().hex
-                    logger.exception(
-                        "chat.tool.call.error tool=%s duration_ms=%d correlation=%s",
+                        # Telemetry: record this LLM call.
+                        trace.add_generation(
+                            input_messages=[
+                                {"role": getattr(m, "__class__", type(m)).__name__, "_repr": repr(m)[:200]}
+                                for m in llm_input_snapshot
+                            ],
+                            output_text=assistant_text,
+                            usage={
+                                "input_tokens": ev.usage.input_tokens,
+                                "output_tokens": ev.usage.output_tokens,
+                                "cache_read_tokens": ev.usage.cache_read_tokens,
+                                "cache_write_tokens": ev.usage.cache_write_tokens,
+                            },
+                        )
+
+                final_assistant_text_buffer.append(assistant_text)
+                history.append(
+                    AssistantMessage(text=assistant_text, tool_calls=pending_calls)
+                )
+
+                if stop_reason == "end_turn" or not pending_calls:
+                    trace.set_output("".join(final_assistant_text_buffer))
+                    yield Done(usage=total_usage)
+                    return
+
+                if tool_calls_this_turn + len(pending_calls) > max_calls:
+                    yield Error(
+                        message=(
+                            f"Tool-call limit ({max_calls}) reached this turn — stopping."
+                        ),
+                        retryable=False,
+                    )
+                    trace.set_output("".join(final_assistant_text_buffer))
+                    yield Done(usage=total_usage)
+                    return
+
+                results: list[ToolResult] = []
+                for call in pending_calls:
+                    tool_calls_this_turn += 1
+                    tool = self.catalog.get(call.name)
+                    if tool is None:
+                        results.append(
+                            ToolResult(
+                                tool_call_id=call.id,
+                                content={"error": f"unknown tool {call.name!r}"},
+                                is_error=True,
+                            )
+                        )
+                        trace.add_tool_span(
+                            name=call.name,
+                            args=call.args,
+                            result={"error": f"unknown tool {call.name!r}"},
+                            duration_ms=0,
+                            status="error",
+                        )
+                        continue
+
+                    logger.info(
+                        "chat.tool.call.start tool=%s kind=%s args=%s",
                         tool.name,
-                        duration_ms,
-                        correlation,
+                        tool.kind,
+                        _short_args(call.args),
                     )
-                    yield ToolProgress(
-                        tool=tool.name,
-                        status="error",
-                        summary=str(exc),
-                        duration_ms=duration_ms,
-                        tool_call_id=call.id,
-                    )
-                    results.append(
-                        ToolResult(
+                    start_ts = time.monotonic()
+                    try:
+                        yield ToolProgress(
+                            tool=tool.name,
+                            status="started",
+                            args=call.args,
                             tool_call_id=call.id,
-                            content={"error": str(exc), "correlation_id": correlation},
-                            is_error=True,
                         )
-                    )
-                    continue
-                duration_ms = int((time.monotonic() - start_ts) * 1000)
-                logger.info(
-                    "chat.tool.call.end tool=%s kind=%s duration_ms=%d",
-                    tool.name,
-                    tool.kind,
-                    duration_ms,
-                )
-
-                if tool.kind == "data":
-                    yield ToolProgress(
-                        tool=tool.name,
-                        status="ok",
-                        duration_ms=duration_ms,
-                        tool_call_id=call.id,
-                    )
-                    results.append(
-                        ToolResult(tool_call_id=call.id, content=result)
-                    )
-                else:  # ui_action
-                    if "error" in result:
+                        if tool.wants_context:
+                            result = await tool.func(
+                                **call.args,
+                                _context={"view_state": view_state or {}},
+                            )
+                        else:
+                            result = await tool.func(**call.args)
+                    except Exception as exc:
+                        duration_ms = int((time.monotonic() - start_ts) * 1000)
+                        correlation = uuid.uuid4().hex
+                        logger.exception(
+                            "chat.tool.call.error tool=%s duration_ms=%d correlation=%s",
+                            tool.name,
+                            duration_ms,
+                            correlation,
+                        )
                         yield ToolProgress(
                             tool=tool.name,
                             status="error",
-                            summary=result["error"],
+                            summary=str(exc),
                             duration_ms=duration_ms,
                             tool_call_id=call.id,
                         )
                         results.append(
                             ToolResult(
                                 tool_call_id=call.id,
-                                content=result,
+                                content={"error": str(exc), "correlation_id": correlation},
                                 is_error=True,
                             )
                         )
-                    else:
-                        yield UIAction(payload=result["payload"])
+                        trace.add_tool_span(
+                            name=tool.name,
+                            args=call.args,
+                            result={"error": str(exc), "correlation_id": correlation},
+                            duration_ms=duration_ms,
+                            status="error",
+                        )
+                        continue
+                    duration_ms = int((time.monotonic() - start_ts) * 1000)
+                    logger.info(
+                        "chat.tool.call.end tool=%s kind=%s duration_ms=%d",
+                        tool.name,
+                        tool.kind,
+                        duration_ms,
+                    )
+
+                    if tool.kind == "data":
                         yield ToolProgress(
                             tool=tool.name,
                             status="ok",
@@ -229,10 +262,58 @@ class ChatAgent:
                             tool_call_id=call.id,
                         )
                         results.append(
-                            ToolResult(
-                                tool_call_id=call.id,
-                                content={"dispatched": True},
-                            )
+                            ToolResult(tool_call_id=call.id, content=result)
                         )
+                        trace.add_tool_span(
+                            name=tool.name,
+                            args=call.args,
+                            result=result,
+                            duration_ms=duration_ms,
+                            status="ok",
+                        )
+                    else:  # ui_action
+                        if "error" in result:
+                            yield ToolProgress(
+                                tool=tool.name,
+                                status="error",
+                                summary=result["error"],
+                                duration_ms=duration_ms,
+                                tool_call_id=call.id,
+                            )
+                            results.append(
+                                ToolResult(
+                                    tool_call_id=call.id,
+                                    content=result,
+                                    is_error=True,
+                                )
+                            )
+                            trace.add_tool_span(
+                                name=tool.name,
+                                args=call.args,
+                                result=result,
+                                duration_ms=duration_ms,
+                                status="error",
+                            )
+                        else:
+                            yield UIAction(payload=result["payload"])
+                            yield ToolProgress(
+                                tool=tool.name,
+                                status="ok",
+                                duration_ms=duration_ms,
+                                tool_call_id=call.id,
+                            )
+                            results.append(
+                                ToolResult(
+                                    tool_call_id=call.id,
+                                    content={"dispatched": True},
+                                )
+                            )
+                            trace.add_tool_span(
+                                name=tool.name,
+                                args=call.args,
+                                result={"payload": result.get("payload")},
+                                duration_ms=duration_ms,
+                                status="ok",
+                            )
 
-            history.append(ToolResultMessage(results=results))
+                history.append(ToolResultMessage(results=results))
