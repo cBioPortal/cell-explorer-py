@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class AgentConfig(BaseSettings):
     """All tunable limits and LLM selection. Prefix: CHAT_."""
 
-    model_config = SettingsConfigDict(env_prefix="CHAT_", case_sensitive=False)
+    model_config = SettingsConfigDict(env_prefix="CHAT_", case_sensitive=False, populate_by_name=True)
 
     llm_transport: Literal["anthropic", "bedrock", "vertex"] = "anthropic"
     llm_model: str = "claude-sonnet-4-6"
@@ -29,3 +29,27 @@ class AgentConfig(BaseSettings):
 
     llm_timeout_s: float = Field(default=60, gt=0)
     turn_timeout_s: float = Field(default=180, gt=0)
+
+    # Langfuse observability (Phase 1). Keys absent → tracing disabled.
+    # When keys present, defaults to enabled; set LANGFUSE_TRACE_ENABLED=false
+    # to kill tracing without rotating keys (incident response).
+    # NOTE: these vars are NOT prefixed with CHAT_ — they follow Langfuse's
+    # standard env var names so the SDK can pick them up directly if needed.
+    langfuse_public_key: str | None = Field(default=None, alias="LANGFUSE_PUBLIC_KEY")
+    langfuse_secret_key: str | None = Field(default=None, alias="LANGFUSE_SECRET_KEY")
+    langfuse_host: str = Field(
+        default="https://us.cloud.langfuse.com", alias="LANGFUSE_HOST"
+    )
+    # The bool field has no default; the property below resolves it.
+    langfuse_trace_enabled_raw: str | None = Field(
+        default=None, alias="LANGFUSE_TRACE_ENABLED"
+    )
+
+    @property
+    def langfuse_trace_enabled(self) -> bool:
+        """True iff Langfuse keys are configured AND the soft kill-switch isn't set."""
+        if self.langfuse_public_key is None or self.langfuse_secret_key is None:
+            return False
+        if self.langfuse_trace_enabled_raw is None:
+            return True
+        return self.langfuse_trace_enabled_raw.strip().lower() not in {"false", "0", "no", "off"}

@@ -60,3 +60,41 @@ def test_experimental_view_tools_disabled_via_env(monkeypatch):
     monkeypatch.setenv("CHAT_EXPERIMENTAL_VIEW_TOOLS", "false")
     cfg = AgentConfig()
     assert cfg.experimental_view_tools is False
+
+
+def test_langfuse_disabled_when_keys_unset(monkeypatch):
+    monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
+    monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+    monkeypatch.delenv("LANGFUSE_TRACE_ENABLED", raising=False)
+    from cell_explorer_agent.config import AgentConfig
+    cfg = AgentConfig()
+    assert cfg.langfuse_public_key is None
+    assert cfg.langfuse_secret_key is None
+    assert cfg.langfuse_trace_enabled is False
+
+
+def test_langfuse_enabled_by_default_when_keys_set(monkeypatch):
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
+    monkeypatch.delenv("LANGFUSE_TRACE_ENABLED", raising=False)
+    from cell_explorer_agent.config import AgentConfig
+    cfg = AgentConfig()
+    assert cfg.langfuse_public_key == "pk-test"
+    assert cfg.langfuse_secret_key == "sk-test"
+    assert cfg.langfuse_trace_enabled is True
+
+
+def test_langfuse_explicit_disable_overrides_default(monkeypatch):
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
+    monkeypatch.setenv("LANGFUSE_TRACE_ENABLED", "false")
+    from cell_explorer_agent.config import AgentConfig
+    cfg = AgentConfig()
+    assert cfg.langfuse_trace_enabled is False
+
+
+def test_langfuse_host_default(monkeypatch):
+    monkeypatch.delenv("LANGFUSE_HOST", raising=False)
+    from cell_explorer_agent.config import AgentConfig
+    cfg = AgentConfig()
+    assert cfg.langfuse_host == "https://us.cloud.langfuse.com"
