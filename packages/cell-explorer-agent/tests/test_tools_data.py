@@ -802,3 +802,106 @@ async def test_gene_panel_by_obs_empty_gene_list_errors(fake_zarr):
     tool = gene_panel_by_obs_tool(fake_zarr, limit_bytes=32_768, concurrency=4)
     result = await tool.func(obs_column="cell_type", genes=[])
     assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# Baseline-aware fraction_expressing tests (fix for floored/non-zero-minimum data)
+# ---------------------------------------------------------------------------
+
+async def test_xscan_panel_sums_floored_data_baseline():
+    """_xscan_panel_sums uses min-as-baseline, not np.count_nonzero.
+
+    expr = [0.5, 0.5, 2.0, 0.5, 3.5]
+    masks: cat0 = first 2 cells, cat1 = last 3 cells
+    union baseline = min(expr[union]) = 0.5
+    expressing = val > 0.5
+      cat0: [0.5, 0.5] -> 0 cells expressing
+      cat1: [2.0, 0.5, 3.5] -> 2 cells expressing
+
+    Old np.count_nonzero would give [2, 3] (all values nonzero).
+    """
+    import numpy as np
+
+    from cell_explorer_agent.tools.data.genes import _xscan_panel_sums
+    from cell_explorer_agent.tools.zarr_protocol import ObsColumn
+    from tests.fakes.fake_zarr import FakeZarrAccess
+
+    expr_arr = np.array([0.5, 0.5, 2.0, 0.5, 3.5], dtype="float32")
+    fake = FakeZarrAccess(
+        n_obs=5,
+        n_var=1,
+        obs={},
+        var=["g0"],
+        expression={"g0": expr_arr},
+    )
+
+    masks = [
+        np.array([True, True, False, False, False]),
+        np.array([False, False, True, True, True]),
+    ]
+
+    sum_x, nnz, n_cells = await _xscan_panel_sums(fake, ["g0"], masks, concurrency=1)
+
+    assert sum_x.shape == (1, 2)
+    assert nnz.shape == (1, 2)
+    # sum_x unaffected by baseline change
+    np.testing.assert_allclose(sum_x[0, 0], 1.0, atol=1e-6)   # 0.5+0.5
+    np.testing.assert_allclose(sum_x[0, 1], 6.0, atol=1e-6)   # 2.0+0.5+3.5
+    # baseline-aware counts
+    assert nnz[0, 0] == 0, f"expected 0, got {nnz[0,0]}"  # no val > 0.5 in cat0
+    assert nnz[0, 1] == 2, f"expected 2, got {nnz[0,1]}"  # 2.0 and 3.5 > 0.5
+
+
+async def test_xscan_group_sums_floored_data_baseline():
+    """_xscan_group_sums uses min-as-baseline over the masked cells.
+
+    expr = [0.1, 0.1, 1.0, 0.1, 2.5], mask = all True
+    baseline = 0.1; expressing = val > 0.1 -> 2 cells (1.0 and 2.5)
+    Old np.count_nonzero would give 5 (all nonzero).
+    """
+    import numpy as np
+
+    from cell_explorer_agent.tools.data.genes import _xscan_group_sums
+    from tests.fakes.fake_zarr import FakeZarrAccess
+
+    expr_arr = np.array([0.1, 0.1, 1.0, 0.1, 2.5], dtype="float32")
+    fake = FakeZarrAccess(
+        n_obs=5,
+        n_var=1,
+        obs={},
+        var=["g0"],
+        expression={"g0": expr_arr},
+    )
+
+    mask = np.ones(5, dtype=bool)
+    sum_x, nnz = await _xscan_group_sums(fake, ["g0"], mask, concurrency=1)
+
+    np.testing.assert_allclose(sum_x[0], 3.8, atol=1e-4)  # 0.1+0.1+1.0+0.1+2.5 (float32 precision)
+    assert nnz[0] == 2, f"expected 2, got {nnz[0]}"  # only 1.0 and 2.5 > baseline 0.1
+
+
+async def test_xscan_group_sums_zero_floored_backward_compat():
+    """When true zeros exist, baseline=0 and nnz matches np.count_nonzero behavior.
+
+    expr = [0, 0, 1, 2, 0], mask = all True
+    baseline = 0; expressing = val > 0 -> 2 cells
+    """
+    import numpy as np
+
+    from cell_explorer_agent.tools.data.genes import _xscan_group_sums
+    from tests.fakes.fake_zarr import FakeZarrAccess
+
+    expr_arr = np.array([0, 0, 1, 2, 0], dtype="float32")
+    fake = FakeZarrAccess(
+        n_obs=5,
+        n_var=1,
+        obs={},
+        var=["g0"],
+        expression={"g0": expr_arr},
+    )
+
+    mask = np.ones(5, dtype=bool)
+    sum_x, nnz = await _xscan_group_sums(fake, ["g0"], mask, concurrency=1)
+
+    np.testing.assert_allclose(sum_x[0], 3.0, atol=1e-6)
+    assert nnz[0] == 2, f"expected 2, got {nnz[0]}"  # matches count_nonzero for zero-floored data
