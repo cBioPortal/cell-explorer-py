@@ -172,6 +172,30 @@ async def test_tool_span_error_sets_level_error(fake):
     assert sp.status_message == "boom"
 
 
+async def test_generations_are_numbered_within_a_turn(fake):
+    """Multi-round agent loops should produce llm-call-1, llm-call-2, ...
+    so the Langfuse trace tree is scannable instead of showing identical
+    'llm-call' rows."""
+    async with TurnTrace(
+        client=fake,
+        user_id="user-1",
+        thread_id="thread-abc",
+        dataset_slug="pbmc3k",
+        is_public=True,
+        model="m",
+        environment="test",
+        user_input="hi",
+        view_state=None,
+    ) as trace:
+        for _ in range(3):
+            trace.add_generation(
+                input_messages=[],
+                output_text="x",
+                usage={"input_tokens": 1, "output_tokens": 1, "cache_read_tokens": 0, "cache_write_tokens": 0},
+            )
+    assert [g.name for g in fake.generations] == ["llm-call-1", "llm-call-2", "llm-call-3"]
+
+
 async def test_exception_during_use_does_not_propagate_through_telemetry(fake):
     """If add_generation hits a bug, chat shouldn't fail."""
     async with TurnTrace(
