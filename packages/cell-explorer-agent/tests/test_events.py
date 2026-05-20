@@ -68,3 +68,23 @@ def test_thread_open_is_part_of_chat_event_union():
     # mypy/runtime test: the union accepts ThreadOpen
     ev: ChatEvent = ThreadOpen(thread_id="x", title="y")
     assert ev.type == "thread_open"
+
+
+def test_tool_progress_accepts_chart_field():
+    """ToolProgress optionally carries a chart hint on the ok status."""
+    ev = ToolProgress(
+        tool="top_expressed_genes",
+        status="ok",
+        chart={"type": "top_genes_bar", "data": {"genes": []}},
+    )
+    assert ev.chart == {"type": "top_genes_bar", "data": {"genes": []}}
+    # Round-trips through JSON.
+    serialized = dump_event(ev)
+    assert '"chart"' in serialized
+    assert '"top_genes_bar"' in serialized
+
+
+def test_tool_progress_chart_field_optional():
+    """Existing call sites without chart still work."""
+    ev = ToolProgress(tool="x", status="started")
+    assert ev.chart is None
