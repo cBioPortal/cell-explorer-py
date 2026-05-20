@@ -6,6 +6,7 @@ from cell_explorer_agent.tools.data.markers import find_markers_tool
 from cell_explorer_agent.tools.strata_protocol import StrataAccess
 from cell_explorer_agent.tools.data.genes import (
     gene_expression_summary_tool,
+    gene_panel_by_obs_tool,
     search_genes_tool,
     top_expressed_genes_tool,
 )
@@ -77,6 +78,13 @@ def build_v1_catalog(
             limit_bytes=lim,
             concurrency=config.gene_scan_concurrency,
             strata=strata,
+        )
+    )
+    cat.register(
+        gene_panel_by_obs_tool(
+            z,
+            limit_bytes=lim,
+            concurrency=config.gene_scan_concurrency,
         )
     )
     cat.register(

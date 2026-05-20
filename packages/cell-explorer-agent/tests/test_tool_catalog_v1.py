@@ -13,6 +13,7 @@ async def test_v1_catalog_includes_all_tools(fake_zarr):
         "search_genes",
         "gene_expression_summary",
         "top_expressed_genes",
+        "gene_panel_by_obs",
         "compare_groups",
         "find_markers",
         # ui_action (existing)
@@ -96,3 +97,11 @@ def test_compare_groups_registered_once_without_strata(fake_zarr):
     names = [t.name for t in catalog.all()]
     assert names.count("compare_groups") == 1
     assert "compare_groups_via_strata" not in names
+
+
+def test_gene_panel_by_obs_in_v1_catalog(fake_zarr):
+    from cell_explorer_agent.config import AgentConfig
+    from cell_explorer_agent.tools import build_v1_catalog
+    cat = build_v1_catalog(fake_zarr, config=AgentConfig())
+    names = [t.name for t in cat.all()]
+    assert "gene_panel_by_obs" in names

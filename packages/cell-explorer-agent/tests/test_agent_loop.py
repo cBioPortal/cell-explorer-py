@@ -506,3 +506,39 @@ async def test_tool_without_wants_context_does_not_get_context(fake_zarr):
         pass
 
     assert "_context" not in captured
+
+
+def test_strip_chart_data_for_llm():
+    """The helper that prepares LLM-side tool result content strips chart.data."""
+    from cell_explorer_agent.agent import _strip_chart_data_for_llm
+
+    result = {
+        "data": {"foo": "bar"},
+        "chart": {"type": "demo", "data": {"foo": "bar"}},
+    }
+    stripped = _strip_chart_data_for_llm(result)
+    assert stripped["data"] == {"foo": "bar"}
+    assert stripped["chart"] == {"type": "demo"}
+    # Original input not mutated.
+    assert result["chart"]["data"] == {"foo": "bar"}
+
+
+def test_strip_chart_data_passes_through_when_no_chart():
+    from cell_explorer_agent.agent import _strip_chart_data_for_llm
+    result = {"data": {"x": 1}}
+    assert _strip_chart_data_for_llm(result) == {"data": {"x": 1}}
+
+
+def test_strip_chart_data_passes_through_when_chart_has_no_data():
+    from cell_explorer_agent.agent import _strip_chart_data_for_llm
+    result = {"data": {"x": 1}, "chart": {"type": "demo"}}
+    stripped = _strip_chart_data_for_llm(result)
+    assert stripped["chart"] == {"type": "demo"}
+
+
+def test_strip_chart_data_handles_non_dict_chart():
+    """Defensive — if chart is somehow not a dict, pass through."""
+    from cell_explorer_agent.agent import _strip_chart_data_for_llm
+    result = {"data": {"x": 1}, "chart": "not a dict"}
+    # Should not raise; original returned unchanged.
+    assert _strip_chart_data_for_llm(result) == result

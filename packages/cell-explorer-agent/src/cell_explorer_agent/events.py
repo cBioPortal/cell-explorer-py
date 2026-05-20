@@ -25,6 +25,12 @@ class ToolProgress(BaseModel):
     # citation markers — used by the frontend to scroll/flash a citation's
     # target row in the WhyPanel. Optional so older clients don't break.
     tool_call_id: str | None = None
+    # Chart hint for inline rendering. When present (only on status="ok"),
+    # the frontend renders a chart inline below the tool pill. Shape:
+    # {"type": "<chart_type_enum>", "data": <renderer-specific>}. Tool authors
+    # decide per-result whether to include this; tools without a meaningful
+    # chart simply omit it.
+    chart: dict[str, Any] | None = None
 
 
 class UIAction(BaseModel):
