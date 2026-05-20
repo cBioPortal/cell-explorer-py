@@ -93,8 +93,8 @@ def test_langfuse_explicit_disable_overrides_default(monkeypatch):
     assert cfg.langfuse_trace_enabled is False
 
 
-def test_langfuse_host_default(monkeypatch):
-    monkeypatch.delenv("LANGFUSE_HOST", raising=False)
+def test_langfuse_base_url_default(monkeypatch):
+    monkeypatch.delenv("LANGFUSE_BASE_URL", raising=False)
     from cell_explorer_agent.config import AgentConfig
     cfg = AgentConfig()
-    assert cfg.langfuse_host == "https://us.cloud.langfuse.com"
+    assert cfg.langfuse_base_url == "https://us.cloud.langfuse.com"

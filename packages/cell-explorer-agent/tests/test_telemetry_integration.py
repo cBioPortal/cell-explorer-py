@@ -56,7 +56,7 @@ def test_sdk_emits_http_when_configured(monkeypatch):
     try:
         monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
         monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
-        monkeypatch.setenv("LANGFUSE_HOST", f"http://127.0.0.1:{port}")
+        monkeypatch.setenv("LANGFUSE_BASE_URL", f"http://127.0.0.1:{port}")
         langfuse_client._reset_for_tests()
         cfg = AgentConfig()
         client = langfuse_client.get(cfg)
@@ -88,7 +88,7 @@ def test_sdk_emits_http_when_configured(monkeypatch):
 def test_chat_survives_langfuse_unreachable(monkeypatch):
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
-    monkeypatch.setenv("LANGFUSE_HOST", "http://127.0.0.1:1")  # closed port
+    monkeypatch.setenv("LANGFUSE_BASE_URL", "http://127.0.0.1:1")  # closed port
     langfuse_client._reset_for_tests()
     cfg = AgentConfig()
     client = langfuse_client.get(cfg)

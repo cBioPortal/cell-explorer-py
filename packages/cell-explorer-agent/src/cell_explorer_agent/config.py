@@ -37,8 +37,8 @@ class AgentConfig(BaseSettings):
     # standard env var names so the SDK can pick them up directly if needed.
     langfuse_public_key: str | None = Field(default=None, alias="LANGFUSE_PUBLIC_KEY")
     langfuse_secret_key: str | None = Field(default=None, alias="LANGFUSE_SECRET_KEY")
-    langfuse_host: str = Field(
-        default="https://us.cloud.langfuse.com", alias="LANGFUSE_HOST"
+    langfuse_base_url: str = Field(
+        default="https://us.cloud.langfuse.com", alias="LANGFUSE_BASE_URL"
     )
     # The bool field has no default; the property below resolves it.
     langfuse_trace_enabled_raw: str | None = Field(

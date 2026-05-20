@@ -21,7 +21,7 @@ def test_get_returns_none_when_disabled(monkeypatch):
 def test_get_returns_client_when_configured(monkeypatch):
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
-    monkeypatch.setenv("LANGFUSE_HOST", "https://us.cloud.langfuse.com")
+    monkeypatch.setenv("LANGFUSE_BASE_URL", "https://us.cloud.langfuse.com")
     cfg = AgentConfig()
     client = langfuse_client.get(cfg)
     assert client is not None

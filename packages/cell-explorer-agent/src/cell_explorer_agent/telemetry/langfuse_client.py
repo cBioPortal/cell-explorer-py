@@ -53,7 +53,7 @@ def get(config: AgentConfig) -> Any | None:
     kwargs: dict[str, Any] = {
         "public_key": config.langfuse_public_key,
         "secret_key": config.langfuse_secret_key,
-        "host": config.langfuse_host,
+        "base_url": config.langfuse_base_url,
     }
     env = _resolve_environment()
     if env is not None:
