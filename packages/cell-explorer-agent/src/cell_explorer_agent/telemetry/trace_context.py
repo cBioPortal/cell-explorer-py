@@ -69,8 +69,10 @@ class TurnTrace:
             return self
         try:
             visibility = "public" if self._is_public else "private"
+            # Note: no explicit env: tag — the Langfuse SDK handles environment
+            # natively (LANGFUSE_TRACING_ENVIRONMENT / ENVIRONMENT) and exposes
+            # it as a first-class filter in the UI rather than a tag.
             tags = [
-                f"env:{self._environment}",
                 f"dataset:{self._dataset_slug}",
                 f"model:{self._model}",
                 f"visibility:{visibility}",

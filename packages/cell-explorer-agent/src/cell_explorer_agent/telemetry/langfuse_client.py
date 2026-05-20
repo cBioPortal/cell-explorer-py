@@ -11,12 +11,26 @@ Langfuse SDK directly.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from cell_explorer_agent.config import AgentConfig
 
 _client: Any | None = None
 _configured: bool = False
+
+
+def _resolve_environment() -> str | None:
+    """LANGFUSE_TRACING_ENVIRONMENT takes precedence over ENVIRONMENT.
+
+    Lets you deploy with `ENVIRONMENT=development` for the app while
+    overriding the Langfuse-side label (e.g. to a Langfuse-project-specific
+    convention). Returns None when neither is set — the SDK then uses its
+    own default (typically "default").
+    """
+    return os.environ.get("LANGFUSE_TRACING_ENVIRONMENT") or os.environ.get(
+        "ENVIRONMENT"
+    )
 
 
 def get(config: AgentConfig) -> Any | None:
@@ -36,11 +50,15 @@ def get(config: AgentConfig) -> Any | None:
 
     from langfuse import Langfuse
 
-    _client = Langfuse(
-        public_key=config.langfuse_public_key,
-        secret_key=config.langfuse_secret_key,
-        host=config.langfuse_host,
-    )
+    kwargs: dict[str, Any] = {
+        "public_key": config.langfuse_public_key,
+        "secret_key": config.langfuse_secret_key,
+        "host": config.langfuse_host,
+    }
+    env = _resolve_environment()
+    if env is not None:
+        kwargs["environment"] = env
+    _client = Langfuse(**kwargs)
     return _client
 
 
