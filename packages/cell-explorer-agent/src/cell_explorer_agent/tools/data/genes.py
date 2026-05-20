@@ -175,23 +175,33 @@ def top_expressed_genes_tool(
         keys = np.where(np.isfinite(means), -means, np.inf)
         order = np.argsort(keys, kind="stable")[:n]
 
-        return cap_json_bytes(
+        genes_list = [
             {
-                "obs_column": obs_column,
-                "group_value": group_value,
-                "method": method,
-                "n_cells": n_cells,
-                "genes": [
-                    {
-                        "symbol": str(names[int(i)]),
-                        "mean": float(means[i]),
-                        "fraction_expressing": float(fractions[i]),
-                    }
-                    for i in order
-                ],
+                "symbol": str(names[int(i)]),
+                "mean": float(means[i]),
+                "fraction_expressing": float(fractions[i]),
+            }
+            for i in order
+        ]
+        payload = {
+            "obs_column": obs_column,
+            "group_value": group_value,
+            "method": method,
+            "n_cells": n_cells,
+            "genes": genes_list,
+            # Inline-chart hint. Frontend reads chart.type to pick a renderer
+            # and chart.data for the values to render. LLM-side, chart.data is
+            # stripped in agent.py before being added to the tool_result block.
+            "chart": {
+                "type": "top_genes_bar",
+                "data": {
+                    "obs_column": obs_column,
+                    "group_value": group_value,
+                    "genes": genes_list,
+                },
             },
-            limit_bytes=limit_bytes,
-        )
+        }
+        return cap_json_bytes(payload, limit_bytes=limit_bytes)
 
     return Tool(
         name="top_expressed_genes",

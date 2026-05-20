@@ -683,3 +683,22 @@ async def test_find_markers_group_not_found_returns_error(fake_zarr):
     result = await tool.func(obs_column="cell_type", group_value="Not_A_Group")
     assert "error" in result
     assert "Not_A_Group" in result["error"]
+
+
+async def test_top_expressed_genes_includes_chart_hint(fake_zarr):
+    """top_expressed_genes returns a chart hint of type top_genes_bar."""
+    from cell_explorer_agent.config import AgentConfig
+
+    cfg = AgentConfig()
+    tool = top_expressed_genes_tool(
+        fake_zarr,
+        limit_bytes=cfg.tool_result_max_bytes,
+        concurrency=cfg.gene_scan_concurrency,
+    )
+    result = await tool.func(obs_column="cell_type", group_value="T cell", n=3)
+    assert "chart" in result
+    assert result["chart"]["type"] == "top_genes_bar"
+    assert "data" in result["chart"]
+    # chart.data echoes the top-genes list — same shape as result["genes"]
+    # so the frontend renderer can consume it directly.
+    assert result["chart"]["data"]["genes"] == result["genes"]
