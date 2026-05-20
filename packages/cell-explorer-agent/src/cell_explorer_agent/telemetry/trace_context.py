@@ -63,6 +63,10 @@ class TurnTrace:
         # v3 internals
         self._root_cm: Any | None = None
         self._root_obs: Any | None = None
+        # Per-turn counter so a turn with multiple LLM rounds shows
+        # llm-call-1, llm-call-2, ... in the Langfuse trace tree
+        # instead of three identical 'llm-call' rows.
+        self._gen_count: int = 0
 
     async def __aenter__(self) -> "TurnTrace":
         if self._client is None:
@@ -124,13 +128,14 @@ class TurnTrace:
         if self._root_obs is None:
             return
         try:
+            self._gen_count += 1
             gen_input: Any = (
                 input_messages
                 if self._is_public
                 else redact_user_input("", public=False)
             )
             gen = self._client.start_observation(
-                name="llm-call",
+                name=f"llm-call-{self._gen_count}",
                 as_type="generation",
                 input=gen_input,
                 model=self._model,
