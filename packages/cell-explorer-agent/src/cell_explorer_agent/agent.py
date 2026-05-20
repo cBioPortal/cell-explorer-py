@@ -24,6 +24,23 @@ def _short_args(args: dict[str, Any]) -> str:
         s = repr(args)
     return s if len(s) <= _MAX_ARG_LOG_LEN else s[:_MAX_ARG_LOG_LEN] + "...(truncated)"
 
+
+def _strip_chart_data_for_llm(result: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of the tool result with chart.data removed.
+
+    The frontend gets the full chart payload (including data) on the
+    ToolProgress wire event so it can render. The LLM only needs to know
+    that a chart was attached and what type — not the underlying numbers,
+    which it already has in result['data']. Stripping avoids the LLM
+    seeing duplicate data and lets it write a concise summary.
+    """
+    chart = result.get("chart")
+    if not isinstance(chart, dict) or "data" not in chart:
+        return result
+    stripped_chart = {k: v for k, v in chart.items() if k != "data"}
+    return {**result, "chart": stripped_chart}
+
+
 from cell_explorer_agent.config import AgentConfig
 from cell_explorer_agent.events import (
     ChatEvent,
@@ -255,14 +272,27 @@ class ChatAgent:
                     )
 
                     if tool.kind == "data":
+                        # Forward chart hint on the wire so the frontend renders.
+                        chart_for_wire = (
+                            result.get("chart") if isinstance(result, dict) else None
+                        )
                         yield ToolProgress(
                             tool=tool.name,
                             status="ok",
                             duration_ms=duration_ms,
                             tool_call_id=call.id,
+                            chart=chart_for_wire,
+                        )
+                        # Strip chart.data before sending to LLM — model only
+                        # needs to know a chart was attached, not duplicate
+                        # values that are also present in result["data"].
+                        llm_content = (
+                            _strip_chart_data_for_llm(result)
+                            if isinstance(result, dict)
+                            else result
                         )
                         results.append(
-                            ToolResult(tool_call_id=call.id, content=result)
+                            ToolResult(tool_call_id=call.id, content=llm_content)
                         )
                         trace.add_tool_span(
                             name=tool.name,
