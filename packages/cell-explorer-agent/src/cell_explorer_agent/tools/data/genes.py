@@ -341,3 +341,110 @@ async def _xscan_panel_sums(
 
     await asyncio.gather(*(_one(i, g) for i, g in enumerate(names)))
     return sum_x, nnz, n_cells
+
+
+PANEL_GENE_CAP = 50
+
+
+def gene_panel_by_obs_tool(
+    z: ZarrAccess,
+    *,
+    limit_bytes: int,
+    concurrency: int,
+) -> Tool:
+    """Per-(gene, category) mean expression and fraction-expressing matrix.
+
+    Returns data shaped for the frontend's ExpressionDotPlot renderer:
+    rows = genes (in argument order), cols = categories (in dataset order).
+    """
+
+    async def run(obs_column: str, genes: list[str]) -> dict[str, Any]:
+        if not isinstance(genes, list) or len(genes) == 0:
+            return {"error": "genes must be a non-empty list of gene symbols"}
+        if len(genes) > PANEL_GENE_CAP:
+            return {
+                "error": (
+                    f"too many genes ({len(genes)} > {PANEL_GENE_CAP}); "
+                    "narrow the panel and retry"
+                )
+            }
+
+        try:
+            col = await z.obs_column(obs_column)
+        except KeyError:
+            return {"error": f"obs column {obs_column!r} not found"}
+        if col.dtype != "categorical" or col.categories is None:
+            return {"error": f"{obs_column!r} is not categorical"}
+
+        categories = list(col.categories)
+        masks = [col.values == code for code in range(len(categories))]
+
+        try:
+            var_names = await z.var_names()
+        except Exception as exc:
+            return {"error": f"failed to read var names: {exc}"}
+        var_set = set(var_names)
+        missing = [g for g in genes if g not in var_set]
+        if missing:
+            return {"error": f"genes not found in dataset: {missing[:5]}"}
+
+        try:
+            sum_x, nnz, n_cells = await _xscan_panel_sums(
+                z, genes, masks, concurrency=concurrency,
+            )
+        except KeyError as exc:
+            return {"error": f"gene {exc!s} not found"}
+        except Exception as exc:
+            return {"error": f"failed to read expression data: {exc}"}
+
+        # Avoid division by zero for empty categories.
+        with np.errstate(divide="ignore", invalid="ignore"):
+            n_cells_safe = np.where(n_cells == 0, 1, n_cells)
+            mean = sum_x.astype("float64") / n_cells_safe
+            frac = nnz.astype("float64") / n_cells_safe
+            mean[:, n_cells == 0] = 0.0
+            frac[:, n_cells == 0] = 0.0
+
+        data = {
+            "genes": list(genes),
+            "categories": categories,
+            "obs_column": obs_column,
+            "mean": mean.tolist(),
+            "frac_expressing": frac.tolist(),
+            "n_cells_per_category": n_cells.tolist(),
+        }
+        return cap_json_bytes(
+            {
+                "data": data,
+                "chart": {"type": "gene_panel_dotplot", "data": data},
+            },
+            limit_bytes=limit_bytes,
+        )
+
+    return Tool(
+        name="gene_panel_by_obs",
+        kind="data",
+        description=(
+            "Per-(gene, category) mean expression and fraction-expressing for "
+            "a panel of genes across a categorical obs column. Use when the "
+            "user wants to see marker genes / cell-type-resolved expression as "
+            "a dotplot (e.g. 'compare CD8A, CD4, GZMB across cell types'). "
+            "Genes must already be resolved to canonical symbols/IDs (use "
+            "search_genes first if needed). Max 50 genes."
+        ),
+        args_schema={
+            "type": "object",
+            "properties": {
+                "obs_column": {"type": "string"},
+                "genes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "maxItems": PANEL_GENE_CAP,
+                },
+            },
+            "required": ["obs_column", "genes"],
+            "additionalProperties": False,
+        },
+        func=run,
+    )

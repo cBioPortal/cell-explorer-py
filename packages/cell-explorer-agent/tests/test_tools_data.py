@@ -729,3 +729,76 @@ async def test_xscan_panel_sums_shape(fake_zarr):
     for j in range(2):
         for i in range(3):
             assert nnz[i, j] <= n_cells[j]
+
+
+async def test_gene_panel_by_obs_returns_matrix(fake_zarr):
+    """gene_panel_by_obs returns matrix-format data + gene_panel_dotplot chart hint."""
+    from cell_explorer_agent.config import AgentConfig
+    from cell_explorer_agent.tools.data.genes import gene_panel_by_obs_tool
+
+    cfg = AgentConfig()
+    tool = gene_panel_by_obs_tool(
+        fake_zarr,
+        limit_bytes=cfg.tool_result_max_bytes,
+        concurrency=cfg.gene_scan_concurrency,
+    )
+    result = await tool.func(obs_column="cell_type", genes=["CD8A", "CD4"])
+
+    assert "data" in result
+    data = result["data"]
+    assert data["genes"] == ["CD8A", "CD4"]
+    # All fixture categories preserved in dataset order.
+    assert "T cell" in data["categories"]
+    assert "B cell" in data["categories"]
+    # Matrices: rows = genes, cols = categories.
+    assert len(data["mean"]) == 2  # 2 genes
+    assert len(data["mean"][0]) == len(data["categories"])
+    assert len(data["frac_expressing"]) == 2
+    assert len(data["n_cells_per_category"]) == len(data["categories"])
+    # Chart hint with the same data echoed for the renderer.
+    assert result["chart"]["type"] == "gene_panel_dotplot"
+    assert result["chart"]["data"]["genes"] == ["CD8A", "CD4"]
+
+
+async def test_gene_panel_by_obs_validates_obs_column(fake_zarr):
+    from cell_explorer_agent.tools.data.genes import gene_panel_by_obs_tool
+    tool = gene_panel_by_obs_tool(fake_zarr, limit_bytes=32_768, concurrency=4)
+    result = await tool.func(obs_column="nonexistent_column", genes=["CD8A"])
+    assert "error" in result
+    assert "nonexistent_column" in result["error"]
+
+
+async def test_gene_panel_by_obs_rejects_non_categorical(fake_zarr):
+    """A continuous obs column can't be used as a category axis."""
+    import pytest
+    from cell_explorer_agent.tools.data.genes import gene_panel_by_obs_tool
+    tool = gene_panel_by_obs_tool(fake_zarr, limit_bytes=32_768, concurrency=4)
+    cols = await fake_zarr.obs_columns()
+    continuous = next((c for c in cols if c.dtype != "categorical"), None)
+    if continuous is None:
+        pytest.skip("fake_zarr fixture has no continuous obs column")
+    result = await tool.func(obs_column=continuous.name, genes=["CD8A"])
+    assert "error" in result
+
+
+async def test_gene_panel_by_obs_unknown_gene_error(fake_zarr):
+    from cell_explorer_agent.tools.data.genes import gene_panel_by_obs_tool
+    tool = gene_panel_by_obs_tool(fake_zarr, limit_bytes=32_768, concurrency=4)
+    result = await tool.func(obs_column="cell_type", genes=["NOT_A_REAL_GENE"])
+    assert "error" in result
+
+
+async def test_gene_panel_by_obs_caps_gene_count(fake_zarr):
+    """Tool rejects >50 genes."""
+    from cell_explorer_agent.tools.data.genes import gene_panel_by_obs_tool
+    tool = gene_panel_by_obs_tool(fake_zarr, limit_bytes=32_768, concurrency=4)
+    too_many = [f"g{i}" for i in range(60)]
+    result = await tool.func(obs_column="cell_type", genes=too_many)
+    assert "error" in result
+
+
+async def test_gene_panel_by_obs_empty_gene_list_errors(fake_zarr):
+    from cell_explorer_agent.tools.data.genes import gene_panel_by_obs_tool
+    tool = gene_panel_by_obs_tool(fake_zarr, limit_bytes=32_768, concurrency=4)
+    result = await tool.func(obs_column="cell_type", genes=[])
+    assert "error" in result
