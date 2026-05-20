@@ -14,6 +14,7 @@ async def test_v1_catalog_includes_all_tools(fake_zarr):
         "gene_expression_summary",
         "top_expressed_genes",
         "compare_groups",
+        "find_markers",
         # ui_action (existing)
         "set_embedding",
         "set_color_by_gene",
