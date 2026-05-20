@@ -2,6 +2,7 @@
 
 from cell_explorer_agent.config import AgentConfig
 from cell_explorer_agent.tools.data.compare import compare_groups_tool
+from cell_explorer_agent.tools.data.markers import find_markers_tool
 from cell_explorer_agent.tools.strata_protocol import StrataAccess
 from cell_explorer_agent.tools.data.genes import (
     gene_expression_summary_tool,
@@ -80,6 +81,14 @@ def build_v1_catalog(
     )
     cat.register(
         compare_groups_tool(
+            z,
+            limit_bytes=lim,
+            concurrency=config.gene_scan_concurrency,
+            strata=strata,
+        )
+    )
+    cat.register(
+        find_markers_tool(
             z,
             limit_bytes=lim,
             concurrency=config.gene_scan_concurrency,

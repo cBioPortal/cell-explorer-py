@@ -562,3 +562,124 @@ async def test_compare_groups_atomic_and_xscan_produce_identical_stats(fake_zarr
         np.testing.assert_allclose(ga["mean_b"], gx["mean_b"], atol=1e-9)
         np.testing.assert_allclose(ga["var_a"], gx["var_a"], atol=1e-9)
         np.testing.assert_allclose(ga["var_b"], gx["var_b"], atol=1e-9)
+
+
+from cell_explorer_agent.tools.data.markers import find_markers_tool
+
+
+async def test_find_markers_returns_top_by_cohens_d(fake_zarr):
+    tool = find_markers_tool(fake_zarr, limit_bytes=32_768, concurrency=4)
+    result = await tool.func(obs_column="cell_type", group_value="T cell", n=5)
+    assert result["method"] == "via_xscan"
+    assert result["ranked_by"] == "cohens_d"
+    assert result["obs_column"] == "cell_type"
+    assert result["group_value"] == "T cell"
+    assert result["n_cells_group"] > 0
+    assert result["n_cells_rest"] > 0
+    assert len(result["genes"]) == 5
+    # CD8A is the T-cell-boosted marker in the fixture, should rank top
+    symbols = [g["symbol"] for g in result["genes"]]
+    assert "CD8A" in symbols
+    cd8a = next(g for g in result["genes"] if g["symbol"] == "CD8A")
+    # T cells are 'group', everything else is 'rest'; CD8A should be higher in group
+    assert cd8a["cohens_d"] > 0
+
+
+async def test_find_markers_output_schema(fake_zarr):
+    """Top-level + per-gene shapes."""
+    tool = find_markers_tool(fake_zarr, limit_bytes=32_768, concurrency=4)
+    result = await tool.func(obs_column="cell_type", group_value="T cell", n=3)
+    assert set(result) == {
+        "obs_column", "group_value", "ranked_by", "method",
+        "n_cells_group", "n_cells_rest", "genes",
+    }
+    for g in result["genes"]:
+        assert set(g) == {
+            "symbol", "cohens_d", "t_statistic",
+            "mean_group", "mean_rest", "var_group", "var_rest",
+            "n_group", "n_rest",
+        }
+
+
+async def test_find_markers_uses_coarse_strata_when_available(fake_zarr):
+    from tests.fakes.fake_strata import FakeStrataAccess
+
+    strata = FakeStrataAccess.default(var_names=fake_zarr.var)
+    tool = find_markers_tool(
+        fake_zarr, limit_bytes=32_768, concurrency=4, strata=strata,
+    )
+    result = await tool.func(obs_column="cell_type", group_value="T cell", n=3)
+    assert "error" not in result, result
+    assert result["method"] == "via_coarse_strata"
+    assert len(result["genes"]) == 3
+
+
+async def test_find_markers_uses_atomic_when_no_coarse(fake_zarr):
+    from tests.fakes.fake_strata import FakeStrataAccess
+
+    strata = FakeStrataAccess.with_atomic(
+        axes=["cell_type", "synth"],
+        stratum_values={
+            "cell_type": ["T cell", "B cell", "Monocyte"],
+            "synth": ["p", "q"],
+        },
+        var_names=fake_zarr.var,
+    )
+    tool = find_markers_tool(
+        fake_zarr, limit_bytes=32_768, concurrency=4, strata=strata,
+    )
+    result = await tool.func(obs_column="cell_type", group_value="T cell", n=3)
+    assert "error" not in result, result
+    assert result["method"] == "via_atomic_strata"
+
+
+async def test_find_markers_falls_back_to_xscan(fake_zarr):
+    tool = find_markers_tool(
+        fake_zarr, limit_bytes=32_768, concurrency=4, strata=None,
+    )
+    result = await tool.func(obs_column="cell_type", group_value="T cell", n=3)
+    assert result["method"] == "via_xscan"
+
+
+async def test_find_markers_strata_and_xscan_produce_identical_stats(fake_zarr):
+    """Cross-path equivalence regression guard."""
+    import numpy as np
+
+    from tests.fakes.fake_strata import FakeStrataAccess
+
+    strata = FakeStrataAccess.from_zarr_data(fake_zarr)
+
+    tool_with = find_markers_tool(
+        fake_zarr, limit_bytes=32_768, concurrency=4, strata=strata,
+    )
+    tool_without = find_markers_tool(
+        fake_zarr, limit_bytes=32_768, concurrency=4, strata=None,
+    )
+    args = dict(obs_column="cell_type", group_value="T cell", n=10)
+
+    result_strata = await tool_with.func(**args)
+    result_xscan = await tool_without.func(**args)
+
+    assert result_strata["method"] == "via_coarse_strata"
+    assert result_xscan["method"] == "via_xscan"
+    assert result_strata["n_cells_group"] == result_xscan["n_cells_group"]
+    assert result_strata["n_cells_rest"] == result_xscan["n_cells_rest"]
+
+    strata_syms = [g["symbol"] for g in result_strata["genes"]]
+    xscan_syms = [g["symbol"] for g in result_xscan["genes"]]
+    assert strata_syms == xscan_syms
+
+    for gs, gx in zip(result_strata["genes"], result_xscan["genes"]):
+        np.testing.assert_allclose(gs["cohens_d"], gx["cohens_d"], atol=1e-9)
+        np.testing.assert_allclose(gs["t_statistic"], gx["t_statistic"], atol=1e-9)
+        np.testing.assert_allclose(gs["mean_group"], gx["mean_group"], atol=1e-9)
+        np.testing.assert_allclose(gs["mean_rest"], gx["mean_rest"], atol=1e-9)
+        np.testing.assert_allclose(gs["var_group"], gx["var_group"], atol=1e-9)
+        np.testing.assert_allclose(gs["var_rest"], gx["var_rest"], atol=1e-9)
+
+
+async def test_find_markers_group_not_found_returns_error(fake_zarr):
+    tool = find_markers_tool(fake_zarr, limit_bytes=32_768, concurrency=4)
+    result = await tool.func(obs_column="cell_type", group_value="Not_A_Group")
+    assert "error" in result
+    assert "Not_A_Group" in result["error"]
