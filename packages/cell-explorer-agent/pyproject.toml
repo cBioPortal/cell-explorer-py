@@ -9,6 +9,7 @@ dependencies = [
     "pydantic-settings>=2.8",
     "numpy>=1.26",
     "httpx>=0.28",
+    "langfuse>=3.0,<4.0",
 ]
 
 [project.optional-dependencies]
@@ -33,6 +34,10 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 pythonpath = ["tests"]
+markers = [
+    "integration: tests that talk to real external services (HTTP servers, etc.)",
+]
+addopts = "-m 'not integration'"
 
 [dependency-groups]
 dev = [

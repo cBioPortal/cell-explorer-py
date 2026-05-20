@@ -152,6 +152,7 @@ async def _ndjson_event_stream(
     engine,  # AsyncEngine — used to open a fresh session for stream-time writes
     thread_id: _uuid.UUID,
     thread_title: str,
+    telemetry_context: dict[str, Any] | None = None,
 ) -> AsyncIterator[bytes]:
     """Serialize agent events as NDJSON. Emits a leading thread_open event,
     accumulates assistant text deltas, and persists the assistant's final
@@ -165,7 +166,11 @@ async def _ndjson_event_stream(
     assistant_buffer: list[str] = []
     persisted = False  # Did we write the assistant message yet?
     try:
-        async for event in agent.run(messages=messages, view_state=view_state):
+        async for event in agent.run(
+            messages=messages,
+            view_state=view_state,
+            telemetry_context=telemetry_context,
+        ):
             if event.type == "text_delta":
                 assistant_buffer.append(event.text)
             elif event.type == "done" and assistant_buffer:
@@ -336,6 +341,7 @@ async def post_chat_turn(
     # request's db session scope, so it uses its own fresh session.
     thread_id_uuid = thread.id
     thread_title_str = thread.title
+    dataset_is_public = dataset.is_public
     engine = request.app.state.db_engine
 
     await db.commit()
@@ -348,6 +354,13 @@ async def post_chat_turn(
             engine=engine,
             thread_id=thread_id_uuid,
             thread_title=thread_title_str,
+            telemetry_context={
+                "user_id": user.sub,
+                "thread_id": str(thread_id_uuid),
+                "dataset_slug": slug,
+                "is_public": dataset_is_public,
+                "environment": settings.environment,
+            },
         ),
         media_type="application/x-ndjson",
     )
