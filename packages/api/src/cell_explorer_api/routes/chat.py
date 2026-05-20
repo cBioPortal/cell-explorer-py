@@ -355,7 +355,9 @@ async def post_chat_turn(
             thread_id=thread_id_uuid,
             thread_title=thread_title_str,
             telemetry_context={
-                "user_id": user.sub,
+                # Prefer email over sub for scannability in the Langfuse UI.
+                # Falls back to sub when the Keycloak profile has no email.
+                "user_id": user.email or user.sub,
                 "thread_id": str(thread_id_uuid),
                 "dataset_slug": slug,
                 "is_public": dataset_is_public,
