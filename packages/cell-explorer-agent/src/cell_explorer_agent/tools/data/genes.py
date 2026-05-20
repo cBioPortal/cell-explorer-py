@@ -304,3 +304,40 @@ async def _xscan_group_sums(
 
     await asyncio.gather(*(_one(i, g) for i, g in enumerate(names)))
     return sum_x, nnz
+
+
+async def _xscan_panel_sums(
+    z: ZarrAccess,
+    names: list[str],
+    masks: list[np.ndarray],
+    *,
+    concurrency: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Per-(gene, category) sum_x + nnz + per-category n_cells.
+
+    Mirrors _xscan_group_sums but with K masks (one per category) instead of
+    one. Single zarr fetch per gene; we slice into each category's mask after
+    the fetch lands.
+
+    Returns:
+        sum_x: (n_genes, n_categories) float64
+        nnz:   (n_genes, n_categories) int64
+        n_cells: (n_categories,) int64
+    """
+    n_genes = len(names)
+    n_cat = len(masks)
+    sum_x = np.zeros((n_genes, n_cat), dtype="float64")
+    nnz = np.zeros((n_genes, n_cat), dtype="int64")
+    n_cells = np.array([int(m.sum()) for m in masks], dtype="int64")
+    sem = asyncio.Semaphore(concurrency)
+
+    async def _one(i: int, gene: str) -> None:
+        async with sem:
+            expr = await z.gene_column(gene)
+        for j, mask in enumerate(masks):
+            sub = expr[mask].astype("float64", copy=False)
+            sum_x[i, j] = sub.sum()
+            nnz[i, j] = int(np.count_nonzero(sub))
+
+    await asyncio.gather(*(_one(i, g) for i, g in enumerate(names)))
+    return sum_x, nnz, n_cells

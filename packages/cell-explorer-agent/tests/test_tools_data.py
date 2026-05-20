@@ -702,3 +702,30 @@ async def test_top_expressed_genes_includes_chart_hint(fake_zarr):
     # chart.data echoes the top-genes list — same shape as result["genes"]
     # so the frontend renderer can consume it directly.
     assert result["chart"]["data"]["genes"] == result["genes"]
+
+
+async def test_xscan_panel_sums_shape(fake_zarr):
+    """_xscan_panel_sums returns (n_genes, n_categories) matrices for sum_x and nnz, plus n_cells per category."""
+    import numpy as np
+    from cell_explorer_agent.tools.data.genes import _xscan_panel_sums
+
+    col = await fake_zarr.obs_column("cell_type")
+    # Use whatever categories the fixture has — first 2 of them.
+    cat_codes = list(range(min(2, len(col.categories))))
+    masks = [col.values == c for c in cat_codes]
+    # Use the first 3 gene names from var.
+    var_names = await fake_zarr.var_names()
+    gene_names = list(var_names[:3])
+
+    sum_x, nnz, n_cells = await _xscan_panel_sums(
+        fake_zarr, gene_names, masks, concurrency=4,
+    )
+    assert sum_x.shape == (3, 2)
+    assert nnz.shape == (3, 2)
+    assert n_cells.shape == (2,)
+    assert n_cells[0] == int(masks[0].sum())
+    assert n_cells[1] == int(masks[1].sum())
+    # Sanity: nnz <= n_cells for each (gene, category)
+    for j in range(2):
+        for i in range(3):
+            assert nnz[i, j] <= n_cells[j]
