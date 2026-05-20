@@ -300,7 +300,11 @@ async def _xscan_group_sums(
             expr = await z.gene_column(gene)
         sub = expr[mask].astype("float64", copy=False)
         sum_x[i] = sub.sum()
-        nnz[i] = int(np.count_nonzero(sub))
+        if sub.size > 0:
+            baseline = float(sub.min())
+            nnz[i] = int(np.sum(sub > baseline))
+        else:
+            nnz[i] = 0
 
     await asyncio.gather(*(_one(i, g) for i, g in enumerate(names)))
     return sum_x, nnz
@@ -331,13 +335,25 @@ async def _xscan_panel_sums(
     n_cells = np.array([int(m.sum()) for m in masks], dtype="int64")
     sem = asyncio.Semaphore(concurrency)
 
+    # Compute baseline per gene over the union of all category masks. This
+    # matches the frontend summary-panel worker's definition of "expressing"
+    # (val > min over all indexed cells) so chats and the summary panel agree.
+    union_mask = (
+        np.logical_or.reduce(masks)
+        if masks
+        else np.zeros(0, dtype=bool)
+    )
+
     async def _one(i: int, gene: str) -> None:
         async with sem:
             expr = await z.gene_column(gene)
+        expr_f = expr.astype("float64", copy=False)
+        scoped = expr_f[union_mask] if union_mask.size else expr_f
+        baseline = float(scoped.min()) if scoped.size > 0 else 0.0
         for j, mask in enumerate(masks):
-            sub = expr[mask].astype("float64", copy=False)
+            sub = expr_f[mask]
             sum_x[i, j] = sub.sum()
-            nnz[i, j] = int(np.count_nonzero(sub))
+            nnz[i, j] = int(np.sum(sub > baseline)) if sub.size > 0 else 0
 
     await asyncio.gather(*(_one(i, g) for i, g in enumerate(names)))
     return sum_x, nnz, n_cells

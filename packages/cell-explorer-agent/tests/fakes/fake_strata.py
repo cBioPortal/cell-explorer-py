@@ -116,7 +116,8 @@ class FakeStrataAccess:
                 sub = expr[mask].astype("float64", copy=False)
                 sum_x[s_idx, g_idx] = float(sub.sum())
                 sum_xx[s_idx, g_idx] = float((sub * sub).sum())
-                nnz[s_idx, g_idx] = int((sub != 0).sum())
+                baseline = float(sub.min()) if sub.size > 0 else 0.0
+                nnz[s_idx, g_idx] = int((sub > baseline).sum())
 
         stratum_keys = np.array([[c] for c in cats], dtype=object)
         return cls(coarse_tables={
@@ -208,7 +209,8 @@ class FakeStrataAccess:
                 sub = fake_zarr.expression[gene][mask].astype("float64", copy=False)
                 sum_x[s_idx, g_idx] = float(sub.sum())
                 sum_xx[s_idx, g_idx] = float((sub * sub).sum())
-                nnz[s_idx, g_idx] = int((sub != 0).sum())
+                baseline = float(sub.min()) if sub.size > 0 else 0.0
+                nnz[s_idx, g_idx] = int((sub > baseline).sum())
 
         stratum_keys = np.array(
             [[ct, synth_val] for ct, synth_val, _ in buckets], dtype=object,
