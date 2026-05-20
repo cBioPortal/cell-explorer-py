@@ -164,6 +164,16 @@ def build_system_prompt(ctx: DatasetContext) -> str:
         "0.5) and/or opacity (0=transparent, 1=opaque). At least one parameter required. "
         "Only use when the user explicitly asks to change the visual style."
     )
+    lines.append(
+        "  - When a tool result includes a `chart` field, the user already sees "
+        "the data as a visualization. Give a concise verbal summary (top hits, "
+        "surprising results, what to compare) — don't enumerate every row."
+    )
+    lines.append(
+        "  - For 'compare these genes across cell types' / 'show CD8A, CD4, GZMB "
+        "by cluster' / 'marker panel by category', use gene_panel_by_obs with the "
+        "gene list and the obs column. Returns a dotplot rendered inline."
+    )
     return "\n".join(lines)
 
 
