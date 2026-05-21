@@ -240,3 +240,161 @@ async def test_chat_enabled_dataset_passes_gate():
             user=user, dataset_slug="open", db=db, settings=settings, llm=llm
         )
         assert agent is not None
+
+
+# ---------- Cache tests (issue #101) ----------
+
+from datetime import datetime, timedelta, timezone
+
+
+def _public_dataset(slug: str = "pbmc3k", *, updated_at: datetime | None = None) -> MagicMock:
+    """Build a public-dataset mock with a settable updated_at."""
+    ds = MagicMock(
+        slug=slug,
+        name=slug,
+        description="",
+        is_public=True,
+        required_roles=[],
+        chat_enabled=True,
+        path=f"{slug}.zarr",
+    )
+    ds.updated_at = updated_at or datetime(2026, 1, 1, tzinfo=timezone.utc)
+    return ds
+
+
+@pytest.fixture(autouse=True)
+def _clear_dataset_ctx_cache():
+    """Each cache test starts with a clean cache."""
+    from cell_explorer_api.services.chat_session import _dataset_ctx_cache
+    _dataset_ctx_cache.clear()
+    yield
+    _dataset_ctx_cache.clear()
+
+
+@pytest.mark.asyncio
+async def test_dataset_ctx_cache_hits_on_second_call_with_same_slug_and_updated_at():
+    """Two make_chat_agent calls with the same Dataset row build dataset_ctx
+    only once — the second call hits the cache."""
+    dataset = _public_dataset()
+    datasource = MagicMock(base_url="https://example.com", type="HTTP_TOKEN", credential_ref=None)
+
+    fake_anndata = MagicMock(n_obs=10, n_vars=20, obsm_keys=[], obs_columns=[])
+
+    async def _db_factory():
+        # Fresh db session per call (the test reuses the same dataset/datasource).
+        return await _mk_db_session(_make_db_row(dataset, datasource))
+
+    call_count = 0
+    real_build = None
+
+    async def _spy_build(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return await real_build(*args, **kwargs)
+
+    from cell_explorer_agent import build_dataset_context as _real
+    real_build = _real
+
+    with patch("cell_explorer_api.services.chat_session.ZarrStore") as MockZS, \
+         patch("cell_explorer_api.services.chat_session.AnnDataStore") as MockADS, \
+         patch("cell_explorer_api.services.chat_session.StrataStore") as MockSS, \
+         patch("cell_explorer_api.services.chat_session.build_dataset_context", _spy_build):
+        MockZS.open = AsyncMock(return_value=MagicMock())
+        MockADS.open = AsyncMock(return_value=fake_anndata)
+        MockSS.open = AsyncMock(return_value=MagicMock())
+
+        user = _FakeUser(roles=[])
+        llm = FakeLLMClient(scripts=[])
+        settings = MagicMock()
+
+        await make_chat_agent(user=user, dataset_slug="pbmc3k", db=await _db_factory(), settings=settings, llm=llm)
+        await make_chat_agent(user=user, dataset_slug="pbmc3k", db=await _db_factory(), settings=settings, llm=llm)
+
+    assert call_count == 1, f"build_dataset_context called {call_count}x; expected 1 (cache hit)"
+
+
+@pytest.mark.asyncio
+async def test_dataset_ctx_cache_invalidates_when_updated_at_changes():
+    """After an admin PUT bumps the Dataset row's updated_at, the cache key
+    changes — the next make_chat_agent call rebuilds dataset_ctx."""
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    t1 = t0 + timedelta(minutes=1)
+    dataset = _public_dataset(updated_at=t0)
+    datasource = MagicMock(base_url="https://example.com", type="HTTP_TOKEN", credential_ref=None)
+
+    fake_anndata = MagicMock(n_obs=10, n_vars=20, obsm_keys=[], obs_columns=[])
+
+    call_count = 0
+    from cell_explorer_agent import build_dataset_context as _real
+
+    async def _spy_build(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return await _real(*args, **kwargs)
+
+    with patch("cell_explorer_api.services.chat_session.ZarrStore") as MockZS, \
+         patch("cell_explorer_api.services.chat_session.AnnDataStore") as MockADS, \
+         patch("cell_explorer_api.services.chat_session.StrataStore") as MockSS, \
+         patch("cell_explorer_api.services.chat_session.build_dataset_context", _spy_build):
+        MockZS.open = AsyncMock(return_value=MagicMock())
+        MockADS.open = AsyncMock(return_value=fake_anndata)
+        MockSS.open = AsyncMock(return_value=MagicMock())
+
+        user = _FakeUser(roles=[])
+        llm = FakeLLMClient(scripts=[])
+        settings = MagicMock()
+
+        # First call: cache miss, build_dataset_context runs.
+        db1 = await _mk_db_session(_make_db_row(dataset, datasource))
+        await make_chat_agent(user=user, dataset_slug="pbmc3k", db=db1, settings=settings, llm=llm)
+        assert call_count == 1
+
+        # Simulate an admin PUT bumping updated_at.
+        dataset.updated_at = t1
+
+        # Next call: cache key is different, build_dataset_context runs again.
+        db2 = await _mk_db_session(_make_db_row(dataset, datasource))
+        await make_chat_agent(user=user, dataset_slug="pbmc3k", db=db2, settings=settings, llm=llm)
+        assert call_count == 2, f"build_dataset_context called {call_count}x; expected 2 after updated_at bump"
+
+
+@pytest.mark.asyncio
+async def test_dataset_ctx_cache_is_independent_per_slug():
+    """Two datasets with different slugs cache independently."""
+    ds_a = _public_dataset(slug="ds-a")
+    ds_b = _public_dataset(slug="ds-b")
+    datasource = MagicMock(base_url="https://example.com", type="HTTP_TOKEN", credential_ref=None)
+
+    fake_anndata = MagicMock(n_obs=10, n_vars=20, obsm_keys=[], obs_columns=[])
+
+    call_count = 0
+    from cell_explorer_agent import build_dataset_context as _real
+
+    async def _spy_build(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return await _real(*args, **kwargs)
+
+    with patch("cell_explorer_api.services.chat_session.ZarrStore") as MockZS, \
+         patch("cell_explorer_api.services.chat_session.AnnDataStore") as MockADS, \
+         patch("cell_explorer_api.services.chat_session.StrataStore") as MockSS, \
+         patch("cell_explorer_api.services.chat_session.build_dataset_context", _spy_build):
+        MockZS.open = AsyncMock(return_value=MagicMock())
+        MockADS.open = AsyncMock(return_value=fake_anndata)
+        MockSS.open = AsyncMock(return_value=MagicMock())
+
+        user = _FakeUser(roles=[])
+        llm = FakeLLMClient(scripts=[])
+        settings = MagicMock()
+
+        # ds-a cold: 1 build
+        db_a = await _mk_db_session(_make_db_row(ds_a, datasource))
+        await make_chat_agent(user=user, dataset_slug="ds-a", db=db_a, settings=settings, llm=llm)
+        # ds-b cold: separate cache key, 1 more build
+        db_b = await _mk_db_session(_make_db_row(ds_b, datasource))
+        await make_chat_agent(user=user, dataset_slug="ds-b", db=db_b, settings=settings, llm=llm)
+        # ds-a warm: cache hit
+        db_a2 = await _mk_db_session(_make_db_row(ds_a, datasource))
+        await make_chat_agent(user=user, dataset_slug="ds-a", db=db_a2, settings=settings, llm=llm)
+
+    assert call_count == 2, f"build_dataset_context called {call_count}x; expected 2 (one per slug, ds-a's second is cached)"

@@ -4,8 +4,10 @@ Used by the CLI today; will be reused by the future /api/chat HTTP route
 (Plan 2).
 """
 
+from datetime import datetime
 from typing import Any
 
+from cell_explorer_agent.prompt import DatasetContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
@@ -27,6 +29,41 @@ from cell_explorer_api.services.zarr_adapter import (
 
 # Heavy imports deferred to call time (via module-level import that can be patched in tests)
 from zarr_access import AnnDataStore, StrataStore, ZarrStore
+
+
+# In-process cache of DatasetContext keyed by (slug, updated_at). The Dataset
+# row's updated_at bumps on every admin PUT (see routes/admin.py), so this
+# self-invalidates without an explicit hook: admin edits change the key,
+# subsequent requests miss the cache and rebuild. Process restart clears the
+# cache (uvicorn --reload covers dev). Stale entries accumulate on edits but
+# the leak is bounded by edit frequency and dataset count.
+#
+# See issue #101.
+_dataset_ctx_cache: dict[tuple[str, datetime], DatasetContext] = {}
+
+
+async def _build_dataset_context_cached(
+    adapter: AnnDataZarrAccess,
+    *,
+    dataset: Dataset,
+) -> DatasetContext:
+    """Cached wrapper around build_dataset_context.
+
+    Cached by (slug, updated_at). build_dataset_context reads every obs
+    column from the zarr store (categorical codes + categories arrays for
+    each), which is the dominant cost of /context cold-start. Caching the
+    DatasetContext means subsequent requests for the same Dataset row pay
+    only the cost of opening the zarr store, not the per-column reads.
+    """
+    key = (dataset.slug, dataset.updated_at)
+    if key not in _dataset_ctx_cache:
+        _dataset_ctx_cache[key] = await build_dataset_context(
+            adapter,
+            slug=dataset.slug,
+            name=dataset.name,
+            description=dataset.description or "",
+        )
+    return _dataset_ctx_cache[key]
 
 
 class ChatSessionError(Exception):
@@ -152,13 +189,8 @@ async def make_chat_agent(
     adapter = AnnDataZarrAccess(anndata)
     strata_adapter = StrataZarrAccess(strata_store)
 
-    # 5. Build DatasetContext + tool catalog
-    ctx = await build_dataset_context(
-        adapter,
-        slug=dataset.slug,
-        name=dataset.name,
-        description=dataset.description or "",
-    )
+    # 5. Build DatasetContext + tool catalog (ctx is cached per (slug, updated_at))
+    ctx = await _build_dataset_context_cached(adapter, dataset=dataset)
     # Only register the strata-powered tool if the dataset has coarse tables.
     # Empty -> pass None so the LLM only sees the X-scan compare_groups.
     strata_for_catalog = strata_adapter if strata_adapter.coarse_slugs() else None
