@@ -32,11 +32,13 @@ from zarr_access import AnnDataStore, StrataStore, ZarrStore
 
 
 # In-process cache of DatasetContext keyed by (slug, updated_at). The Dataset
-# row's updated_at bumps on every admin PUT (see routes/admin.py), so this
-# self-invalidates without an explicit hook: admin edits change the key,
-# subsequent requests miss the cache and rebuild. Process restart clears the
-# cache (uvicorn --reload covers dev). Stale entries accumulate on edits but
-# the leak is bounded by edit frequency and dataset count.
+# row's updated_at bumps unconditionally on every admin PUT (see
+# routes/admin.py update_dataset, line ~234), so this self-invalidates for any
+# DB-sourced DatasetContext field — including prompt_addendum — without an
+# explicit hook: admin edits change the key, subsequent requests miss the
+# cache and rebuild. Process restart clears the cache (uvicorn --reload covers
+# dev). Stale entries accumulate on edits but the leak is bounded by edit
+# frequency and dataset count.
 #
 # See issue #101.
 _dataset_ctx_cache: dict[tuple[str, datetime], DatasetContext] = {}
