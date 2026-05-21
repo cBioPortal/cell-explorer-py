@@ -55,6 +55,7 @@ class Dataset(SQLModel, table=True):
     description: str | None = None
     is_public: bool = Field(default=False)
     required_roles: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    prompt_addendum: str | None = Field(default=None)
     chat_enabled: bool = Field(default=False)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
