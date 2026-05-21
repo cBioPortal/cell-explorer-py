@@ -51,6 +51,10 @@ def test_build_system_prompt_includes_curator_notes_when_present():
     idx_desc = prompt.index("A test description.")
     assert idx_desc < idx_fence
 
+    # The block is paragraph-isolated: a blank line follows the closing
+    # fence so it doesn't visually bleed into the shape metadata.
+    assert "=== end curator notes ===\n\nShape:" in prompt
+
 
 def test_build_system_prompt_omits_curator_notes_when_none():
     from cell_explorer_agent.prompt.system import build_system_prompt

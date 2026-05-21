@@ -29,6 +29,7 @@ def build_system_prompt(ctx: DatasetContext) -> str:
         lines.append("=== Curator notes (authoritative dataset context) ===")
         lines.append(ctx.prompt_addendum)
         lines.append("=== end curator notes ===")
+        lines.append("")
     lines.append(f"Shape: {ctx.n_obs} cells × {ctx.n_var} genes.")
     lines.append("")
     lines.append("Obs columns:")
