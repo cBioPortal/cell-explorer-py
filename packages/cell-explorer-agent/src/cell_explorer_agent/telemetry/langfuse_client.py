@@ -12,6 +12,7 @@ Langfuse SDK directly.
 from __future__ import annotations
 
 import os
+import subprocess
 from typing import Any
 
 from cell_explorer_agent.config import AgentConfig
@@ -31,6 +32,26 @@ def _resolve_environment() -> str | None:
     return os.environ.get("LANGFUSE_TRACING_ENVIRONMENT") or os.environ.get(
         "ENVIRONMENT"
     )
+
+
+def _resolve_release() -> str | None:
+    """Resolve the git SHA to stamp on every trace as `release`.
+
+    Prefers GIT_SHA env (set by deploys / docker-compose) over a subprocess
+    fallback (useful in local dev). Returns None when neither is available
+    so the Langfuse SDK falls back to its own default.
+    """
+    sha = os.environ.get("GIT_SHA")
+    if sha:
+        return sha.strip()
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short=7", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except Exception:
+        return None
 
 
 def get(config: AgentConfig) -> Any | None:
@@ -58,6 +79,9 @@ def get(config: AgentConfig) -> Any | None:
     env = _resolve_environment()
     if env is not None:
         kwargs["environment"] = env
+    release = _resolve_release()
+    if release is not None:
+        kwargs["release"] = release
     _client = Langfuse(**kwargs)
     return _client
 

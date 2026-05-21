@@ -40,3 +40,52 @@ def test_get_returns_none_when_kill_switch_off(monkeypatch):
     monkeypatch.setenv("LANGFUSE_TRACE_ENABLED", "false")
     cfg = AgentConfig()
     assert langfuse_client.get(cfg) is None
+
+
+def test_release_kwarg_passed_when_git_sha_env_set(monkeypatch):
+    """GIT_SHA env value flows into the Langfuse() constructor as `release`."""
+    captured: dict = {}
+
+    class _RecordingLangfuse:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    import langfuse as langfuse_mod  # noqa: PLC0415
+
+    monkeypatch.setattr(langfuse_mod, "Langfuse", _RecordingLangfuse)
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
+    monkeypatch.setenv("GIT_SHA", "abc1234")
+
+    cfg = AgentConfig()
+    langfuse_client.get(cfg)
+
+    assert captured.get("release") == "abc1234"
+
+
+def test_release_kwarg_omitted_when_no_git_sha(monkeypatch):
+    """When GIT_SHA is unset and not in a git repo, `release` is not passed
+    so the SDK uses its own default."""
+    captured: dict = {}
+
+    class _RecordingLangfuse:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    import langfuse as langfuse_mod  # noqa: PLC0415
+
+    monkeypatch.setattr(langfuse_mod, "Langfuse", _RecordingLangfuse)
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
+    monkeypatch.delenv("GIT_SHA", raising=False)
+
+    # Force the subprocess fallback to return None by pointing PATH at /tmp.
+    monkeypatch.setattr(
+        "subprocess.check_output",
+        lambda *a, **kw: (_ for _ in ()).throw(FileNotFoundError("no git")),
+    )
+
+    cfg = AgentConfig()
+    langfuse_client.get(cfg)
+
+    assert "release" not in captured
