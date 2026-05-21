@@ -59,6 +59,7 @@ class DatasetCreate(BaseModel):
     is_public: bool = False
     required_roles: list[str] = []
     chat_enabled: bool = False
+    prompt_addendum: str | None = None
 
 
 class DatasetUpdate(BaseModel):
@@ -68,6 +69,7 @@ class DatasetUpdate(BaseModel):
     is_public: bool | None = None
     required_roles: list[str] | None = None
     chat_enabled: bool | None = None
+    prompt_addendum: str | None = None
 
 
 class DatasetAdminResponse(BaseModel):
@@ -80,6 +82,7 @@ class DatasetAdminResponse(BaseModel):
     is_public: bool
     required_roles: list[str]
     chat_enabled: bool
+    prompt_addendum: str | None
 
 
 class DatasetAdminListResponse(BaseModel):
@@ -176,6 +179,7 @@ async def list_datasets_admin(
             is_public=dataset.is_public,
             required_roles=dataset.required_roles,
             chat_enabled=dataset.chat_enabled,
+            prompt_addendum=dataset.prompt_addendum,
         )
         for dataset in result.all()
     ]
@@ -210,6 +214,7 @@ async def create_dataset(
         is_public=dataset.is_public,
         required_roles=dataset.required_roles,
         chat_enabled=dataset.chat_enabled,
+        prompt_addendum=dataset.prompt_addendum,
     )
 
 
@@ -240,6 +245,7 @@ async def update_dataset(
         is_public=dataset.is_public,
         required_roles=dataset.required_roles,
         chat_enabled=dataset.chat_enabled,
+        prompt_addendum=dataset.prompt_addendum,
     )
 
 

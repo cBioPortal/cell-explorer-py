@@ -302,3 +302,83 @@ def test_admin_create_dataset_chat_enabled_defaults_false(seeded_app):
     )
     assert response.status_code == 201
     assert response.json()["chat_enabled"] is False
+
+
+# --- prompt_addendum field ---
+
+
+def test_create_dataset_with_prompt_addendum(seeded_app):
+    """POST /admin/datasets stores prompt_addendum and surfaces it on response."""
+    ds_id = seeded_app.state.test_datasource_id
+    client = TestClient(seeded_app)
+    response = client.post(
+        "/api/admin/datasets",
+        json={
+            "datasource_id": ds_id,
+            "name": "Test",
+            "slug": "test-with-addendum",
+            "path": "test.zarr",
+            "prompt_addendum": "Important: cells were sorted on CD45 first.",
+        },
+        headers=AUTH_HEADER,
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["prompt_addendum"] == "Important: cells were sorted on CD45 first."
+
+
+def test_update_dataset_prompt_addendum(seeded_app):
+    """PUT updates only prompt_addendum; other fields unchanged."""
+    ds_id = seeded_app.state.test_datasource_id
+    client = TestClient(seeded_app)
+    # Create a dataset with no addendum first
+    create_resp = client.post(
+        "/api/admin/datasets",
+        json={
+            "datasource_id": ds_id,
+            "name": "No-Addendum",
+            "slug": "no-addendum",
+            "path": "no-addendum.zarr",
+        },
+        headers=AUTH_HEADER,
+    )
+    assert create_resp.status_code == 201
+    created = create_resp.json()
+    # Update only prompt_addendum
+    response = client.put(
+        "/api/admin/datasets/no-addendum",
+        json={"prompt_addendum": "Curator notes here."},
+        headers=AUTH_HEADER,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["prompt_addendum"] == "Curator notes here."
+    # Other fields kept their previous values
+    assert body["name"] == created["name"]
+    assert body["path"] == created["path"]
+
+
+def test_get_datasets_includes_prompt_addendum(seeded_app):
+    """GET /admin/datasets surfaces prompt_addendum on each row."""
+    ds_id = seeded_app.state.test_datasource_id
+    client = TestClient(seeded_app)
+    # Create a dataset with an addendum
+    create_resp = client.post(
+        "/api/admin/datasets",
+        json={
+            "datasource_id": ds_id,
+            "name": "Has-Addendum",
+            "slug": "has-addendum",
+            "path": "has-addendum.zarr",
+            "prompt_addendum": "Sample curator note.",
+        },
+        headers=AUTH_HEADER,
+    )
+    assert create_resp.status_code == 201
+    response = client.get("/api/admin/datasets", headers=AUTH_HEADER)
+    assert response.status_code == 200
+    body = response.json()
+    rows = {d["slug"]: d for d in body["datasets"]}
+    assert "has-addendum" in rows
+    assert "prompt_addendum" in rows["has-addendum"]
+    assert rows["has-addendum"]["prompt_addendum"] == "Sample curator note."
