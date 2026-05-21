@@ -9,7 +9,6 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-import sqlmodel
 
 
 # revision identifiers, used by Alembic.
@@ -21,7 +20,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    op.add_column('datasets', sa.Column('prompt_addendum', sa.String(), nullable=True))
+    op.add_column('datasets', sa.Column('prompt_addendum', sa.Text(), nullable=True))
 
 
 def downgrade() -> None:
