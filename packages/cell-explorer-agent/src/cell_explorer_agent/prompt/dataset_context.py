@@ -23,10 +23,16 @@ class DatasetContext:
     n_var: int
     obs_columns: list[ObsColumnInfo]
     embedding_keys: list[str]
+    prompt_addendum: str | None = None
 
 
 async def build_dataset_context(
-    z: ZarrAccess, *, slug: str, name: str, description: str
+    z: ZarrAccess,
+    *,
+    slug: str,
+    name: str,
+    description: str,
+    prompt_addendum: str | None = None,
 ) -> DatasetContext:
     n_obs, n_var = await z.shape()
     obs = await z.obs_columns()
@@ -47,4 +53,5 @@ async def build_dataset_context(
             for c in obs
         ],
         embedding_keys=list(emb),
+        prompt_addendum=prompt_addendum,
     )

@@ -62,6 +62,7 @@ async def _build_dataset_context_cached(
             slug=dataset.slug,
             name=dataset.name,
             description=dataset.description or "",
+            prompt_addendum=dataset.prompt_addendum,
         )
     return _dataset_ctx_cache[key]
 

@@ -359,6 +359,43 @@ async def test_dataset_ctx_cache_invalidates_when_updated_at_changes():
 
 
 @pytest.mark.asyncio
+async def test_make_chat_agent_forwards_prompt_addendum_to_dataset_context():
+    """When the Dataset row has prompt_addendum set, make_chat_agent forwards
+    it to build_dataset_context (via _build_dataset_context_cached)."""
+    dataset = _public_dataset()
+    dataset.prompt_addendum = "Test curator note: cells were sorted on CD45."
+    datasource = MagicMock(base_url="https://example.com", type="HTTP_TOKEN", credential_ref=None)
+    db = await _mk_db_session(_make_db_row(dataset, datasource))
+
+    fake_anndata = MagicMock(n_obs=10, n_vars=20, obsm_keys=[], obs_columns=[])
+
+    captured: dict = {}
+    from cell_explorer_agent import build_dataset_context as _real
+
+    async def _spy_build(*args, **kwargs):
+        captured.update(kwargs)
+        return await _real(*args, **kwargs)
+
+    with patch("cell_explorer_api.services.chat_session.ZarrStore") as MockZS, \
+         patch("cell_explorer_api.services.chat_session.AnnDataStore") as MockADS, \
+         patch("cell_explorer_api.services.chat_session.StrataStore") as MockSS, \
+         patch("cell_explorer_api.services.chat_session.build_dataset_context", _spy_build):
+        MockZS.open = AsyncMock(return_value=MagicMock())
+        MockADS.open = AsyncMock(return_value=fake_anndata)
+        MockSS.open = AsyncMock(return_value=MagicMock())
+
+        user = _FakeUser(roles=[])
+        llm = FakeLLMClient(scripts=[])
+        settings = MagicMock()
+        agent = await make_chat_agent(
+            user=user, dataset_slug="pbmc3k", db=db, settings=settings, llm=llm,
+        )
+
+    assert captured.get("prompt_addendum") == "Test curator note: cells were sorted on CD45."
+    assert agent.dataset_ctx.prompt_addendum == "Test curator note: cells were sorted on CD45."
+
+
+@pytest.mark.asyncio
 async def test_dataset_ctx_cache_is_independent_per_slug():
     """Two datasets with different slugs cache independently."""
     ds_a = _public_dataset(slug="ds-a")
