@@ -144,9 +144,15 @@ async def append_message(
     *,
     role: str,
     content: str,
+    langfuse_trace_id: str | None = None,
 ) -> ChatMessageRow:
     """Append a message to the thread and bump its updated_at."""
-    msg = ChatMessageRow(thread_id=thread.id, role=role, content=content)
+    msg = ChatMessageRow(
+        thread_id=thread.id,
+        role=role,
+        content=content,
+        langfuse_trace_id=langfuse_trace_id,
+    )
     session.add(msg)
     thread.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
     session.add(thread)

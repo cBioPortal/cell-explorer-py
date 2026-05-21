@@ -1,6 +1,7 @@
 """HTTP routes for the chat agent (Plan 2a)."""
 
 import asyncio
+import logging
 import uuid as _uuid
 from collections.abc import AsyncIterator
 from datetime import datetime
@@ -13,8 +14,10 @@ from sqlalchemy.orm import aliased
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from cell_explorer_agent.config import AgentConfig
 from cell_explorer_agent.events import Error, ThreadOpen
 from cell_explorer_agent.messages import AssistantMessage, UserMessage
+from cell_explorer_agent.telemetry import langfuse_client
 from cell_explorer_api.auth.dependencies import require_auth
 from cell_explorer_api.auth.models import User
 from cell_explorer_api.auth.optional import optional_auth
@@ -48,11 +51,46 @@ from cell_explorer_api.services.threads import (
     load_thread,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["chat"])
 
 # Note: this router is included by routes/__init__.py whose own router has
 # prefix="/api". Routes inside use absolute paths ("/chat/{slug}/context"),
 # matching the convention in datasets.py.
+
+
+def _forward_feedback_to_langfuse(
+    *,
+    trace_id: str,
+    user_sub: str,
+    message_id: _uuid.UUID,
+    rating: str,
+    comment: str | None,
+) -> None:
+    """Best-effort forward of a thumbs rating to Langfuse Scores.
+
+    Idempotent on (user_sub, message_id) via deterministic score_id so
+    re-clicking updates the score in place (assuming Langfuse upserts;
+    duplicate rows are at worst dedupable later via score_id prefix).
+
+    Any failure is logged and swallowed — feedback writes to our DB are
+    the source of truth; Langfuse is an observability sink.
+    """
+    try:
+        client = langfuse_client.get(AgentConfig())
+        if client is None:
+            return
+        client.create_score(
+            name="user_feedback",
+            value=1.0 if rating == "up" else 0.0,
+            data_type="NUMERIC",
+            trace_id=trace_id,
+            score_id=f"feedback-{user_sub}-{message_id}",
+            comment=comment,
+        )
+    except Exception:
+        logger.exception("Failed to forward feedback to Langfuse")
 
 
 class ChatMessage(BaseModel):
@@ -183,6 +221,7 @@ async def _ndjson_event_stream(
                         msg = await append_message(
                             stream_db, thread, role="assistant",
                             content="".join(assistant_buffer),
+                            langfuse_trace_id=event.trace_id,
                         )
                         # Capture id before commit() expires ORM attributes.
                         message_id = str(msg.id)
@@ -534,6 +573,8 @@ async def put_message_feedback(
             status_code=422, detail="Only assistant messages can be rated"
         )
 
+    # Capture trace_id before commit() expires ORM attributes.
+    langfuse_trace_id = msg.langfuse_trace_id
     # Upsert by (message_id, user_sub).
     existing = (
         await db.exec(
@@ -559,6 +600,15 @@ async def put_message_feedback(
         fb = existing
     await db.commit()
     await db.refresh(fb)
+    # Forward to Langfuse Scores when we know the trace id. Best-effort.
+    if langfuse_trace_id:
+        _forward_feedback_to_langfuse(
+            trace_id=langfuse_trace_id,
+            user_sub=user.sub,
+            message_id=message_id,
+            rating=fb.rating,
+            comment=fb.comment,
+        )
     return FeedbackResponse(
         rating=fb.rating,  # type: ignore[arg-type]
         comment=fb.comment,
