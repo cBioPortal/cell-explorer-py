@@ -7,6 +7,11 @@ services:
       - "8001:8000"
     env_file:
       - .env
+    environment:
+      # Bare name = pass-through from host shell env (no value if unset, so
+      # any GIT_SHA baked into the image by Dockerfile is preserved). The
+      # `make dev-docker` target exports this from `git rev-parse`.
+      - GIT_SHA
     volumes:
       # Mount local source for hot-reload
       - ./packages/api/src:/app/packages/api/src
