@@ -13,7 +13,7 @@ dev: ## Start API dev server with hot-reload
 	uv run --project packages/api uvicorn cell_explorer_api.main:app --reload --port 8000
 
 dev-docker: ## Start API via docker-compose (serves frontend from dist)
-	docker compose up
+	GIT_SHA=$$(git rev-parse --short=7 HEAD) docker compose up
 
 test: ## Run API tests
 	uv run --project packages/api pytest packages/api/tests/ -v
