@@ -101,6 +101,9 @@ class ChatMessageRow(SQLModel, table=True):
     role: str  # "user" | "assistant"
     content: str
     created_at: datetime = Field(default_factory=_utcnow)
+    # Set on assistant rows when Langfuse tracing is enabled. Used by the
+    # feedback PUT route to forward thumbs ratings to Langfuse Scores.
+    langfuse_trace_id: str | None = Field(default=None, index=True)
 
 
 class ChatFeedback(SQLModel, table=True):

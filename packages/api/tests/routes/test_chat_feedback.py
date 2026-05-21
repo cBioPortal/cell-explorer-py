@@ -284,3 +284,152 @@ def test_thread_detail_includes_message_id(seeded_app):
     res = client.get(f"/api/chat/public-atlas/threads/{thread_id}")
     assert res.status_code == 200
     assert res.json()["messages"][0]["id"] == msg_id
+
+
+def _create_assistant_msg_with_trace_id(seeded_app, *, user_sub: str, trace_id: str) -> str:
+    """Seed one assistant ChatMessageRow with langfuse_trace_id set."""
+    from cell_explorer_api.db.models import ChatMessageRow, ChatThread, Dataset
+    from sqlmodel import select
+
+    async def _seed() -> str:
+        engine = seeded_app.state.db_engine
+        async with AsyncSession(engine) as session:
+            dataset = (await session.exec(select(Dataset))).first()
+            t = ChatThread(user_sub=user_sub, dataset_id=dataset.id, title="t")
+            session.add(t)
+            await session.flush()
+            m = ChatMessageRow(
+                thread_id=t.id,
+                role="assistant",
+                content="hello",
+                langfuse_trace_id=trace_id,
+            )
+            session.add(m)
+            await session.commit()
+            await session.refresh(m)
+            return str(m.id)
+
+    return asyncio.run(_seed())
+
+
+def test_put_feedback_forwards_to_langfuse_when_trace_id_present(
+    seeded_app, monkeypatch
+):
+    """PUT 👍 on a message with langfuse_trace_id calls Langfuse create_score."""
+    from cell_explorer_agent.telemetry import langfuse_client
+    from cell_explorer_agent.telemetry.fake import FakeLangfuseClient
+
+    fake = FakeLangfuseClient()
+    monkeypatch.setattr(langfuse_client, "get", lambda _config: fake)
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="user-1")
+    msg_id = _create_assistant_msg_with_trace_id(
+        seeded_app, user_sub="user-1", trace_id="trace-xyz",
+    )
+
+    res = client.put(
+        f"/api/chat/public-atlas/messages/{msg_id}/feedback",
+        json={"rating": "up", "comment": "great answer"},
+    )
+    assert res.status_code == 200, res.text
+
+    assert len(fake.scores) == 1
+    s = fake.scores[0]
+    assert s["name"] == "user_feedback"
+    assert s["value"] == 1.0
+    assert s["data_type"] == "NUMERIC"
+    assert s["trace_id"] == "trace-xyz"
+    assert s["score_id"] == f"feedback-user-1-{msg_id}"
+    assert s["comment"] == "great answer"
+
+
+def test_put_feedback_forwards_down_as_zero(seeded_app, monkeypatch):
+    """👎 maps to value=0.0."""
+    from cell_explorer_agent.telemetry import langfuse_client
+    from cell_explorer_agent.telemetry.fake import FakeLangfuseClient
+
+    fake = FakeLangfuseClient()
+    monkeypatch.setattr(langfuse_client, "get", lambda _config: fake)
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="user-1")
+    msg_id = _create_assistant_msg_with_trace_id(
+        seeded_app, user_sub="user-1", trace_id="trace-xyz",
+    )
+
+    res = client.put(
+        f"/api/chat/public-atlas/messages/{msg_id}/feedback",
+        json={"rating": "down"},
+    )
+    assert res.status_code == 200
+    assert fake.scores[0]["value"] == 0.0
+
+
+def test_put_feedback_skips_langfuse_when_no_trace_id(seeded_app, monkeypatch):
+    """When the message has no langfuse_trace_id, no Langfuse call is made."""
+    from cell_explorer_agent.telemetry import langfuse_client
+    from cell_explorer_agent.telemetry.fake import FakeLangfuseClient
+
+    fake = FakeLangfuseClient()
+    monkeypatch.setattr(langfuse_client, "get", lambda _config: fake)
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="user-1")
+    # Message created via _create_thread_with_assistant_msg has no trace_id.
+    _thread_id, msg_id = _create_thread_with_assistant_msg(seeded_app, user_sub="user-1")
+
+    res = client.put(
+        f"/api/chat/public-atlas/messages/{msg_id}/feedback",
+        json={"rating": "up"},
+    )
+    assert res.status_code == 200
+    assert fake.scores == []
+
+
+def test_put_feedback_swallows_langfuse_errors(seeded_app, monkeypatch):
+    """A Langfuse failure must not break the user-facing feedback PUT."""
+    from cell_explorer_agent.telemetry import langfuse_client
+
+    class _BrokenClient:
+        def create_score(self, **_kwargs):
+            raise RuntimeError("langfuse down")
+
+    monkeypatch.setattr(langfuse_client, "get", lambda _config: _BrokenClient())
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="user-1")
+    msg_id = _create_assistant_msg_with_trace_id(
+        seeded_app, user_sub="user-1", trace_id="trace-xyz",
+    )
+
+    res = client.put(
+        f"/api/chat/public-atlas/messages/{msg_id}/feedback",
+        json={"rating": "up"},
+    )
+    assert res.status_code == 200, res.text
+
+
+def test_delete_feedback_does_not_call_langfuse(seeded_app, monkeypatch):
+    """DELETE clears local feedback only; Langfuse history is preserved."""
+    from cell_explorer_agent.telemetry import langfuse_client
+    from cell_explorer_agent.telemetry.fake import FakeLangfuseClient
+
+    fake = FakeLangfuseClient()
+    monkeypatch.setattr(langfuse_client, "get", lambda _config: fake)
+
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="user-1")
+    msg_id = _create_assistant_msg_with_trace_id(
+        seeded_app, user_sub="user-1", trace_id="trace-xyz",
+    )
+    # First PUT creates feedback + one score; then DELETE clears the row.
+    client.put(
+        f"/api/chat/public-atlas/messages/{msg_id}/feedback",
+        json={"rating": "up"},
+    )
+    pre_delete_scores = list(fake.scores)
+    res = client.delete(f"/api/chat/public-atlas/messages/{msg_id}/feedback")
+    assert res.status_code == 204
+    # DELETE did not produce any additional Langfuse calls.
+    assert fake.scores == pre_delete_scores

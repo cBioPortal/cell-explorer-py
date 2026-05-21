@@ -176,7 +176,7 @@ class ChatAgent:
 
                 if stop_reason == "end_turn" or not pending_calls:
                     trace.set_output("".join(final_assistant_text_buffer))
-                    yield Done(usage=total_usage)
+                    yield Done(usage=total_usage, trace_id=trace.trace_id)
                     return
 
                 if tool_calls_this_turn + len(pending_calls) > max_calls:
@@ -187,7 +187,7 @@ class ChatAgent:
                         retryable=False,
                     )
                     trace.set_output("".join(final_assistant_text_buffer))
-                    yield Done(usage=total_usage)
+                    yield Done(usage=total_usage, trace_id=trace.trace_id)
                     return
 
                 results: list[ToolResult] = []

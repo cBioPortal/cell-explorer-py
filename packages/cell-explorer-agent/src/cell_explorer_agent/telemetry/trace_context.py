@@ -63,6 +63,10 @@ class TurnTrace:
         # v3 internals
         self._root_cm: Any | None = None
         self._root_obs: Any | None = None
+        # Captured inside __aenter__ once the root span is active. Used by
+        # callers (route layer) to persist a message → trace association so
+        # later feedback can be forwarded to Langfuse Scores.
+        self.trace_id: str | None = None
         # Per-turn counter so a turn with multiple LLM rounds shows
         # llm-call-1, llm-call-2, ... in the Langfuse trace tree
         # instead of three identical 'llm-call' rows.
@@ -94,6 +98,12 @@ class TurnTrace:
                 },
             )
             self._root_obs = self._root_cm.__enter__()
+            # Capture trace id from the now-active span context. None if the
+            # SDK can't resolve one (e.g. fake clients without OTel context).
+            try:
+                self.trace_id = self._client.get_current_trace_id()
+            except Exception:
+                self.trace_id = None
             # Set trace-level fields (user/session/tags) once the root span
             # is active — these belong on the implicit trace, not the span.
             self._client.update_current_trace(

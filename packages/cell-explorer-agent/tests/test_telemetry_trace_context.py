@@ -110,6 +110,40 @@ async def test_private_dataset_trace_redacts_content(fake):
     assert fake.tool_spans[0].input == {"_redacted": "tool_args", "tool": "filter_by_ids"}
 
 
+async def test_turn_trace_captures_trace_id_from_active_span(fake):
+    """Once the root span is open, get_current_trace_id() returns a value;
+    TurnTrace caches it on self.trace_id so the route layer can persist it."""
+    fake.fake_trace_id = "abc-trace-123"
+    async with TurnTrace(
+        client=fake,
+        user_id="u",
+        thread_id="t",
+        dataset_slug="ds",
+        is_public=True,
+        model="m",
+        environment="test",
+        user_input="hi",
+        view_state=None,
+    ) as trace:
+        assert trace.trace_id == "abc-trace-123"
+
+
+async def test_turn_trace_trace_id_none_when_no_client():
+    """No client → no span context → no trace_id."""
+    async with TurnTrace(
+        client=None,
+        user_id="u",
+        thread_id="t",
+        dataset_slug="ds",
+        is_public=True,
+        model="m",
+        environment="test",
+        user_input="hi",
+        view_state=None,
+    ) as trace:
+        assert trace.trace_id is None
+
+
 async def test_no_client_is_noop():
     """When client=None, the context manager records nothing and does not raise."""
     async with TurnTrace(
