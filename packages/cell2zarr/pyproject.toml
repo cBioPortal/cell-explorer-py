@@ -1,6 +1,6 @@
 [project]
 name = "cell2zarr"
-version = "1.0.0"
+version = "0.1.0"
 description = "h5ad to Zarr conversion pipeline for single-cell RNA-seq data"
 requires-python = ">=3.12"
 dependencies = [
