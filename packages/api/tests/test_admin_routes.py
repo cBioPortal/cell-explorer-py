@@ -327,6 +327,24 @@ def test_create_dataset_with_prompt_addendum(seeded_app):
     assert body["prompt_addendum"] == "Important: cells were sorted on CD45 first."
 
 
+def test_create_dataset_prompt_addendum_defaults_null(seeded_app):
+    """prompt_addendum is null when not supplied on create."""
+    ds_id = seeded_app.state.test_datasource_id
+    client = TestClient(seeded_app)
+    response = client.post(
+        "/api/admin/datasets",
+        json={
+            "datasource_id": ds_id,
+            "name": "No-Addendum-Default",
+            "slug": "no-addendum-default",
+            "path": "no-addendum.zarr",
+        },
+        headers=AUTH_HEADER,
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["prompt_addendum"] is None
+
+
 def test_update_dataset_prompt_addendum(seeded_app):
     """PUT updates only prompt_addendum; other fields unchanged."""
     ds_id = seeded_app.state.test_datasource_id
@@ -344,6 +362,7 @@ def test_update_dataset_prompt_addendum(seeded_app):
     )
     assert create_resp.status_code == 201
     created = create_resp.json()
+    assert created["prompt_addendum"] is None
     # Update only prompt_addendum
     response = client.put(
         "/api/admin/datasets/no-addendum",
