@@ -58,6 +58,11 @@ class Done(BaseModel):
     # does not persist, so this is None at agent emit time; the API layer fills
     # it in just before yielding the event to the client.
     message_id: str | None = None
+    # Langfuse trace id for this turn. Set by the agent when telemetry is
+    # enabled; the API layer persists it on the assistant row so later
+    # feedback (PUT /feedback) can forward to Langfuse Scores. Wire-level
+    # field — the frontend ignores it.
+    trace_id: str | None = None
 
 
 class ThreadOpen(BaseModel):

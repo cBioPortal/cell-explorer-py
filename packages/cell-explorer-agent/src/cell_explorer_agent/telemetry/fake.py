@@ -93,6 +93,11 @@ class FakeLangfuseClient:
         self.trace_updates: list[dict[str, Any]] = []
         self.flushed_count: int = 0
         self._current_stack: list[FakeObservation] = []
+        # Tests can override; defaults to a synthetic value returned by
+        # get_current_trace_id() while a span context is active.
+        self.fake_trace_id: str = "fake-trace-id"
+        # Records every create_score(**kwargs) call for assertion in tests.
+        self.scores: list[dict[str, Any]] = []
 
     # ---- observation creation ----
 
@@ -134,6 +139,19 @@ class FakeLangfuseClient:
             if obs.as_type == "span":
                 obs.update(**kwargs)
                 return
+
+    # ---- trace id resolution ----
+
+    def get_current_trace_id(self) -> str | None:
+        """Mirrors v3 SDK: returns the active trace id while a span context
+        is open; None otherwise."""
+        return self.fake_trace_id if self._current_stack else None
+
+    # ---- scores ----
+
+    def create_score(self, **kwargs: Any) -> None:
+        """Record a create_score call. Tests inspect self.scores."""
+        self.scores.append(dict(kwargs))
 
     # ---- lifecycle ----
 
