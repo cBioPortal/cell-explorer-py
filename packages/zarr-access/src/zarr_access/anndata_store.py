@@ -67,6 +67,12 @@ class AnnDataStore:
         node = await obs.getitem(name)
         return await decode_column(node)
 
+    async def var_column(self, name: str):
+        """Single var column — efficient for targeted queries."""
+        var = await self._zarr.get_group("var")
+        node = await var.getitem(name)
+        return await decode_column(node)
+
     async def obsm(self, key: str) -> np.ndarray:
         """Embedding array (e.g., X_umap)."""
         obsm = await self._zarr.get_group("obsm")

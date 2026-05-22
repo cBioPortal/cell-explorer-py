@@ -20,6 +20,10 @@ class FakeZarrAccess:
     obs: dict[str, ObsColumn] = field(default_factory=dict)
     var: list[str] = field(default_factory=list)
     var_columns_data: list[str] = field(default_factory=lambda: ["feature_id", "gene_symbol"])
+    # Per-name var column payloads, keyed by var_columns_data name. Tests that
+    # exercise describe_var_column populate this; defaults left empty so older
+    # tests stay unaffected.
+    var_data: dict[str, ObsColumn] = field(default_factory=dict)
     obsm: list[str] = field(default_factory=lambda: ["X_umap", "X_pca"])
     expression: dict[str, np.ndarray] = field(default_factory=dict)
     _attrs: dict = field(
@@ -94,6 +98,11 @@ class FakeZarrAccess:
 
     async def var_columns(self) -> list[str]:
         return list(self.var_columns_data)
+
+    async def var_column(self, name: str) -> ObsColumn:
+        if name not in self.var_data:
+            raise KeyError(name)
+        return self.var_data[name]
 
     async def obsm_keys(self) -> list[str]:
         return list(self.obsm)

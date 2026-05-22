@@ -101,6 +101,10 @@ class AnnDataZarrAccess:
         raw = await self.store.obs_column(name)
         return _decode_col_to_obs_column(name, raw)
 
+    async def var_column(self, name: str) -> ObsColumn:
+        raw = await self.store.var_column(name)
+        return _decode_col_to_obs_column(name, raw)
+
     async def gene_index(self, gene: str) -> int:
         await self._ensure_gene_map()
         assert self._gene_to_row_cache is not None

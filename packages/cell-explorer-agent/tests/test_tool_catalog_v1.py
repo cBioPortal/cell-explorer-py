@@ -9,6 +9,7 @@ async def test_v1_catalog_includes_all_tools(fake_zarr):
         # data
         "get_dataset_schema",
         "describe_obs_column",
+        "describe_var_column",
         "cluster_stats",
         "search_genes",
         "gene_expression_summary",
