@@ -13,6 +13,10 @@ async def test_get_dataset_schema(fake_zarr):
     assert cell_type["cardinality"] == 3
     assert "X_umap" in result["embeddings"]
     assert result["var_count"] == 50
+    # var_columns lists names from the var dataframe (e.g. gene_symbol, feature_id)
+    assert "var_columns" in result
+    assert "feature_id" in result["var_columns"]
+    assert "gene_symbol" in result["var_columns"]
 
 
 async def test_get_dataset_schema_is_data_kind(fake_zarr):
@@ -905,3 +909,59 @@ async def test_xscan_group_sums_zero_floored_backward_compat():
 
     np.testing.assert_allclose(sum_x[0], 3.0, atol=1e-6)
     assert nnz[0] == 2, f"expected 2, got {nnz[0]}"  # matches count_nonzero for zero-floored data
+
+
+# ---------------------------------------------------------------------------
+# describe_var_column tests — mirror the obs side
+# ---------------------------------------------------------------------------
+
+from cell_explorer_agent.tools.data.var import describe_var_column_tool
+from cell_explorer_agent.tools.zarr_protocol import ObsColumn
+
+
+async def test_describe_var_column_categorical(fake_zarr):
+    import numpy as np
+
+    # Seed the fake with a categorical var column (e.g., feature_type with two values)
+    n_var = 50
+    cats = ["protein_coding", "lncRNA"]
+    codes = np.array([0] * 40 + [1] * 10, dtype=np.int32)
+    fake_zarr.var_data["feature_type"] = ObsColumn(
+        name="feature_type",
+        dtype="categorical",
+        values=codes,
+        categories=list(cats),
+    )
+    fake_zarr.var_columns_data = ["feature_id", "gene_symbol", "feature_type"]
+
+    tool = describe_var_column_tool(fake_zarr, limit_bytes=32_768)
+    result = await tool.func(name="feature_type")
+    assert result["dtype"] == "categorical"
+    assert result["total"] == n_var
+    names = {c["value"] for c in result["top_categories"]}
+    assert names == {"protein_coding", "lncRNA"}
+
+
+async def test_describe_var_column_numeric(fake_zarr):
+    import numpy as np
+
+    n_var = 50
+    fake_zarr.var_data["mean_counts"] = ObsColumn(
+        name="mean_counts",
+        dtype="numeric",
+        values=np.linspace(0.1, 10.0, n_var, dtype=np.float32),
+    )
+
+    tool = describe_var_column_tool(fake_zarr, limit_bytes=32_768)
+    result = await tool.func(name="mean_counts")
+    assert result["dtype"] == "numeric"
+    assert result["total"] == n_var
+    assert set(result["stats"]) == {"min", "max", "mean", "median", "q1", "q3", "stddev"}
+    assert result["stats"]["min"] < result["stats"]["max"]
+
+
+async def test_describe_var_column_unknown_returns_error(fake_zarr):
+    tool = describe_var_column_tool(fake_zarr, limit_bytes=32_768)
+    result = await tool.func(name="nonexistent_column")
+    assert "error" in result
+    assert "nonexistent_column" in result["error"]

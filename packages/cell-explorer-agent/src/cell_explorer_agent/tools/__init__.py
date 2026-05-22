@@ -15,6 +15,7 @@ from cell_explorer_agent.tools.data.obs import (
     describe_obs_column_tool,
 )
 from cell_explorer_agent.tools.data.schema import get_dataset_schema_tool
+from cell_explorer_agent.tools.data.var import describe_var_column_tool
 from cell_explorer_agent.tools.registry import Tool, ToolCatalog, ToolKind
 from cell_explorer_agent.tools.ui_action.color import (
     clear_color_by_tool,
@@ -69,6 +70,7 @@ def build_v1_catalog(
     # data
     cat.register(get_dataset_schema_tool(z, limit_bytes=lim))
     cat.register(describe_obs_column_tool(z, limit_bytes=lim))
+    cat.register(describe_var_column_tool(z, limit_bytes=lim))
     cat.register(cluster_stats_tool(z, limit_bytes=lim))
     cat.register(search_genes_tool(z, limit_bytes=lim))
     cat.register(gene_expression_summary_tool(z, limit_bytes=lim))

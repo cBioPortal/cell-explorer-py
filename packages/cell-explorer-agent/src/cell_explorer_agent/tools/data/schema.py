@@ -11,6 +11,7 @@ def get_dataset_schema_tool(z: ZarrAccess, *, limit_bytes: int) -> Tool:
     async def run() -> dict[str, Any]:
         n_obs, n_var = await z.shape()
         cols = await z.obs_columns()
+        var_cols = await z.var_columns()
         obsm = await z.obsm_keys()
         payload = {
             "n_obs": n_obs,
@@ -20,6 +21,7 @@ def get_dataset_schema_tool(z: ZarrAccess, *, limit_bytes: int) -> Tool:
                 {"name": c.name, "dtype": c.dtype, "cardinality": c.cardinality}
                 for c in cols
             ],
+            "var_columns": list(var_cols),
             "embeddings": list(obsm),
         }
         return cap_json_bytes(payload, limit_bytes=limit_bytes)
@@ -29,7 +31,8 @@ def get_dataset_schema_tool(z: ZarrAccess, *, limit_bytes: int) -> Tool:
         kind="data",
         description=(
             "Return dataset shape, obs column names/dtypes/cardinalities, "
-            "and available embedding keys. Call this first to learn the schema."
+            "var (per-gene) column names, and available embedding keys. Call "
+            "this first to learn the schema."
         ),
         args_schema={"type": "object", "properties": {}, "additionalProperties": False},
         func=run,
