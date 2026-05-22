@@ -52,6 +52,39 @@ async def test_var_names_from_var_dataframe():
     assert await adapter.var_names() == ["CD8A", "CD4", "MS4A1"]
 
 
+@pytest.mark.asyncio
+async def test_var_names_resolves_gene_column_when_index_is_ensembl():
+    """A dataset with Ensembl IDs as the var index and gene symbols in a
+    column literally named `gene` resolves to symbols (egfr_all_cells case)."""
+    store = _make_fake_anndata_store()
+    store.var = AsyncMock(
+        return_value=pd.DataFrame(
+            {"gene": ["CD8A", "CD4", "MS4A1"]},
+            index=["ENSG00000153563", "ENSG00000010610", "ENSG00000156738"],
+        )
+    )
+    adapter = AnnDataZarrAccess(store)
+    assert await adapter.var_names() == ["CD8A", "CD4", "MS4A1"]
+
+
+@pytest.mark.asyncio
+async def test_var_names_prefers_feature_name_over_gene():
+    """Priority order: feature_name wins over gene when both are present, so
+    datasets with both columns get the canonical symbol column."""
+    store = _make_fake_anndata_store()
+    store.var = AsyncMock(
+        return_value=pd.DataFrame(
+            {
+                "feature_name": ["CD8A", "CD4", "MS4A1"],
+                "gene": ["alt-CD8A", "alt-CD4", "alt-MS4A1"],
+            },
+            index=["ENSG00000153563", "ENSG00000010610", "ENSG00000156738"],
+        )
+    )
+    adapter = AnnDataZarrAccess(store)
+    assert await adapter.var_names() == ["CD8A", "CD4", "MS4A1"]
+
+
 import numpy as np
 
 

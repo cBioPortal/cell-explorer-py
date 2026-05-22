@@ -17,6 +17,12 @@ from cell_explorer_agent.tools.zarr_protocol import ObsColumn, ObsColumnSpec
 # Candidate var columns (in priority order) that hold human-readable gene symbols.
 # Mirrors the frontend's GENE_SYMBOL_COLUMNS so the CLI and browser agree on how
 # genes are named. The first column present in a given dataset wins.
+#
+# `gene` is the most ambiguous candidate (a future dataset could in theory store
+# something else under that name) so it sits at the end — a dataset that has
+# both `feature_name` and `gene` still picks `feature_name`. Per-dataset
+# overrides via a Dataset.gene_label_column field are tracked separately for
+# the rare cases where this heuristic is wrong.
 GENE_SYMBOL_COLUMNS: tuple[str, ...] = (
     "feature_name",
     "gene_symbol",
@@ -27,6 +33,7 @@ GENE_SYMBOL_COLUMNS: tuple[str, ...] = (
     "gene_short_name",
     "symbol",
     "name",
+    "gene",
 )
 
 
