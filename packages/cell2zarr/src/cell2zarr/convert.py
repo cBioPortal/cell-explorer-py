@@ -247,13 +247,12 @@ def _read_obsm_chunked(adata_backed, n_obs: int, cell_chunk_size: int) -> dict[s
     n_cell_chunks = (n_obs + cell_chunk_size - 1) // cell_chunk_size
     for key in adata_backed.obsm.keys():
         logger.info(f"Reading obsm/{key} in chunks...")
+        obsm_arr = adata_backed.obsm[key]
         parts = []
         for ci in range(n_cell_chunks):
             c_start = ci * cell_chunk_size
             c_end = min((ci + 1) * cell_chunk_size, n_obs)
-            chunk = adata_backed[c_start:c_end, :].to_memory()
-            parts.append(np.array(chunk.obsm[key]))
-            del chunk
+            parts.append(np.asarray(obsm_arr[c_start:c_end]))
         obsm_data[key] = np.concatenate(parts, axis=0)
         del parts
         gc.collect()
