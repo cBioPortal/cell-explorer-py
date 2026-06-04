@@ -177,3 +177,28 @@ def test_cli_normalize_without_two_phase_warns_and_ignores(tmp_path):
     X_out = np.asarray(adata_out.X.toarray() if hasattr(adata_out.X, 'toarray') else adata_out.X)
     X_expected = np.asarray(adata.X.toarray() if hasattr(adata.X, 'toarray') else adata.X)
     np.testing.assert_allclose(X_out, X_expected, rtol=1e-5, atol=1e-5)
+
+
+def test_normalize_float64_precision_matches_scanpy(tmp_path):
+    import scanpy as sc
+    h5ad = tmp_path / "f64.h5ad"
+    out = tmp_path / "out.zarr"
+    rng = np.random.default_rng(1)
+    # Non-integer float64 values that are NOT exactly representable in float32,
+    # so rounding the raw to float32 before the math would visibly diverge.
+    X = (rng.random((150, 25)) * 1000.0).astype(np.float64)
+    obs = pd.DataFrame(index=[f"cell_{i}" for i in range(150)])
+    var = pd.DataFrame(index=[f"gene_{i}" for i in range(25)])
+    ad.AnnData(X=X, obs=obs, var=var).write_h5ad(h5ad)
+
+    cfg = ConversionConfig(
+        input_file=h5ad, output_file=out, normalize=True,
+        dtype="float64", var_chunk_size=10, cell_chunk_size=50,
+    )
+    convert_h5ad_to_zarr_chunked(cfg)
+    X_out = np.asarray(open_zarr(out)["X"][:])
+
+    expected = ad.read_h5ad(h5ad)
+    sc.pp.normalize_total(expected)
+    sc.pp.log1p(expected)
+    np.testing.assert_allclose(X_out, np.asarray(expected.X), rtol=1e-9, atol=1e-9)
