@@ -154,12 +154,16 @@ def _filter_hvgs(var_df, n_top_genes: int | None):
     return var_idx
 
 
-def _compute_cell_totals(adata_backed, var_idx, n_obs: int, cell_chunk_size: int) -> np.ndarray:
-    """Pre-pass: per-cell total counts (float64), summed directly from the sparse source.
+def _compute_cell_totals(adata_backed, n_obs: int, cell_chunk_size: int) -> np.ndarray:
+    """Pre-pass: per-cell total counts (float64), summed over ALL genes.
 
     Reads the backed h5ad in cell-chunks and sums each row without densifying or
     writing a temp store, so the normalization median can be computed in float64
     before Phase 1 rounds anything to float32.
+
+    Totals are always over the full gene set (scanpy normalize_total runs before
+    HVG selection, so the scale factor must be derived from all genes regardless
+    of any --n-top-genes filtering applied afterward).
     """
     cell_totals = np.zeros(n_obs, dtype=np.float64)
     n_cell_chunks = (n_obs + cell_chunk_size - 1) // cell_chunk_size
@@ -167,10 +171,7 @@ def _compute_cell_totals(adata_backed, var_idx, n_obs: int, cell_chunk_size: int
     for ci in range(n_cell_chunks):
         c_start = ci * cell_chunk_size
         c_end = min((ci + 1) * cell_chunk_size, n_obs)
-        if var_idx is not None:
-            chunk = adata_backed[c_start:c_end, var_idx].to_memory()
-        else:
-            chunk = adata_backed[c_start:c_end, :].to_memory()
+        chunk = adata_backed[c_start:c_end, :].to_memory()
         cell_totals[c_start:c_end] = np.asarray(chunk.X.sum(axis=1), dtype=np.float64).ravel()
         del chunk
         gc.collect()
@@ -899,7 +900,7 @@ def convert_h5ad_to_zarr_chunked(config: ConversionConfig, hooks: dict[str, Call
 
         scale = None
         if config.normalize:
-            cell_totals = _compute_cell_totals(adata_backed, var_idx, n_obs, config.cell_chunk_size)
+            cell_totals = _compute_cell_totals(adata_backed, n_obs, config.cell_chunk_size)
             positive = cell_totals[cell_totals > 0]
             if positive.size == 0:
                 raise ValueError("Cannot normalize: all cells have zero total counts")

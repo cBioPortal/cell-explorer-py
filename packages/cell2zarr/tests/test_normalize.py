@@ -179,6 +179,42 @@ def test_cli_normalize_without_two_phase_warns_and_ignores(tmp_path):
     np.testing.assert_allclose(X_out, X_expected, rtol=1e-5, atol=1e-5)
 
 
+def test_normalize_with_n_top_genes_uses_full_gene_totals(tmp_path):
+    import scanpy as sc
+    from anndata.io import read_elem
+    h5ad = tmp_path / "hvg.h5ad"
+    out = tmp_path / "out.zarr"
+    rng = np.random.default_rng(2)
+    n_obs, n_vars = 200, 40
+    X = rng.poisson(3.0, size=(n_obs, n_vars)).astype(np.float32)
+    obs = pd.DataFrame(index=[f"cell_{i}" for i in range(n_obs)])
+    var = pd.DataFrame(index=[f"gene_{i}" for i in range(n_vars)])
+    var["highly_variable"] = [True] * 15 + [False] * (n_vars - 15)
+    ad.AnnData(X=X, obs=obs, var=var).write_h5ad(h5ad)
+
+    cfg = ConversionConfig(
+        input_file=h5ad, output_file=out, normalize=True, n_top_genes=10,
+        dtype="float64", var_chunk_size=5, cell_chunk_size=50,
+    )
+    convert_h5ad_to_zarr_chunked(cfg)
+
+    root = open_zarr(out)
+    X_out = np.asarray(root["X"][:])
+    selected = list(read_elem(root["var"]).index)  # genes the pipeline kept, in output order
+
+    # scanpy oracle: normalize on the FULL gene set, then subset to the same genes.
+    # Cast X to float64 so scanpy's arithmetic matches the pipeline's float64 math;
+    # without this cast scanpy stays in float32, diverging ~1e-7 from our float64 output.
+    expected = ad.read_h5ad(h5ad)
+    expected.X = np.asarray(expected.X, dtype=np.float64)
+    sc.pp.normalize_total(expected)
+    sc.pp.log1p(expected)
+    expected_sub = expected[:, selected]
+
+    assert X_out.shape == (n_obs, 10)
+    np.testing.assert_allclose(X_out, np.asarray(expected_sub.X), rtol=1e-9, atol=1e-9)
+
+
 def test_normalize_float64_precision_matches_scanpy(tmp_path):
     import scanpy as sc
     h5ad = tmp_path / "f64.h5ad"
