@@ -161,3 +161,19 @@ def test_cli_normalize_flag_log_normalizes_X(tmp_path):
     sc.pp.normalize_total(expected)
     sc.pp.log1p(expected)
     np.testing.assert_allclose(X_out, np.asarray(expected.X), rtol=1e-4, atol=1e-4)
+
+
+def test_cli_normalize_without_two_phase_warns_and_ignores(tmp_path):
+    h5ad = tmp_path / "counts.h5ad"
+    out = tmp_path / "out.zarr"
+    _, adata = _write_counts_h5ad(h5ad, n_obs=60, n_vars=15)
+
+    result = CliRunner().invoke(cli, ["convert", str(h5ad), str(out), "--normalize"])
+    assert result.exit_code == 0, result.output
+    assert "--normalize requires --two-phase" in result.output
+
+    # Simple path does not normalize: X stays equal to the raw input.
+    adata_out = ad.read_zarr(out)
+    X_out = np.asarray(adata_out.X.toarray() if hasattr(adata_out.X, 'toarray') else adata_out.X)
+    X_expected = np.asarray(adata.X.toarray() if hasattr(adata.X, 'toarray') else adata.X)
+    np.testing.assert_allclose(X_out, X_expected, rtol=1e-5, atol=1e-5)
