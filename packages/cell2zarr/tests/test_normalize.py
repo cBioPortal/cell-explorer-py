@@ -30,3 +30,60 @@ def test_conversionconfig_normalize_can_be_set(tmp_path):
         input_file=tmp_path / "in.h5ad", output_file=tmp_path / "out.zarr", normalize=True
     )
     assert cfg.normalize is True
+
+
+from cell2zarr._testing import open_zarr, _write_test_h5ad
+from cell2zarr.convert import convert_h5ad_to_zarr_chunked
+
+
+def test_normalize_matches_scanpy(tmp_path):
+    import scanpy as sc
+    h5ad = tmp_path / "counts.h5ad"
+    out = tmp_path / "out.zarr"
+    _, adata = _write_counts_h5ad(h5ad, n_obs=200, n_vars=40)
+
+    cfg = ConversionConfig(
+        input_file=h5ad, output_file=out, normalize=True,
+        var_chunk_size=10, cell_chunk_size=50,
+    )
+    convert_h5ad_to_zarr_chunked(cfg)
+
+    X_out = np.asarray(open_zarr(out)["X"][:])
+
+    expected = adata.copy()
+    sc.pp.normalize_total(expected)
+    sc.pp.log1p(expected)
+    X_expected = np.asarray(expected.X)
+
+    np.testing.assert_allclose(X_out, X_expected, rtol=1e-4, atol=1e-4)
+
+
+def test_normalize_zero_count_cell_stays_zero(tmp_path):
+    h5ad = tmp_path / "counts.h5ad"
+    out = tmp_path / "out.zarr"
+    _write_counts_h5ad(h5ad, n_obs=120, n_vars=30, zero_cell=True)
+
+    cfg = ConversionConfig(
+        input_file=h5ad, output_file=out, normalize=True,
+        var_chunk_size=10, cell_chunk_size=50,
+    )
+    convert_h5ad_to_zarr_chunked(cfg)
+
+    X_out = np.asarray(open_zarr(out)["X"][:])
+    assert np.all(np.isfinite(X_out))
+    assert np.all(X_out[0, :] == 0.0)
+
+
+def test_default_path_leaves_X_unchanged(tmp_path):
+    h5ad = tmp_path / "raw.h5ad"
+    out = tmp_path / "out.zarr"
+    _, adata = _write_test_h5ad(h5ad, n_obs=120, n_vars=30)
+
+    cfg = ConversionConfig(
+        input_file=h5ad, output_file=out, normalize=False,
+        var_chunk_size=10, cell_chunk_size=50,
+    )
+    convert_h5ad_to_zarr_chunked(cfg)
+
+    X_out = np.asarray(open_zarr(out)["X"][:])
+    np.testing.assert_allclose(X_out, np.asarray(adata.X), rtol=1e-5, atol=1e-5)

@@ -202,6 +202,7 @@ def _phase1_write_temp_zarr(config: ConversionConfig, adata_backed, var_idx, n_o
             )
 
     logger.info(f"Streaming {n_obs:,} cells in {n_cell_chunks} chunks of {config.cell_chunk_size:,}")
+    cell_totals = np.zeros(n_obs, dtype=np.float64) if config.normalize else None
     phase1_start = time.time()
 
     for ci in range(n_cell_chunks):
@@ -215,6 +216,8 @@ def _phase1_write_temp_zarr(config: ConversionConfig, adata_backed, var_idx, n_o
 
         X_dense = chunk.X.toarray() if sparse.issparse(chunk.X) else np.asarray(chunk.X)
         tmp_X[c_start:c_end, :] = X_dense.astype(np.float32)
+        if cell_totals is not None:
+            cell_totals[c_start:c_end] = X_dense.sum(axis=1)
 
         for ln in layer_names:
             ld = chunk.layers[ln]
@@ -232,7 +235,7 @@ def _phase1_write_temp_zarr(config: ConversionConfig, adata_backed, var_idx, n_o
     phase1_time = time.time() - phase1_start
     logger.info(f"Phase 1 complete in {phase1_time:.0f}s")
 
-    return tmp_root, tmp_dir, phase1_time, has_layers, layer_names
+    return tmp_root, tmp_dir, phase1_time, has_layers, layer_names, cell_totals
 
 
 def _read_obsm_chunked(adata_backed, n_obs: int, cell_chunk_size: int) -> dict[str, np.ndarray]:
@@ -290,7 +293,7 @@ def _extract_metadata(adata_backed, var_idx, n_obs: int, cell_chunk_size: int) -
     }
 
 
-def _phase2_rechunk(config: ConversionConfig, tmp_root, n_obs: int, n_vars: int, v_chunk: int, has_layers: bool, layer_names: list[str], encoding: EncodingConfig | None = None):
+def _phase2_rechunk(config: ConversionConfig, tmp_root, n_obs: int, n_vars: int, v_chunk: int, has_layers: bool, layer_names: list[str], encoding: EncodingConfig | None = None, scale: np.ndarray | None = None):
     """Phase 2: Rechunk temp zarr → final column-chunked zarr.
 
     Returns (final_root, final_store, phase2_time).
@@ -361,8 +364,10 @@ def _phase2_rechunk(config: ConversionConfig, tmp_root, n_obs: int, n_vars: int,
         b_end = min((bi + 1) * read_batch, n_vars)
 
         # Read batch of columns from temp zarr (amortizes decompression across batch)
-        col_data = np.array(tmp_X[:, b_start:b_end]).astype(target_dtype)
-        final_X[:, b_start:b_end] = col_data
+        col_data = np.array(tmp_X[:, b_start:b_end])
+        if scale is not None:
+            col_data = np.log1p(col_data.astype(np.float64) * scale[:, None])
+        final_X[:, b_start:b_end] = col_data.astype(target_dtype)
 
         for ln in layer_names:
             layer_col = np.array(tmp_layers_data[ln][:, b_start:b_end]).astype(target_dtype)
@@ -867,15 +872,24 @@ def convert_h5ad_to_zarr_chunked(config: ConversionConfig, hooks: dict[str, Call
             if hooks and "on_encoding_loaded" in hooks:
                 hooks["on_encoding_loaded"](encoding=encoding, config_path=config.encoding_config)
 
-        tmp_root, tmp_dir, phase1_time, has_layers, layer_names = _phase1_write_temp_zarr(
+        tmp_root, tmp_dir, phase1_time, has_layers, layer_names, cell_totals = _phase1_write_temp_zarr(
             config, adata_backed, var_idx, n_obs, n_vars,
         )
 
         if hooks and "on_phase1_done" in hooks:
             hooks["on_phase1_done"](phase1_time=phase1_time)
 
+        scale = None
+        if config.normalize:
+            positive = cell_totals[cell_totals > 0]
+            if positive.size == 0:
+                raise ValueError("Cannot normalize: all cells have zero total counts")
+            median = float(np.median(positive))
+            scale = np.where(cell_totals > 0, median / cell_totals, 0.0)
+            logger.info(f"Normalizing: scanpy normalize_total (median total counts = {median:.1f}) + log1p")
+
         final_root, final_store, phase2_time = _phase2_rechunk(
-            config, tmp_root, n_obs, n_vars, v_chunk, has_layers, layer_names, encoding,
+            config, tmp_root, n_obs, n_vars, v_chunk, has_layers, layer_names, encoding, scale,
         )
 
         # Clean up temp zarr before loading metadata to free memory
