@@ -898,6 +898,9 @@ def convert_h5ad_to_zarr_chunked(config: ConversionConfig, hooks: dict[str, Call
 
         metadata = _extract_metadata(adata_backed, var_idx, n_obs, config.cell_chunk_size)
 
+        if config.normalize:
+            metadata["uns"] = {**(metadata["uns"] or {}), "log1p": {"base": None}}
+
         _write_metadata(final_root, final_store, metadata, config, encoding)
 
         total_time = phase1_time + phase2_time

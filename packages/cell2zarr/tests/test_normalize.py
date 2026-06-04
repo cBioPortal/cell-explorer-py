@@ -103,3 +103,38 @@ def test_normalize_raises_if_all_zero_counts(tmp_path):
     )
     with pytest.raises(ValueError, match="all cells have zero total counts"):
         convert_h5ad_to_zarr_chunked(cfg)
+
+
+from anndata.io import read_elem
+
+
+def test_normalize_writes_log1p_uns(tmp_path):
+    h5ad = tmp_path / "counts.h5ad"
+    out = tmp_path / "out.zarr"
+    _write_counts_h5ad(h5ad, n_obs=100, n_vars=20)
+
+    cfg = ConversionConfig(
+        input_file=h5ad, output_file=out, normalize=True,
+        var_chunk_size=10, cell_chunk_size=50,
+    )
+    convert_h5ad_to_zarr_chunked(cfg)
+
+    root = open_zarr(out)
+    uns = read_elem(root["uns"])
+    assert uns["log1p"] == {"base": None}
+
+
+def test_default_path_has_no_log1p_uns(tmp_path):
+    h5ad = tmp_path / "raw.h5ad"
+    out = tmp_path / "out.zarr"
+    _write_test_h5ad(h5ad, n_obs=100, n_vars=20)
+
+    cfg = ConversionConfig(
+        input_file=h5ad, output_file=out, normalize=False,
+        var_chunk_size=10, cell_chunk_size=50,
+    )
+    convert_h5ad_to_zarr_chunked(cfg)
+
+    root = open_zarr(out)
+    uns = read_elem(root["uns"]) if "uns" in root else {}
+    assert "log1p" not in uns
