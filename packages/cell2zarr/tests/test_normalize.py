@@ -87,3 +87,19 @@ def test_default_path_leaves_X_unchanged(tmp_path):
 
     X_out = np.asarray(open_zarr(out)["X"][:])
     np.testing.assert_allclose(X_out, np.asarray(adata.X), rtol=1e-5, atol=1e-5)
+
+
+def test_normalize_raises_if_all_zero_counts(tmp_path):
+    h5ad = tmp_path / "zeros.h5ad"
+    out = tmp_path / "out.zarr"
+    X = np.zeros((10, 5), dtype=np.float32)
+    obs = pd.DataFrame(index=[f"cell_{i}" for i in range(10)])
+    var = pd.DataFrame(index=[f"gene_{i}" for i in range(5)])
+    ad.AnnData(X=X, obs=obs, var=var).write_h5ad(h5ad)
+
+    cfg = ConversionConfig(
+        input_file=h5ad, output_file=out, normalize=True,
+        var_chunk_size=5, cell_chunk_size=5,
+    )
+    with pytest.raises(ValueError, match="all cells have zero total counts"):
+        convert_h5ad_to_zarr_chunked(cfg)

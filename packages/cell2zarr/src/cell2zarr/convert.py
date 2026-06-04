@@ -885,11 +885,11 @@ def convert_h5ad_to_zarr_chunked(config: ConversionConfig, hooks: dict[str, Call
             if positive.size == 0:
                 raise ValueError("Cannot normalize: all cells have zero total counts")
             median = float(np.median(positive))
-            scale = np.where(cell_totals > 0, median / cell_totals, 0.0)
+            scale = np.divide(median, cell_totals, out=np.zeros(n_obs, dtype=np.float64), where=cell_totals > 0)
             logger.info(f"Normalizing: scanpy normalize_total (median total counts = {median:.1f}) + log1p")
 
         final_root, final_store, phase2_time = _phase2_rechunk(
-            config, tmp_root, n_obs, n_vars, v_chunk, has_layers, layer_names, encoding, scale,
+            config, tmp_root, n_obs, n_vars, v_chunk, has_layers, layer_names, encoding, scale=scale,
         )
 
         # Clean up temp zarr before loading metadata to free memory
