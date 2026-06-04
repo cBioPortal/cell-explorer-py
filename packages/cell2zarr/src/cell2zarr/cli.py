@@ -134,6 +134,7 @@ def cli():
 @click.option("--var-chunk-size", type=int, help="Variable (gene) chunk size. Default: 10.")
 @click.option("--n-top-genes", type=int, help="Filter to top N highly variable genes.")
 @click.option("--keep-raw", is_flag=True, help="Keep raw counts in the output.")
+@click.option("--normalize", is_flag=True, help="Apply scanpy normalize_total + log1p to X (two-phase only).")
 @click.option("--sparse-format", type=click.Choice(["csr", "csc"]), default="csr", help="Sparse matrix format. Default: csr.")
 @click.option("--dense", is_flag=True, help="Convert sparse matrix to dense array.")
 @click.option("--force-int32", is_flag=True, help="Cast sparse indices to int32.")
@@ -148,7 +149,7 @@ def cli():
 @click.option("--temp-dir", type=click.Path(path_type=Path), help="Directory for phase 1 temp zarr.")
 @click.option("--log-level", type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False), default="INFO", help="Log level. Default: INFO.")
 def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes,
-            keep_raw, sparse_format, dense, force_int32, two_phase, cell_chunk_size,
+            keep_raw, normalize, sparse_format, dense, force_int32, two_phase, cell_chunk_size,
             shard_size, dtype, obsm_cell_chunk_size, log_file, run_db, encoding_config, temp_dir,
             log_level):
     """Convert h5ad file to Zarr store."""
@@ -163,6 +164,9 @@ def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes
         log_file = output_file.with_suffix('.log')
 
     _setup_logging(log_file, getattr(logging, log_level.upper()))
+
+    if normalize and not two_phase:
+        click.echo("Note: --normalize requires --two-phase; ignoring.", err=True)
 
     if two_phase:
         if sparse_format != "csr" or force_int32:
@@ -186,6 +190,7 @@ def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes
             var_chunk_size=var_chunk_size if var_chunk_size is not None else enc_defaults.get("var_chunk_size", 10),
             n_top_genes=n_top_genes,
             keep_raw=keep_raw,
+            normalize=normalize,
             cell_chunk_size=cell_chunk_size,
             shard_size=shard_size if shard_size is not None else enc_defaults.get("shard_size"),
             dtype=dtype if dtype is not None else enc_defaults.get("dtype", "float32"),
@@ -208,6 +213,7 @@ def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes
                 "--two-phase": True,
                 "--var-chunk-size": config.var_chunk_size,
                 "--keep-raw": config.keep_raw,
+                "--normalize": config.normalize,
                 "--cell-chunk-size": config.cell_chunk_size,
                 "--dtype": config.dtype,
                 "--obsm-cell-chunk-size": config.obsm_cell_chunk_size,

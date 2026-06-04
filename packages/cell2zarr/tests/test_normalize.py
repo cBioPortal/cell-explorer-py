@@ -138,3 +138,26 @@ def test_default_path_has_no_log1p_uns(tmp_path):
     root = open_zarr(out)
     uns = read_elem(root["uns"]) if "uns" in root else {}
     assert "log1p" not in uns
+
+
+from click.testing import CliRunner
+from cell2zarr.cli import cli
+
+
+def test_cli_normalize_flag_log_normalizes_X(tmp_path):
+    import scanpy as sc
+    h5ad = tmp_path / "counts.h5ad"
+    out = tmp_path / "out.zarr"
+    _, adata = _write_counts_h5ad(h5ad, n_obs=120, n_vars=20)
+
+    result = CliRunner().invoke(
+        cli, ["convert", str(h5ad), str(out), "--two-phase", "--normalize",
+              "--cell-chunk-size", "50", "--var-chunk-size", "10"]
+    )
+    assert result.exit_code == 0, result.output
+
+    X_out = np.asarray(open_zarr(out)["X"][:])
+    expected = adata.copy()
+    sc.pp.normalize_total(expected)
+    sc.pp.log1p(expected)
+    np.testing.assert_allclose(X_out, np.asarray(expected.X), rtol=1e-4, atol=1e-4)
