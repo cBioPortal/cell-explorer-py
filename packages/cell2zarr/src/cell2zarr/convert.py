@@ -178,7 +178,7 @@ def _compute_cell_totals(adata_backed, var_idx, n_obs: int, cell_chunk_size: int
 
 
 def _phase1_write_temp_zarr(config: ConversionConfig, adata_backed, var_idx, n_obs: int, n_vars: int, scale: np.ndarray | None = None):
-    """Phase 1: Single pass through h5ad → row-chunked temp zarr.
+    """Phase 1: Single write-pass through h5ad → row-chunked temp zarr.
 
     Returns (tmp_root, tmp_dir, phase1_time, has_layers, layer_names).
     """
@@ -856,7 +856,7 @@ def add_key_to_store(
 def convert_h5ad_to_zarr_chunked(config: ConversionConfig, hooks: dict[str, Callable] | None = None) -> None:
     """Convert h5ad to dense zarr using two-phase approach.
 
-    Phase 1: Single pass through h5ad → row-chunked temp zarr (aligned with CSR read pattern).
+    Phase 1: Single write-pass through h5ad → row-chunked temp zarr (preceded by a sparse-sum pre-pass when normalizing).
     Phase 2: Rechunk temp zarr → final column-chunked zarr (all_cells, var_chunk_size).
 
     Optional hooks dict for lifecycle events:
