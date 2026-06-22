@@ -470,7 +470,7 @@ dev = [
 
 [[package]]
 name = "cell-explorer-api"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/api" }
 dependencies = [
     { name = "aiosqlite" },
@@ -514,7 +514,7 @@ provides-extras = ["test"]
 
 [[package]]
 name = "cell2zarr"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/cell2zarr" }
 dependencies = [
     { name = "anndata" },
