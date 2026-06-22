@@ -154,8 +154,32 @@ def _filter_hvgs(var_df, n_top_genes: int | None):
     return var_idx
 
 
-def _phase1_write_temp_zarr(config: ConversionConfig, adata_backed, var_idx, n_obs: int, n_vars: int):
-    """Phase 1: Single pass through h5ad → row-chunked temp zarr.
+def _compute_cell_totals(adata_backed, n_obs: int, cell_chunk_size: int) -> np.ndarray:
+    """Pre-pass: per-cell total counts (float64), summed over ALL genes.
+
+    Reads the backed h5ad in cell-chunks and sums each row without densifying or
+    writing a temp store, so the normalization median can be computed in float64
+    before Phase 1 rounds anything to float32.
+
+    Totals are always over the full gene set (scanpy normalize_total runs before
+    HVG selection, so the scale factor must be derived from all genes regardless
+    of any --n-top-genes filtering applied afterward).
+    """
+    cell_totals = np.zeros(n_obs, dtype=np.float64)
+    n_cell_chunks = (n_obs + cell_chunk_size - 1) // cell_chunk_size
+    logger.info(f"Pre-pass: computing per-cell totals over {n_cell_chunks} chunks...")
+    for ci in range(n_cell_chunks):
+        c_start = ci * cell_chunk_size
+        c_end = min((ci + 1) * cell_chunk_size, n_obs)
+        chunk = adata_backed[c_start:c_end, :].to_memory()
+        cell_totals[c_start:c_end] = np.asarray(chunk.X.sum(axis=1), dtype=np.float64).ravel()
+        del chunk
+        gc.collect()
+    return cell_totals
+
+
+def _phase1_write_temp_zarr(config: ConversionConfig, adata_backed, var_idx, n_obs: int, n_vars: int, scale: np.ndarray | None = None):
+    """Phase 1: Single write-pass through h5ad → row-chunked temp zarr.
 
     Returns (tmp_root, tmp_dir, phase1_time, has_layers, layer_names).
     """
@@ -181,11 +205,16 @@ def _phase1_write_temp_zarr(config: ConversionConfig, adata_backed, var_idx, n_o
     tmp_var_chunk = min(1000, n_vars)
     logger.info(f"Temp zarr chunk shape: ({config.cell_chunk_size}, {tmp_var_chunk})")
 
+    # Use target dtype for temp when normalizing so the float64 math result is
+    # preserved end-to-end. For raw (no normalization) the temp is always float32
+    # since it stores raw counts that will be cast to target dtype in Phase 2.
+    tmp_dtype = config.dtype if scale is not None else "float32"
+
     tmp_X = tmp_root.create_array(
         "X",
         shape=(n_obs, n_vars),
         chunks=(config.cell_chunk_size, tmp_var_chunk),
-        dtype="float32",
+        dtype=tmp_dtype,
         overwrite=True,
     )
 
@@ -214,7 +243,9 @@ def _phase1_write_temp_zarr(config: ConversionConfig, adata_backed, var_idx, n_o
             chunk = adata_backed[c_start:c_end, :].to_memory()
 
         X_dense = chunk.X.toarray() if sparse.issparse(chunk.X) else np.asarray(chunk.X)
-        tmp_X[c_start:c_end, :] = X_dense.astype(np.float32)
+        if scale is not None:
+            X_dense = np.log1p(X_dense.astype(np.float64) * scale[c_start:c_end, None])
+        tmp_X[c_start:c_end, :] = X_dense.astype(tmp_dtype)
 
         for ln in layer_names:
             ld = chunk.layers[ln]
@@ -826,7 +857,7 @@ def add_key_to_store(
 def convert_h5ad_to_zarr_chunked(config: ConversionConfig, hooks: dict[str, Callable] | None = None) -> None:
     """Convert h5ad to dense zarr using two-phase approach.
 
-    Phase 1: Single pass through h5ad → row-chunked temp zarr (aligned with CSR read pattern).
+    Phase 1: Single write-pass through h5ad → row-chunked temp zarr (preceded by a sparse-sum pre-pass when normalizing).
     Phase 2: Rechunk temp zarr → final column-chunked zarr (all_cells, var_chunk_size).
 
     Optional hooks dict for lifecycle events:
@@ -867,8 +898,18 @@ def convert_h5ad_to_zarr_chunked(config: ConversionConfig, hooks: dict[str, Call
             if hooks and "on_encoding_loaded" in hooks:
                 hooks["on_encoding_loaded"](encoding=encoding, config_path=config.encoding_config)
 
+        scale = None
+        if config.normalize:
+            cell_totals = _compute_cell_totals(adata_backed, n_obs, config.cell_chunk_size)
+            positive = cell_totals[cell_totals > 0]
+            if positive.size == 0:
+                raise ValueError("Cannot normalize: all cells have zero total counts")
+            median = float(np.median(positive))
+            scale = np.divide(median, cell_totals, out=np.zeros(n_obs, dtype=np.float64), where=cell_totals > 0)
+            logger.info(f"Normalizing: scanpy normalize_total (median total counts = {median:.1f}) + log1p")
+
         tmp_root, tmp_dir, phase1_time, has_layers, layer_names = _phase1_write_temp_zarr(
-            config, adata_backed, var_idx, n_obs, n_vars,
+            config, adata_backed, var_idx, n_obs, n_vars, scale,
         )
 
         if hooks and "on_phase1_done" in hooks:
@@ -883,6 +924,9 @@ def convert_h5ad_to_zarr_chunked(config: ConversionConfig, hooks: dict[str, Call
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
         metadata = _extract_metadata(adata_backed, var_idx, n_obs, config.cell_chunk_size)
+
+        if config.normalize:
+            metadata["uns"] = {**(metadata["uns"] or {}), "log1p": {"base": None}}
 
         _write_metadata(final_root, final_store, metadata, config, encoding)
 

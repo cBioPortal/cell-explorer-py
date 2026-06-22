@@ -37,6 +37,7 @@ class ConversionConfig(BaseModel):
     var_chunk_size: int = 10
     n_top_genes: int | None = None
     keep_raw: bool = False
+    normalize: bool = False
     cell_chunk_size: int = 10000
     shard_size: int | None = None
     dtype: str = "float32"
