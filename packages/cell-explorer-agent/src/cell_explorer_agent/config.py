@@ -13,6 +13,7 @@ class AgentConfig(BaseSettings):
 
     llm_transport: Literal["anthropic", "bedrock", "vertex"] = "anthropic"
     llm_model: str = "claude-sonnet-4-6"
+    bedrock_region: str = "us-east-1"
 
     tool_result_max_bytes: int = Field(default=32_768, ge=1)
     filter_ids_max: int = Field(default=100_000, ge=1)
