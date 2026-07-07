@@ -89,13 +89,15 @@ Transport = Literal["anthropic", "bedrock", "vertex"]
 class AnthropicLLMClient(LLMClient):
     """Anthropic SDK adapter. Supports direct/Bedrock/Vertex via transport arg."""
 
-    def __init__(self, *, transport: Transport = "anthropic") -> None:
+    def __init__(
+        self, *, transport: Transport = "anthropic", bedrock_region: str = "us-east-1"
+    ) -> None:
         import anthropic
 
         if transport == "anthropic":
             self._client = anthropic.AsyncAnthropic()
         elif transport == "bedrock":
-            self._client = anthropic.AsyncAnthropicBedrock()
+            self._client = anthropic.AsyncAnthropicBedrock(aws_region=bedrock_region)
         elif transport == "vertex":
             self._client = anthropic.AsyncAnthropicVertex()
         else:
