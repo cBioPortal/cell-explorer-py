@@ -98,3 +98,9 @@ def test_langfuse_base_url_default(monkeypatch):
     from cell_explorer_agent.config import AgentConfig
     cfg = AgentConfig()
     assert cfg.langfuse_base_url == "https://us.cloud.langfuse.com"
+
+
+def test_bedrock_region_default_and_override(monkeypatch):
+    assert AgentConfig().bedrock_region == "us-east-1"
+    monkeypatch.setenv("CHAT_BEDROCK_REGION", "us-west-2")
+    assert AgentConfig().bedrock_region == "us-west-2"
