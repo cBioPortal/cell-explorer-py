@@ -8,6 +8,7 @@ def test_defaults():
     cfg = AgentConfig()
     assert cfg.llm_transport == "anthropic"
     assert cfg.llm_model == "claude-sonnet-4-6"
+    assert cfg.bedrock_region == "us-east-1"
     assert cfg.tool_result_max_bytes == 32_768
     assert cfg.filter_ids_max == 100_000
     assert cfg.max_tool_calls_per_turn == 8
@@ -100,7 +101,11 @@ def test_langfuse_base_url_default(monkeypatch):
     assert cfg.langfuse_base_url == "https://us.cloud.langfuse.com"
 
 
-def test_bedrock_region_default_and_override(monkeypatch):
+def test_bedrock_region_default(monkeypatch):
+    monkeypatch.delenv("CHAT_BEDROCK_REGION", raising=False)
     assert AgentConfig().bedrock_region == "us-east-1"
+
+
+def test_bedrock_region_override(monkeypatch):
     monkeypatch.setenv("CHAT_BEDROCK_REGION", "us-west-2")
     assert AgentConfig().bedrock_region == "us-west-2"

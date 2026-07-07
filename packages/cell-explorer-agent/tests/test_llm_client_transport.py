@@ -12,9 +12,11 @@ def test_bedrock_runtime_dep_importable():
 
 
 def test_bedrock_transport_uses_region():
-    client = AnthropicLLMClient(transport="bedrock", bedrock_region="us-east-1")
+    # Non-default region so this fails if aws_region were dropped from the
+    # constructor call (the SDK would otherwise fall back to "us-east-1").
+    client = AnthropicLLMClient(transport="bedrock", bedrock_region="ap-southeast-1")
     assert isinstance(client._client, anthropic.AsyncAnthropicBedrock)
-    assert client._client.aws_region == "us-east-1"
+    assert client._client.aws_region == "ap-southeast-1"
 
 
 def test_bedrock_transport_region_override():
