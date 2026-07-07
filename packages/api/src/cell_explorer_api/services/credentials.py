@@ -6,6 +6,7 @@ import os
 from datetime import datetime, timezone, timedelta
 
 import jwt
+from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
@@ -116,7 +117,11 @@ def _cloudfront_b64(data: bytes) -> str:
 
 
 def _rsa_sha1_sign(private_key_pem: str, message: bytes) -> bytes:
-    """RSA-SHA1 (PKCS#1 v1.5) signature — the algorithm CloudFront validates."""
+    """RSA-SHA1 (PKCS#1 v1.5) signature — the algorithm CloudFront validates.
+
+    private_key_pem must contain real newlines, not literal ``\\n`` escapes — some
+    dotenv loaders leave the escapes, which makes load_pem_private_key raise ValueError.
+    """
     key = serialization.load_pem_private_key(private_key_pem.encode("utf-8"), password=None)
     return key.sign(message, padding.PKCS1v15(), hashes.SHA1())
 
@@ -148,7 +153,7 @@ def _mint_cloudfront(
     policy = _cloudfront_policy(url, expires_at)
     try:
         signature = _rsa_sha1_sign(private_key, policy.encode("utf-8"))
-    except (ValueError, TypeError) as e:
+    except (ValueError, TypeError, UnsupportedAlgorithm) as e:
         raise CredentialError(
             f"Invalid private key for datasource '{datasource.name}': {e}"
         ) from e

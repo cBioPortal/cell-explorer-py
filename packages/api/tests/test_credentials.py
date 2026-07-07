@@ -2,6 +2,7 @@
 
 import base64
 import json
+import time
 from pathlib import Path
 
 import jwt
@@ -112,8 +113,6 @@ def test_mint_cloudfront_signed_cookies(cloudfront_datasource, cloudfront_keypai
     assert result["url"] == "https://cf.example.com/protected/spectrum.zarr"
     cookies = result["cookies"]
     assert cookies["CloudFront-Key-Pair-Id"] == "K2XYZ123"
-    assert cookies["CloudFront-Policy"] != "TODO"
-    assert cookies["CloudFront-Signature"] != "TODO"
 
     policy_bytes = _cf_b64_decode(cookies["CloudFront-Policy"])
     sig_bytes = _cf_b64_decode(cookies["CloudFront-Signature"])
@@ -124,11 +123,27 @@ def test_mint_cloudfront_signed_cookies(cloudfront_datasource, cloudfront_keypai
     policy = json.loads(policy_bytes)
     stmt = policy["Statement"][0]
     assert stmt["Resource"] == "https://cf.example.com/protected/spectrum.zarr/*"
-    assert isinstance(stmt["Condition"]["DateLessThan"]["AWS:EpochTime"], int)
+    epoch = stmt["Condition"]["DateLessThan"]["AWS:EpochTime"]
+    assert isinstance(epoch, int)
+    now = int(time.time())
+    assert now + 1700 < epoch < now + 1900  # default TTL is 1800s
 
 
 def test_mint_cloudfront_missing_env(cloudfront_datasource):
     with pytest.raises(CredentialError, match="not set"):
+        mint_credentials(cloudfront_datasource, "protected/spectrum.zarr")
+
+
+@pytest.mark.parametrize(
+    "set_var, missing_var",
+    [
+        ("DATASOURCE_TEST_KEY_PAIR_ID", "DATASOURCE_TEST_PRIVATE_KEY"),
+        ("DATASOURCE_TEST_PRIVATE_KEY", "DATASOURCE_TEST_KEY_PAIR_ID"),
+    ],
+)
+def test_mint_cloudfront_partial_missing_env(cloudfront_datasource, set_var, missing_var, monkeypatch):
+    monkeypatch.setenv(set_var, "x")
+    with pytest.raises(CredentialError, match=missing_var):
         mint_credentials(cloudfront_datasource, "protected/spectrum.zarr")
 
 
