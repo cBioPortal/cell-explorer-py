@@ -1,9 +1,13 @@
 """Credential minting service for datasource-specific access tokens."""
 
+import base64
+import json
 import os
 from datetime import datetime, timezone, timedelta
 
 import jwt
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
 
 from cell_explorer_api.db.models import Datasource, DatasourceType
 
@@ -87,6 +91,36 @@ def _mint_http_token(
     }
 
 
+def _cloudfront_policy(url: str, expires_at: datetime) -> str:
+    """Compact CloudFront custom policy granting the dataset path prefix until expiry."""
+    policy = {
+        "Statement": [
+            {
+                "Resource": f"{url}/*",
+                "Condition": {"DateLessThan": {"AWS:EpochTime": int(expires_at.timestamp())}},
+            }
+        ]
+    }
+    return json.dumps(policy, separators=(",", ":"))
+
+
+def _cloudfront_b64(data: bytes) -> str:
+    """CloudFront's URL-safe base64: + -> -, = -> _, / -> ~."""
+    return (
+        base64.b64encode(data)
+        .decode("ascii")
+        .replace("+", "-")
+        .replace("=", "_")
+        .replace("/", "~")
+    )
+
+
+def _rsa_sha1_sign(private_key_pem: str, message: bytes) -> bytes:
+    """RSA-SHA1 (PKCS#1 v1.5) signature — the algorithm CloudFront validates."""
+    key = serialization.load_pem_private_key(private_key_pem.encode("utf-8"), password=None)
+    return key.sign(message, padding.PKCS1v15(), hashes.SHA1())
+
+
 def _mint_cloudfront(
     datasource: Datasource,
     path: str,
@@ -94,12 +128,7 @@ def _mint_cloudfront(
     expires_at: datetime,
     ttl_seconds: int,
 ) -> dict:
-    """Mint CloudFront signed cookies.
-
-    Note: Full CloudFront signing requires the cryptography library's
-    RSA signing. This is a placeholder structure — the actual signing
-    logic will be implemented when CloudFront integration is tested.
-    """
+    """Mint CloudFront signed cookies (custom policy, RSA-SHA1, URL-safe base64)."""
     key_pair_id_key = f"DATASOURCE_{datasource.credential_ref}_KEY_PAIR_ID"
     private_key_key = f"DATASOURCE_{datasource.credential_ref}_PRIVATE_KEY"
 
@@ -116,15 +145,20 @@ def _mint_cloudfront(
             f"Credentials not configured: {', '.join(missing)} environment variable(s) not set"
         )
 
-    # CloudFront signed cookie generation will be implemented
-    # when integration testing with a real CloudFront distribution.
-    # For now, return the structure so the API contract is established.
+    policy = _cloudfront_policy(url, expires_at)
+    try:
+        signature = _rsa_sha1_sign(private_key, policy.encode("utf-8"))
+    except (ValueError, TypeError) as e:
+        raise CredentialError(
+            f"Invalid private key for datasource '{datasource.name}': {e}"
+        ) from e
+
     return {
         "url": url,
         "credential_type": "signed_cookies",
         "cookies": {
-            "CloudFront-Policy": "TODO",
-            "CloudFront-Signature": "TODO",
+            "CloudFront-Policy": _cloudfront_b64(policy.encode("utf-8")),
+            "CloudFront-Signature": _cloudfront_b64(signature),
             "CloudFront-Key-Pair-Id": key_pair_id,
         },
         "expires_at": expires_at.isoformat(),
