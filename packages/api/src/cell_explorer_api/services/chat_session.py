@@ -201,7 +201,10 @@ async def make_chat_agent(
 
     # 6. Construct LLMClient if not provided
     if llm is None:
-        llm = AnthropicLLMClient(transport=agent_config.llm_transport)
+        llm = AnthropicLLMClient(
+            transport=agent_config.llm_transport,
+            bedrock_region=agent_config.bedrock_region,
+        )
 
     # 7. Return the wired agent
     return ChatAgent(llm=llm, catalog=catalog, dataset_ctx=ctx, config=agent_config)
