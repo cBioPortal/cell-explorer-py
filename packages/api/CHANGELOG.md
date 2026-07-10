@@ -2,6 +2,33 @@
 
 <!-- version list -->
 
+## v0.3.0 (2026-07-10)
+
+### Chores
+
+- **api**: Declare cryptography dependency explicitly
+  ([`f5f3030`](https://github.com/cBioPortal/cell-explorer-py/commit/f5f303066a0c1ccac129e8e47c570c08aecdea82))
+
+### Features
+
+- **api**: Implement CloudFront signed-cookie minting
+  ([`2538e0c`](https://github.com/cBioPortal/cell-explorer-py/commit/2538e0c0f005237ca0f98cced4fe33d652f69e38))
+
+- **api**: Pass bedrock_region when constructing the LLM client
+  ([`d533e1b`](https://github.com/cBioPortal/cell-explorer-py/commit/d533e1b16e6c1245cdef64169b4a94f42e20f35d))
+
+- **tools**: Describe_var_column + var_columns in dataset schema
+  ([`c578231`](https://github.com/cBioPortal/cell-explorer-py/commit/c578231426d0307c841bc8c4c39ae60a60337ce7))
+
+- **zarr-adapter**: Recognize 'gene' as a gene-symbol column candidate
+  ([`42ef311`](https://github.com/cBioPortal/cell-explorer-py/commit/42ef311456317a4685718ccb1b798f2f68cce3b3))
+
+### Testing
+
+- **api**: Harden cloudfront tests (expiry range, partial-env) + catch UnsupportedAlgorithm
+  ([`f57d210`](https://github.com/cBioPortal/cell-explorer-py/commit/f57d210deb58b481561b917889382c4c9594e338))
+
+
 ## v0.2.0 (2026-05-21)
 
 ### Bug Fixes
