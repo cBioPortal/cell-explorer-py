@@ -2,6 +2,49 @@
 
 <!-- version list -->
 
+## v0.3.0 (2026-07-10)
+
+### Bug Fixes
+
+- **cell2zarr**: Read obsm directly without materializing X
+  ([`6f1a4f1`](https://github.com/cBioPortal/cell-explorer-py/commit/6f1a4f14e3ab1361732f18b94079b0852bcbe4cd))
+
+- **convert**: Compute normalization totals over all genes, not the HVG subset
+  ([`6cff4f3`](https://github.com/cBioPortal/cell-explorer-py/commit/6cff4f3f8ccd439afc829ae0702ae00fa69a8495))
+
+### Documentation
+
+- **convert**: Clarify phase 1 is preceded by a pre-pass when normalizing
+  ([`8ac563c`](https://github.com/cBioPortal/cell-explorer-py/commit/8ac563ccfb37fddec551e76297630dd7ed3a1b6f))
+
+### Features
+
+- **cli**: Add --normalize flag to convert command
+  ([`4b52886`](https://github.com/cBioPortal/cell-explorer-py/commit/4b52886d1f7a388f02d6ed6f6bbaee3bda52af11))
+
+- **convert**: Add normalize field to ConversionConfig
+  ([`29f288a`](https://github.com/cBioPortal/cell-explorer-py/commit/29f288ad23407911908ee34b3672920cea872c17))
+
+- **convert**: Apply scanpy normalize_total + log1p when normalize is set
+  ([`c8aa61c`](https://github.com/cBioPortal/cell-explorer-py/commit/c8aa61cd847132d7b8df9b799a4ef12780245ed1))
+
+- **convert**: Write uns['log1p'] when normalizing
+  ([`7e5d58a`](https://github.com/cBioPortal/cell-explorer-py/commit/7e5d58affcc07c0ca8acc123d79ac36fb913fd30))
+
+### Refactoring
+
+- **convert**: Normalize in float64 during phase 1 via sparse-sum pre-pass
+  ([`d168b1e`](https://github.com/cBioPortal/cell-explorer-py/commit/d168b1eb83155be2ba11d4a72d1b07ef7cfbc288))
+
+- **convert**: Silence divide-by-zero warning and test all-zero guard
+  ([`f8ef038`](https://github.com/cBioPortal/cell-explorer-py/commit/f8ef038a153062d62317a1b72ebff425f6068ffa))
+
+### Testing
+
+- **cli**: Verify --normalize without --two-phase warns and skips normalization
+  ([`1cfb533`](https://github.com/cBioPortal/cell-explorer-py/commit/1cfb533a7b73df3f3e77dc5a6195a2cec2e2c4e2))
+
+
 ## v0.2.0 (2026-05-21)
 
 ### Bug Fixes
