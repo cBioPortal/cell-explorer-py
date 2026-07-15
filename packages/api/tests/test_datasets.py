@@ -62,6 +62,7 @@ async def seeded_app(app, db_url):
             path="datasets/public.zarr",
             is_public=True,
             chat_enabled=True,
+            default_view={"pointSize": 3},
         )
         private_dataset = Dataset(
             datasource_id=ds.id,
@@ -237,3 +238,10 @@ def test_get_dataset_includes_chat_enabled(seeded_app):
     response = client.get("/api/datasets/public-atlas")
     assert response.status_code == 200
     assert response.json()["chat_enabled"] is True  # seed has chat_enabled=True
+
+
+def test_get_dataset_includes_default_view(seeded_app):
+    client = TestClient(seeded_app)
+    resp = client.get("/api/datasets/public-atlas")
+    assert resp.status_code == 200
+    assert resp.json()["default_view"] == {"pointSize": 3}
