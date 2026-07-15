@@ -127,3 +127,60 @@ def test_chat_feedback_accepts_comment():
     )
     assert f.rating == "down"
     assert f.comment == "off-topic"
+
+
+@pytest.mark.asyncio
+async def test_dataset_default_view_persists():
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlmodel import SQLModel, select
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    from cell_explorer_api.db.models import Dataset, Datasource, DatasourceType
+
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+
+    async with AsyncSession(engine) as session:
+        ds = Datasource(name="cdn", type=DatasourceType.S3_CLOUDFRONT, base_url="https://cdn")
+        session.add(ds)
+        await session.commit()
+        await session.refresh(ds)
+
+        dataset = Dataset(
+            datasource_id=ds.id,
+            name="D",
+            slug="d",
+            path="d.zarr",
+            default_view={"colorBy": "category", "category": "cell_type"},
+        )
+        session.add(dataset)
+        await session.commit()
+
+        result = await session.exec(select(Dataset).where(Dataset.slug == "d"))
+        loaded = result.first()
+        assert loaded.default_view == {"colorBy": "category", "category": "cell_type"}
+
+
+@pytest.mark.asyncio
+async def test_dataset_default_view_defaults_to_none():
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlmodel import SQLModel
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    from cell_explorer_api.db.models import Dataset, Datasource, DatasourceType
+
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+
+    async with AsyncSession(engine) as session:
+        ds = Datasource(name="cdn", type=DatasourceType.S3_CLOUDFRONT, base_url="https://cdn")
+        session.add(ds)
+        await session.commit()
+        await session.refresh(ds)
+        dataset = Dataset(datasource_id=ds.id, name="D", slug="d2", path="d.zarr")
+        session.add(dataset)
+        await session.commit()
+        await session.refresh(dataset)
+        assert dataset.default_view is None
