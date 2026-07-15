@@ -12,6 +12,7 @@ from sqlmodel import select
 from cell_explorer_api.auth.admin import require_admin
 from cell_explorer_api.db import get_db
 from cell_explorer_api.db.models import Dataset, Datasource, DatasourceType
+from cell_explorer_api.services.default_view import DefaultViewError, validate_default_view
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 
@@ -59,6 +60,7 @@ class DatasetCreate(BaseModel):
     is_public: bool = False
     required_roles: list[str] = []
     prompt_addendum: str | None = None
+    default_view: dict | None = None
     chat_enabled: bool = False
 
 
@@ -69,6 +71,7 @@ class DatasetUpdate(BaseModel):
     is_public: bool | None = None
     required_roles: list[str] | None = None
     prompt_addendum: str | None = None
+    default_view: dict | None = None
     chat_enabled: bool | None = None
 
 
@@ -82,11 +85,28 @@ class DatasetAdminResponse(BaseModel):
     is_public: bool
     required_roles: list[str]
     prompt_addendum: str | None
+    default_view: dict | None
     chat_enabled: bool
 
 
 class DatasetAdminListResponse(BaseModel):
     datasets: list[DatasetAdminResponse]
+
+
+def _dataset_to_admin_response(dataset: Dataset) -> DatasetAdminResponse:
+    return DatasetAdminResponse(
+        id=str(dataset.id),
+        datasource_id=str(dataset.datasource_id),
+        name=dataset.name,
+        slug=dataset.slug,
+        path=dataset.path,
+        description=dataset.description,
+        is_public=dataset.is_public,
+        required_roles=dataset.required_roles,
+        prompt_addendum=dataset.prompt_addendum,
+        default_view=dataset.default_view,
+        chat_enabled=dataset.chat_enabled,
+    )
 
 
 # --- Datasource routes ---
@@ -168,21 +188,7 @@ async def list_datasets_admin(
     db: AsyncSession = Depends(get_db),
 ) -> DatasetAdminListResponse:
     result = await db.exec(select(Dataset))
-    datasets = [
-        DatasetAdminResponse(
-            id=str(dataset.id),
-            datasource_id=str(dataset.datasource_id),
-            name=dataset.name,
-            slug=dataset.slug,
-            path=dataset.path,
-            description=dataset.description,
-            is_public=dataset.is_public,
-            required_roles=dataset.required_roles,
-            prompt_addendum=dataset.prompt_addendum,
-            chat_enabled=dataset.chat_enabled,
-        )
-        for dataset in result.all()
-    ]
+    datasets = [_dataset_to_admin_response(dataset) for dataset in result.all()]
     return DatasetAdminListResponse(datasets=datasets)
 
 
@@ -196,6 +202,11 @@ async def create_dataset(
         data["datasource_id"] = uuid.UUID(data["datasource_id"])
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid datasource_id format")
+    if data.get("default_view") is not None:
+        try:
+            data["default_view"] = validate_default_view(data["default_view"])
+        except DefaultViewError as exc:
+            raise HTTPException(status_code=422, detail=f"invalid default_view: {exc}")
     dataset = Dataset(**data)
     db.add(dataset)
     try:
@@ -204,18 +215,7 @@ async def create_dataset(
         await db.rollback()
         raise HTTPException(status_code=409, detail="Dataset with this slug already exists")
     await db.refresh(dataset)
-    return DatasetAdminResponse(
-        id=str(dataset.id),
-        datasource_id=str(dataset.datasource_id),
-        name=dataset.name,
-        slug=dataset.slug,
-        path=dataset.path,
-        description=dataset.description,
-        is_public=dataset.is_public,
-        required_roles=dataset.required_roles,
-        prompt_addendum=dataset.prompt_addendum,
-        chat_enabled=dataset.chat_enabled,
-    )
+    return _dataset_to_admin_response(dataset)
 
 
 @router.put("/datasets/{slug}")
@@ -229,24 +229,18 @@ async def update_dataset(
     if dataset is None:
         raise HTTPException(status_code=404, detail="Dataset not found")
     updates = payload.model_dump(exclude_unset=True)
+    if updates.get("default_view") is not None:
+        try:
+            updates["default_view"] = validate_default_view(updates["default_view"])
+        except DefaultViewError as exc:
+            raise HTTPException(status_code=422, detail=f"invalid default_view: {exc}")
     for key, value in updates.items():
         setattr(dataset, key, value)
     dataset.updated_at = datetime.now(timezone.utc)
     db.add(dataset)
     await db.commit()
     await db.refresh(dataset)
-    return DatasetAdminResponse(
-        id=str(dataset.id),
-        datasource_id=str(dataset.datasource_id),
-        name=dataset.name,
-        slug=dataset.slug,
-        path=dataset.path,
-        description=dataset.description,
-        is_public=dataset.is_public,
-        required_roles=dataset.required_roles,
-        prompt_addendum=dataset.prompt_addendum,
-        chat_enabled=dataset.chat_enabled,
-    )
+    return _dataset_to_admin_response(dataset)
 
 
 @router.delete("/datasets/{slug}", status_code=204)
