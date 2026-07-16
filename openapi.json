@@ -158,6 +158,26 @@
         }
       }
     },
+    "/api/auth/refresh": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Refresh",
+        "description": "Rotate session cookies using the refresh cookie.\n\nIdempotent endpoint used by the frontend's proactive-refresh timer to\nkeep the access cookie fresh before its TTL expires. Avoids the\nrotation race that happens when multiple parallel requests all try to\nrefresh after expiry. Returns 401 if no refresh cookie or if Keycloak\nrejects the refresh.",
+        "operationId": "refresh_api_auth_refresh_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/token-exchange": {
       "post": {
         "tags": [
@@ -850,6 +870,111 @@
           }
         }
       }
+    },
+    "/api/chat/{slug}/messages/{message_id}/feedback": {
+      "put": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Put Message Feedback",
+        "operationId": "put_message_feedback_api_chat__slug__messages__message_id__feedback_put",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Message Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Delete Message Feedback",
+        "operationId": "delete_message_feedback_api_chat__slug__messages__message_id__feedback_delete",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Message Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1022,6 +1147,29 @@
             "type": "array",
             "title": "Required Roles"
           },
+          "prompt_addendum": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Addendum"
+          },
+          "default_view": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default View"
+          },
           "chat_enabled": {
             "type": "boolean",
             "title": "Chat Enabled"
@@ -1037,6 +1185,8 @@
           "description",
           "is_public",
           "required_roles",
+          "prompt_addendum",
+          "default_view",
           "chat_enabled"
         ],
         "title": "DatasetAdminResponse"
@@ -1082,6 +1232,29 @@
             "type": "array",
             "title": "Required Roles",
             "default": []
+          },
+          "prompt_addendum": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Addendum"
+          },
+          "default_view": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default View"
           },
           "chat_enabled": {
             "type": "boolean",
@@ -1153,6 +1326,18 @@
           "chat_enabled": {
             "type": "boolean",
             "title": "Chat Enabled"
+          },
+          "default_view": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default View"
           }
         },
         "type": "object",
@@ -1225,6 +1410,29 @@
               }
             ],
             "title": "Required Roles"
+          },
+          "prompt_addendum": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Addendum"
+          },
+          "default_view": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default View"
           },
           "chat_enabled": {
             "anyOf": [
@@ -1411,6 +1619,69 @@
         "type": "object",
         "title": "DatasourceUpdate"
       },
+      "FeedbackRequest": {
+        "properties": {
+          "rating": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down"
+            ],
+            "title": "Rating"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rating"
+        ],
+        "title": "FeedbackRequest"
+      },
+      "FeedbackResponse": {
+        "properties": {
+          "rating": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down"
+            ],
+            "title": "Rating"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rating",
+          "comment",
+          "updated_at"
+        ],
+        "title": "FeedbackResponse"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1555,8 +1826,42 @@
         ],
         "title": "ThreadListResponse"
       },
+      "ThreadMessageFeedback": {
+        "properties": {
+          "rating": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down"
+            ],
+            "title": "Rating"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rating",
+          "comment"
+        ],
+        "title": "ThreadMessageFeedback"
+      },
       "ThreadMessageResponse": {
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
           "role": {
             "type": "string",
             "enum": [
@@ -1573,10 +1878,21 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "feedback": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ThreadMessageFeedback"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
         "required": [
+          "id",
           "role",
           "content",
           "created_at"

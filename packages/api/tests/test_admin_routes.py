@@ -401,3 +401,71 @@ def test_get_datasets_includes_prompt_addendum(seeded_app):
     assert "has-addendum" in rows
     assert "prompt_addendum" in rows["has-addendum"]
     assert rows["has-addendum"]["prompt_addendum"] == "Sample curator note."
+
+
+def test_update_dataset_with_valid_default_view(seeded_app):
+    client = TestClient(seeded_app)
+    ds_id = seeded_app.state.test_datasource_id
+    client.post(
+        "/api/admin/datasets",
+        headers=AUTH_HEADER,
+        json={"datasource_id": ds_id, "name": "D", "slug": "d", "path": "d.zarr"},
+    )
+    resp = client.put(
+        "/api/admin/datasets/d",
+        headers=AUTH_HEADER,
+        json={"default_view": {"colorBy": "category", "category": "cell_type"}},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["default_view"] == {"colorBy": "category", "category": "cell_type"}
+
+
+def test_update_dataset_with_invalid_default_view_returns_422(seeded_app):
+    client = TestClient(seeded_app)
+    ds_id = seeded_app.state.test_datasource_id
+    client.post(
+        "/api/admin/datasets",
+        headers=AUTH_HEADER,
+        json={"datasource_id": ds_id, "name": "D", "slug": "d", "path": "d.zarr"},
+    )
+    resp = client.put(
+        "/api/admin/datasets/d",
+        headers=AUTH_HEADER,
+        json={"default_view": {"colorBy": "gene"}},  # missing companion 'gene'
+    )
+    assert resp.status_code == 422, resp.text
+
+
+def test_create_dataset_with_valid_default_view(seeded_app):
+    client = TestClient(seeded_app)
+    ds_id = seeded_app.state.test_datasource_id
+    resp = client.post(
+        "/api/admin/datasets",
+        headers=AUTH_HEADER,
+        json={
+            "datasource_id": ds_id,
+            "name": "D",
+            "slug": "d",
+            "path": "d.zarr",
+            "default_view": {"colorBy": "category", "category": "cell_type"},
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["default_view"] == {"colorBy": "category", "category": "cell_type"}
+
+
+def test_create_dataset_with_invalid_default_view_returns_422(seeded_app):
+    client = TestClient(seeded_app)
+    ds_id = seeded_app.state.test_datasource_id
+    resp = client.post(
+        "/api/admin/datasets",
+        headers=AUTH_HEADER,
+        json={
+            "datasource_id": ds_id,
+            "name": "D",
+            "slug": "d",
+            "path": "d.zarr",
+            "default_view": {"colorBy": "gene"},  # missing companion 'gene'
+        },
+    )
+    assert resp.status_code == 422, resp.text
