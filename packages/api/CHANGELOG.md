@@ -2,6 +2,23 @@
 
 <!-- version list -->
 
+## v0.4.0 (2026-07-20)
+
+### Features
+
+- **api**: Add nullable default_view JSON column to Dataset
+  ([`583a5f8`](https://github.com/cBioPortal/cell-explorer-py/commit/583a5f8f450f7fd184221e52b4786e0b844eacfb))
+
+- **api**: Add validate_default_view (reuse AppConfig + v1 guard + cross-field)
+  ([`a4722c6`](https://github.com/cBioPortal/cell-explorer-py/commit/a4722c6e10d3ceae49618549ac41aa1fe56034aa))
+
+- **api**: Admin create/update default_view with validation; DRY admin response
+  ([`dc6bb09`](https://github.com/cBioPortal/cell-explorer-py/commit/dc6bb091a335b240d30f39565c9f197871bade18))
+
+- **api**: Expose default_view in public DatasetResponse
+  ([`71706ec`](https://github.com/cBioPortal/cell-explorer-py/commit/71706eca4b632ff5a4b6c86440d9886720d02286))
+
+
 ## v0.3.0 (2026-07-10)
 
 ### Chores
