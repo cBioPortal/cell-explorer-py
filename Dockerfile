@@ -41,7 +41,11 @@ ARG FRONTEND_REF=main
 ARG FRONTEND_CACHE_BUST=""
 
 WORKDIR /frontend
-RUN git clone --depth 1 --branch "$FRONTEND_REF" "$FRONTEND_REPO" .
+# Reference FRONTEND_CACHE_BUST so a changed value invalidates this layer's cache
+# and forces a fresh clone of the frontend on each build (BuildKit only busts a
+# layer when the RUN references the arg).
+RUN echo "cache-bust: $FRONTEND_CACHE_BUST" && \
+    git clone --depth 1 --branch "$FRONTEND_REF" "$FRONTEND_REPO" .
 
 # Install dependencies
 RUN pnpm install --frozen-lockfile
