@@ -10,6 +10,9 @@ This is a [uv workspace](https://docs.astral.sh/uv/concepts/workspaces/) monorep
 |---------|-------------|
 | [`cell2zarr`](packages/cell2zarr/) | h5ad to Zarr conversion pipeline |
 | [`cell-explorer-api`](packages/api/) | FastAPI API + static file serving |
+| [`cell-explorer-agent`](packages/cell-explorer-agent/) | LLM chat agent library for single-cell zarr datasets |
+| [`zarr-access`](packages/zarr-access/) | Async zarr store access with optional bearer token auth |
+| [`zarr-auth-proxy`](packages/zarr-auth-proxy/) | JWT-protected file server for zarr datasets |
 
 ## Setup
 
