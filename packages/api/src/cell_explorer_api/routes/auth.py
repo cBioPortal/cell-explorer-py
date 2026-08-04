@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 
 from cell_explorer_api.auth.dependencies import require_auth
-from cell_explorer_api.auth.keycloak import KeycloakClient
+from cell_explorer_api.auth.oidc import OidcClient
 from cell_explorer_api.auth.models import User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -130,10 +130,10 @@ def _clear_token_cookies(response: Response) -> None:
 async def login(request: Request):
     """Redirect to Keycloak login page."""
     _require_auth_enabled(request)
-    keycloak: KeycloakClient = request.app.state.keycloak
+    oidc: OidcClient = request.app.state.oidc
     state = secrets.token_urlsafe(32)
     redirect_uri = _callback_uri(request)
-    auth_url = keycloak.authorization_url(redirect_uri=redirect_uri, state=state)
+    auth_url = oidc.authorization_url(redirect_uri=redirect_uri, state=state)
     response = RedirectResponse(url=auth_url, status_code=307)
     defaults = _cookie_defaults(request)
     response.set_cookie("cce_state", state, max_age=600, httponly=True, secure=defaults["secure"], samesite="lax", path="/api/auth")
@@ -159,9 +159,9 @@ async def cli_login(request: Request, redirect_uri: str):
         )
 
     signed_state = _sign_cli_state(secret, redirect_uri)
-    keycloak: KeycloakClient = request.app.state.keycloak
+    oidc: OidcClient = request.app.state.oidc
     api_callback_uri = _callback_uri(request)
-    auth_url = keycloak.authorization_url(redirect_uri=api_callback_uri, state=signed_state)
+    auth_url = oidc.authorization_url(redirect_uri=api_callback_uri, state=signed_state)
     return RedirectResponse(url=auth_url, status_code=307)
 
 
@@ -169,7 +169,7 @@ async def cli_login(request: Request, redirect_uri: str):
 async def callback(request: Request, code: str, state: str):
     """Handle Keycloak callback — exchange code for tokens."""
     _require_auth_enabled(request)
-    keycloak: KeycloakClient = request.app.state.keycloak
+    oidc: OidcClient = request.app.state.oidc
 
     # Try CLI flow first (state is a signed JWT).
     settings = request.app.state.settings
@@ -177,7 +177,7 @@ async def callback(request: Request, code: str, state: str):
         cli_state = _decode_cli_state(state, settings.cli_state_secret)
         if cli_state is not None:
             redirect_uri = cli_state["redirect_uri"]
-            tokens = await keycloak.exchange_code(code, _callback_uri(request))
+            tokens = await oidc.exchange_code(code, _callback_uri(request))
             import json as _json
             tokens_payload = {
                 "access_token": tokens["access_token"],
@@ -195,7 +195,7 @@ async def callback(request: Request, code: str, state: str):
     if not expected_state or state != expected_state:
         return Response(status_code=400, content="Invalid state parameter")
     redirect_uri = _callback_uri(request)
-    tokens = await keycloak.exchange_code(code, redirect_uri)
+    tokens = await oidc.exchange_code(code, redirect_uri)
     response = RedirectResponse(url="/", status_code=302)
     _set_token_cookies(request, response, tokens["access_token"], tokens["refresh_token"])
     response.delete_cookie("cce_state", path="/api/auth")
@@ -231,9 +231,9 @@ async def refresh(request: Request):
     refresh_token = request.cookies.get("cce_refresh")
     if not refresh_token:
         raise HTTPException(status_code=401, detail="No refresh cookie")
-    keycloak: KeycloakClient = request.app.state.keycloak
+    oidc: OidcClient = request.app.state.oidc
     try:
-        tokens = await keycloak.refresh_token(refresh_token)
+        tokens = await oidc.refresh_token(refresh_token)
     except Exception:
         raise HTTPException(status_code=401, detail="Refresh failed")
     response = Response(status_code=204)
@@ -250,13 +250,13 @@ async def refresh(request: Request):
 async def token_exchange(request: Request):
     """Exchange an external access token for session cookies."""
     _require_auth_enabled(request)
-    keycloak: KeycloakClient = request.app.state.keycloak
+    oidc: OidcClient = request.app.state.oidc
     body = await request.json()
     access_token = body.get("accessToken")
     if not access_token:
         return Response(status_code=400, content="accessToken required")
     try:
-        user = keycloak.decode_token(access_token)
+        user = oidc.decode_token(access_token)
     except Exception:
         return Response(status_code=401, content="Invalid token")
     response = Response(status_code=200)

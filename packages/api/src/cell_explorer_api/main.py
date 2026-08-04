@@ -75,18 +75,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.db_engine = create_engine(settings.effective_database_url)
 
-    # Auth — routes always registered (return 501 when disabled); Keycloak client only when configured
+    # Auth — routes always registered (return 501 when disabled); OIDC client only when configured
     if settings.auth_enabled:
-        from cell_explorer_api.auth.keycloak import KeycloakClient
+        from cell_explorer_api.auth.oidc import OidcClient
 
-        keycloak = KeycloakClient(settings)
-        app.state.keycloak = keycloak
+        oidc = OidcClient(settings)
+        app.state.oidc = oidc
 
     # Unified lifespan: always dispose db engine; fetch JWKS only when auth enabled
     @asynccontextmanager
     async def lifespan(app):
         if settings.auth_enabled:
-            await app.state.keycloak.fetch_jwks()
+            await app.state.oidc.discover()
+            await app.state.oidc.fetch_jwks()
         yield
         # Flush any queued Langfuse traces before tearing down. The flush
         # is a best-effort call that swallows errors; never raises.

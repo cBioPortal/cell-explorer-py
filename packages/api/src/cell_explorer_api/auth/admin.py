@@ -27,15 +27,15 @@ async def require_admin(
     if credentials and credentials.credentials == settings.admin_api_key:
         return
 
-    # Try Keycloak JWT with admin role
+    # Try OIDC JWT with admin role
     if settings.auth_enabled:
         access_token = request.cookies.get("cce_access")
         if access_token:
             try:
-                from cell_explorer_api.auth.keycloak import KeycloakClient
+                from cell_explorer_api.auth.oidc import OidcClient
 
-                keycloak: KeycloakClient = request.app.state.keycloak
-                user = keycloak.decode_token(access_token)
+                oidc: OidcClient = request.app.state.oidc
+                user = oidc.decode_token(access_token)
                 if "admin" in user.roles:
                     return
             except Exception:

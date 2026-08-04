@@ -21,11 +21,11 @@ def _settings_with_keycloak() -> Settings:
 def _make_client() -> tuple[TestClient, MagicMock, Settings]:
     settings = _settings_with_keycloak()
     app = create_app(settings=settings)
-    # Inject a fake KeycloakClient whose authorization_url we can assert on.
+    # Inject a fake OidcClient whose authorization_url we can assert on.
     fake_kc = MagicMock()
     fake_kc.authorization_url = MagicMock(return_value="http://kc.test/auth?...signed_state")
     fake_kc.fetch_jwks = AsyncMock()
-    app.state.keycloak = fake_kc
+    app.state.oidc = fake_kc
     return TestClient(app), fake_kc, settings
 
 
@@ -105,7 +105,7 @@ def test_cli_login_requires_cli_state_secret():
     app = create_app(settings=settings)
     fake_kc = MagicMock()
     fake_kc.fetch_jwks = AsyncMock()
-    app.state.keycloak = fake_kc
+    app.state.oidc = fake_kc
     client = TestClient(app)
     resp = client.get(
         "/api/auth/cli-login",

@@ -4,7 +4,7 @@ import logging
 
 from fastapi import HTTPException, Request
 
-from cell_explorer_api.auth.keycloak import KeycloakClient
+from cell_explorer_api.auth.oidc import OidcClient
 from cell_explorer_api.auth.models import User
 
 logger = logging.getLogger(__name__)
@@ -15,19 +15,19 @@ async def require_auth(request: Request) -> User:
     access_token = request.cookies.get("cce_access")
     refresh_token = request.cookies.get("cce_refresh")
 
-    # No credentials at all — short-circuit before hitting Keycloak config.
+    # No credentials at all — short-circuit before hitting OIDC config.
     if not access_token and not refresh_token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     if not request.app.state.settings.auth_enabled:
         raise HTTPException(status_code=501, detail="Authentication is not configured")
 
-    keycloak: KeycloakClient = request.app.state.keycloak
+    oidc: OidcClient = request.app.state.oidc
 
     # Happy path: try to decode the access token if we have one.
     if access_token:
         try:
-            return keycloak.decode_token(access_token)
+            return oidc.decode_token(access_token)
         except Exception as e:
             logger.warning("Access token decode failed: %s", e)
 
@@ -38,8 +38,8 @@ async def require_auth(request: Request) -> User:
 
     try:
         logger.info("Attempting token refresh")
-        tokens = await keycloak.refresh_token(refresh_token)
-        user = keycloak.decode_token(tokens["access_token"])
+        tokens = await oidc.refresh_token(refresh_token)
+        user = oidc.decode_token(tokens["access_token"])
         request.state.new_access_token = tokens["access_token"]
         request.state.new_refresh_token = tokens.get("refresh_token", refresh_token)
         return user

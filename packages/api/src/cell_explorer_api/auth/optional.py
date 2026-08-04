@@ -21,10 +21,10 @@ async def optional_auth(request: Request) -> User | None:
         return None
 
     try:
-        from cell_explorer_api.auth.keycloak import KeycloakClient
+        from cell_explorer_api.auth.oidc import OidcClient
 
-        keycloak: KeycloakClient = request.app.state.keycloak
-        return keycloak.decode_token(access_token)
+        oidc: OidcClient = request.app.state.oidc
+        return oidc.decode_token(access_token)
     except Exception:
         logger.debug("Optional auth: token decode failed, treating as anonymous")
         return None

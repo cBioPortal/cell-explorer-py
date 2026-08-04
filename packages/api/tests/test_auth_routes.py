@@ -8,7 +8,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from fastapi.testclient import TestClient
 
-from cell_explorer_api.auth.keycloak import KeycloakClient
+from cell_explorer_api.auth.oidc import OidcClient
 from cell_explorer_api.config import Settings
 from cell_explorer_api.main import create_app
 
@@ -51,8 +51,15 @@ def auth_client(rsa_keys):
     _, public_key = rsa_keys
     settings = _make_settings()
     app = create_app(settings)
-    keycloak: KeycloakClient = app.state.keycloak
-    keycloak._jwks = {
+    oidc: OidcClient = app.state.oidc
+    oidc._apply_discovery({
+        "issuer": "https://auth.example.com/realms/test-realm",
+        "authorization_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/auth",
+        "token_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/token",
+        "jwks_uri": "https://auth.example.com/realms/test-realm/protocol/openid-connect/certs",
+        "end_session_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/logout",
+    })
+    oidc._jwks = {
         "test-kid": public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
     }
     return TestClient(app)
@@ -129,10 +136,10 @@ def test_me_sets_refreshed_cookies(auth_client, rsa_keys):
     # Create a fresh token that the refresh flow will return
     fresh_token = _make_token(private_key)
 
-    # Mock the refresh_token method on the keycloak client
-    keycloak: KeycloakClient = auth_client.app.state.keycloak
+    # Mock the refresh_token method on the oidc client
+    oidc: OidcClient = auth_client.app.state.oidc
     import unittest.mock as mock
-    keycloak.refresh_token = mock.AsyncMock(return_value={
+    oidc.refresh_token = mock.AsyncMock(return_value={
         "access_token": fresh_token,
         "refresh_token": "new-refresh-token-value",
     })
@@ -167,9 +174,9 @@ def test_refresh_endpoint_rotates_cookies(auth_client, rsa_keys):
     private_key, _ = rsa_keys
     fresh_access = _make_token(private_key)
 
-    keycloak: KeycloakClient = auth_client.app.state.keycloak
+    oidc: OidcClient = auth_client.app.state.oidc
     import unittest.mock as mock
-    keycloak.refresh_token = mock.AsyncMock(return_value={
+    oidc.refresh_token = mock.AsyncMock(return_value={
         "access_token": fresh_access,
         "refresh_token": "rotated-refresh",
     })
@@ -194,10 +201,10 @@ def test_refresh_endpoint_401_when_no_refresh_cookie(auth_client):
 
 
 def test_refresh_endpoint_401_when_keycloak_rejects(auth_client):
-    """When Keycloak rejects the refresh token, /refresh returns 401."""
-    keycloak: KeycloakClient = auth_client.app.state.keycloak
+    """When the OIDC provider rejects the refresh token, /refresh returns 401."""
+    oidc: OidcClient = auth_client.app.state.oidc
     import unittest.mock as mock
-    keycloak.refresh_token = mock.AsyncMock(side_effect=Exception("invalid_grant"))
+    oidc.refresh_token = mock.AsyncMock(side_effect=Exception("invalid_grant"))
 
     auth_client.cookies.set("cce_refresh", "expired-refresh")
     response = auth_client.post("/api/auth/refresh")
