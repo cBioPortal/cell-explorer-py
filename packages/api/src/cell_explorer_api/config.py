@@ -153,11 +153,6 @@ class Settings(BaseSettings):
         """Auth is enabled when issuer + client id + secret resolve."""
         return all([self.resolved_issuer, self.resolved_client_id, self.resolved_client_secret])
 
-    # Backward-compat alias — some code referenced oidc_issuer_url.
-    @property
-    def oidc_issuer_url(self) -> str | None:
-        return self.resolved_issuer
-
     @property
     def cors_origin_list(self) -> list[str]:
         """Parse comma-separated CORS origins into a list."""
