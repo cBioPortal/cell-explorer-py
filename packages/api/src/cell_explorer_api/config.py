@@ -47,6 +47,17 @@ class Settings(BaseSettings):
     keycloak_client_id: str | None = None
     keycloak_client_secret: str | None = None
     keycloak_idp_hint: str | None = None
+
+    # Generic OIDC (provider-agnostic). auth_provider selects preset defaults;
+    # KEYCLOAK_* remain the zero-config path for auth_provider="keycloak".
+    auth_provider: str = "keycloak"  # keycloak | entra | oidc
+    oidc_issuer: str | None = None
+    oidc_client_id: str | None = None
+    oidc_client_secret: str | None = None
+    oidc_scopes: str = "openid profile email"
+    oidc_roles_claims: str | None = None
+    oidc_audience: str | None = None
+
     cors_origins: str = ""
 
     # Session cookie lifetimes (seconds). Defaults match a typical Keycloak
@@ -90,21 +101,62 @@ class Settings(BaseSettings):
         return f"sqlite+aiosqlite:///{self.app_data_dir / 'cell_explorer.db'}"
 
     @property
-    def auth_enabled(self) -> bool:
-        """Auth is enabled when all required Keycloak fields are set."""
-        return all([
-            self.keycloak_url,
-            self.keycloak_realm,
-            self.keycloak_client_id,
-            self.keycloak_client_secret,
-        ])
+    def resolved_client_id(self) -> str | None:
+        return self.oidc_client_id or self.keycloak_client_id
 
     @property
+    def resolved_client_secret(self) -> str | None:
+        return self.oidc_client_secret or self.keycloak_client_secret
+
+    @property
+    def resolved_issuer(self) -> str | None:
+        """OIDC issuer URL. Keycloak derives it from url+realm; others use OIDC_ISSUER."""
+        if self.oidc_issuer:
+            return self.oidc_issuer
+        if self.auth_provider == "keycloak" and self.keycloak_url and self.keycloak_realm:
+            return f"{self.keycloak_url}/realms/{self.keycloak_realm}"
+        return None
+
+    @property
+    def discovery_url(self) -> str | None:
+        issuer = self.resolved_issuer
+        return f"{issuer}/.well-known/openid-configuration" if issuer else None
+
+    @property
+    def resolved_audience(self) -> str | None:
+        return self.oidc_audience or self.resolved_client_id
+
+    @property
+    def resolved_scopes(self) -> str:
+        scopes = self.oidc_scopes
+        if self.auth_provider == "entra" and "offline_access" not in scopes.split():
+            scopes = f"{scopes} offline_access"
+        return scopes
+
+    @property
+    def resolved_idp_hint(self) -> str | None:
+        return self.keycloak_idp_hint if self.auth_provider == "keycloak" else None
+
+    @property
+    def resolved_roles_claims(self) -> list[str]:
+        """Dotted claim-paths whose role lists are merged into User.roles."""
+        if self.oidc_roles_claims:
+            return [p.strip() for p in self.oidc_roles_claims.split(",") if p.strip()]
+        if self.auth_provider == "keycloak":
+            return ["realm_access.roles", f"resource_access.{self.resolved_client_id}.roles"]
+        if self.auth_provider == "entra":
+            return ["roles"]
+        return []
+
+    @property
+    def auth_enabled(self) -> bool:
+        """Auth is enabled when issuer + client id + secret resolve."""
+        return all([self.resolved_issuer, self.resolved_client_id, self.resolved_client_secret])
+
+    # Backward-compat alias — some code referenced oidc_issuer_url.
+    @property
     def oidc_issuer_url(self) -> str | None:
-        """Keycloak OIDC issuer URL, constructed from base URL and realm."""
-        if not self.keycloak_url or not self.keycloak_realm:
-            return None
-        return f"{self.keycloak_url}/realms/{self.keycloak_realm}"
+        return self.resolved_issuer
 
     @property
     def cors_origin_list(self) -> list[str]:
