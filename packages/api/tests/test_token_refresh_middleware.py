@@ -22,7 +22,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
 from cell_explorer_api.auth.dependencies import require_auth
-from cell_explorer_api.auth.keycloak import KeycloakClient
+from cell_explorer_api.auth.oidc import OidcClient
 from cell_explorer_api.auth.middleware import TokenRefreshMiddleware
 from cell_explorer_api.auth.models import User
 from cell_explorer_api.config import Settings
@@ -65,17 +65,24 @@ def rsa_keys():
 def keycloak(rsa_keys):
     _, public_key = rsa_keys
     settings = _make_settings()
-    client = KeycloakClient(settings)
+    client = OidcClient(settings)
+    client._apply_discovery({
+        "issuer": "https://auth.example.com/realms/test-realm",
+        "authorization_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/auth",
+        "token_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/token",
+        "jwks_uri": "https://auth.example.com/realms/test-realm/protocol/openid-connect/certs",
+        "end_session_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/logout",
+    })
     client._jwks = {
         "test-kid": public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
     }
     return client
 
 
-def _app_with_middleware(keycloak: KeycloakClient) -> FastAPI:
+def _app_with_middleware(keycloak: OidcClient) -> FastAPI:
     app = FastAPI()
     app.state.settings = _make_settings()
-    app.state.keycloak = keycloak
+    app.state.oidc = keycloak
     app.add_middleware(TokenRefreshMiddleware)
 
     @app.get("/json")

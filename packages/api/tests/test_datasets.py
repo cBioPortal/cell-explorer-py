@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from cell_explorer_api.auth.keycloak import KeycloakClient
+from cell_explorer_api.auth.oidc import OidcClient
 from cell_explorer_api.config import Settings
 from cell_explorer_api.db.models import Dataset, Datasource, DatasourceType
 from cell_explorer_api.main import create_app
@@ -94,17 +94,24 @@ def test_list_datasets_anonymous_sees_public_only(seeded_app):
 def test_list_datasets_authenticated_sees_authorized(seeded_app):
     private_key, public_key = _generate_rsa_keypair()
     settings = seeded_app.state.settings
-    # Enable Keycloak for this test
+    # Enable OIDC for this test
     settings.keycloak_url = "https://auth.example.com"
     settings.keycloak_realm = "test-realm"
     settings.keycloak_client_id = "test-client"
     settings.keycloak_client_secret = "test-secret"
 
-    keycloak = KeycloakClient(settings)
-    keycloak._jwks = {
+    oidc = OidcClient(settings)
+    oidc._apply_discovery({
+        "issuer": "https://auth.example.com/realms/test-realm",
+        "authorization_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/auth",
+        "token_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/token",
+        "jwks_uri": "https://auth.example.com/realms/test-realm/protocol/openid-connect/certs",
+        "end_session_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/logout",
+    })
+    oidc._jwks = {
         "test-kid": public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
     }
-    seeded_app.state.keycloak = keycloak
+    seeded_app.state.oidc = oidc
 
     token = jwt.encode(
         {
@@ -138,11 +145,18 @@ def test_list_datasets_authenticated_no_matching_role(seeded_app):
     settings.keycloak_client_id = "test-client"
     settings.keycloak_client_secret = "test-secret"
 
-    keycloak = KeycloakClient(settings)
-    keycloak._jwks = {
+    oidc = OidcClient(settings)
+    oidc._apply_discovery({
+        "issuer": "https://auth.example.com/realms/test-realm",
+        "authorization_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/auth",
+        "token_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/token",
+        "jwks_uri": "https://auth.example.com/realms/test-realm/protocol/openid-connect/certs",
+        "end_session_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/logout",
+    })
+    oidc._jwks = {
         "test-kid": public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
     }
-    seeded_app.state.keycloak = keycloak
+    seeded_app.state.oidc = oidc
 
     token = jwt.encode(
         {
@@ -191,11 +205,18 @@ def test_private_dataset_url_is_null_for_anonymous(seeded_app):
     settings.keycloak_client_id = "test-client"
     settings.keycloak_client_secret = "test-secret"
 
-    keycloak = KeycloakClient(settings)
-    keycloak._jwks = {
+    oidc = OidcClient(settings)
+    oidc._apply_discovery({
+        "issuer": "https://auth.example.com/realms/test-realm",
+        "authorization_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/auth",
+        "token_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/token",
+        "jwks_uri": "https://auth.example.com/realms/test-realm/protocol/openid-connect/certs",
+        "end_session_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/logout",
+    })
+    oidc._jwks = {
         "test-kid": public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
     }
-    seeded_app.state.keycloak = keycloak
+    seeded_app.state.oidc = oidc
 
     # Authenticated user with matching role
     token = jwt.encode(

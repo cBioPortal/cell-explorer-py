@@ -31,7 +31,7 @@ def _decode_username(access_token: str) -> str:
     """Best-effort extract username from the JWT access token (no signature check).
 
     Authoritative validation happens inside the agent loop when the user is
-    constructed from the Settings/KeycloakClient. Here we only want a display
+    constructed from the Settings/OidcClient. Here we only want a display
     value for the login banner.
     """
     import jwt as _jwt
@@ -115,13 +115,14 @@ class _User:
 
 async def _load_user_from_auth(settings: Settings) -> _User:
     """Load auth.json, refresh if needed, decode the access token, return _User."""
-    from cell_explorer_api.auth.keycloak import KeycloakClient
+    from cell_explorer_api.auth.oidc import OidcClient
 
     cfg = load_auth_config()
-    keycloak = KeycloakClient(settings)
-    await keycloak.fetch_jwks()
-    cfg = await ensure_fresh_access_token(cfg, keycloak)
-    user_obj = keycloak.decode_token(cfg.access_token)
+    oidc = OidcClient(settings)
+    await oidc.discover()
+    await oidc.fetch_jwks()
+    cfg = await ensure_fresh_access_token(cfg, oidc)
+    user_obj = oidc.decode_token(cfg.access_token)
     # The auth.models.User has sub/name/email/roles but no `username` field.
     # Compute a display value from whichever fields are populated.
     display = user_obj.email or user_obj.name or user_obj.sub

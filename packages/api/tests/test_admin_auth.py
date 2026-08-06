@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from cell_explorer_api.auth.admin import require_admin
-from cell_explorer_api.auth.keycloak import KeycloakClient
+from cell_explorer_api.auth.oidc import OidcClient
 from cell_explorer_api.config import Settings
 
 
@@ -83,8 +83,15 @@ def test_admin_accepts_keycloak_admin_role():
         keycloak_client_secret="test-secret",
     )
     app = _make_test_app(settings)
-    keycloak: KeycloakClient = app.state.keycloak
-    keycloak._jwks = {
+    oidc: OidcClient = app.state.oidc
+    oidc._apply_discovery({
+        "issuer": "https://auth.example.com/realms/test-realm",
+        "authorization_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/auth",
+        "token_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/token",
+        "jwks_uri": "https://auth.example.com/realms/test-realm/protocol/openid-connect/certs",
+        "end_session_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/logout",
+    })
+    oidc._jwks = {
         "test-kid": public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
     }
 

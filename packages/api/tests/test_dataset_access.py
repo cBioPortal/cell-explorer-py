@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from cell_explorer_api.auth.keycloak import KeycloakClient
+from cell_explorer_api.auth.oidc import OidcClient
 from cell_explorer_api.config import Settings
 from cell_explorer_api.db.models import Dataset, Datasource, DatasourceType
 from cell_explorer_api.main import create_app
@@ -53,8 +53,15 @@ async def access_app(monkeypatch, tmp_path):
     )
     app = create_app(settings)
 
-    keycloak: KeycloakClient = app.state.keycloak
-    keycloak._jwks = {
+    oidc: OidcClient = app.state.oidc
+    oidc._apply_discovery({
+        "issuer": "https://auth.example.com/realms/test-realm",
+        "authorization_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/auth",
+        "token_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/token",
+        "jwks_uri": "https://auth.example.com/realms/test-realm/protocol/openid-connect/certs",
+        "end_session_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/logout",
+    })
+    oidc._jwks = {
         "test-kid": public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
     }
 

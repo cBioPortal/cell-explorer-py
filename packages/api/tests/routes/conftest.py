@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from cell_explorer_api.auth.keycloak import KeycloakClient
+from cell_explorer_api.auth.oidc import OidcClient
 from cell_explorer_api.config import Settings
 from cell_explorer_api.db.models import Dataset, Datasource, DatasourceType
 from cell_explorer_api.main import create_app
@@ -81,11 +81,18 @@ def _set_auth_cookie(client: TestClient, app, *, sub="user-1", roles=None):
     settings.keycloak_realm = "test-realm"
     settings.keycloak_client_id = "test-client"
     settings.keycloak_client_secret = "test-secret"
-    keycloak = KeycloakClient(settings)
-    keycloak._jwks = {
+    oidc = OidcClient(settings)
+    oidc._apply_discovery({
+        "issuer": "https://auth.example.com/realms/test-realm",
+        "authorization_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/auth",
+        "token_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/token",
+        "jwks_uri": "https://auth.example.com/realms/test-realm/protocol/openid-connect/certs",
+        "end_session_endpoint": "https://auth.example.com/realms/test-realm/protocol/openid-connect/logout",
+    })
+    oidc._jwks = {
         "test-kid": public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
     }
-    app.state.keycloak = keycloak
+    app.state.oidc = oidc
 
     token = jwt.encode(
         {

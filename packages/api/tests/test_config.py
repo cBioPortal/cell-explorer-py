@@ -158,3 +158,88 @@ def test_chat_disabled_when_no_key():
 
     settings = Settings()
     assert settings.chat_enabled is False
+
+
+def test_keycloak_backward_compat_resolution():
+    # Only KEYCLOAK_* set (existing prod shape) — provider defaults to keycloak.
+    from cell_explorer_api.config import Settings
+
+    s = Settings(
+        keycloak_url="https://auth.example.com",
+        keycloak_realm="cell-explorer",
+        keycloak_client_id="ce-app",
+        keycloak_client_secret="secret",
+    )
+    assert s.auth_provider == "keycloak"
+    assert s.auth_enabled is True
+    assert s.resolved_issuer == "https://auth.example.com/realms/cell-explorer"
+    assert s.resolved_client_id == "ce-app"
+    assert s.resolved_client_secret == "secret"
+    assert s.resolved_audience == "ce-app"
+    assert s.resolved_scopes == "openid profile email"
+    assert s.resolved_roles_claims == [
+        "realm_access.roles",
+        "resource_access.ce-app.roles",
+    ]
+    assert s.resolved_idp_hint is None
+    assert s.discovery_url == (
+        "https://auth.example.com/realms/cell-explorer/.well-known/openid-configuration"
+    )
+
+
+def test_keycloak_idp_hint_flows_through():
+    from cell_explorer_api.config import Settings
+
+    s = Settings(
+        keycloak_url="https://a", keycloak_realm="r",
+        keycloak_client_id="c", keycloak_client_secret="x",
+        keycloak_idp_hint="pingId",
+    )
+    assert s.resolved_idp_hint == "pingId"
+
+
+def test_entra_resolution():
+    from cell_explorer_api.config import Settings
+
+    s = Settings(
+        auth_provider="entra",
+        oidc_issuer="https://login.microsoftonline.com/TENANT/v2.0",
+        oidc_client_id="app-guid",
+        oidc_client_secret="secret",
+    )
+    assert s.auth_enabled is True
+    assert s.resolved_issuer == "https://login.microsoftonline.com/TENANT/v2.0"
+    assert s.resolved_roles_claims == ["roles"]
+    assert s.resolved_audience == "app-guid"
+    assert "offline_access" in s.resolved_scopes.split()
+    assert s.resolved_idp_hint is None
+
+
+def test_roles_claims_override():
+    from cell_explorer_api.config import Settings
+
+    s = Settings(
+        auth_provider="oidc",
+        oidc_issuer="https://idp.example.com",
+        oidc_client_id="c", oidc_client_secret="x",
+        oidc_roles_claims="groups, my.custom.path",
+    )
+    assert s.resolved_roles_claims == ["groups", "my.custom.path"]
+
+
+def test_oidc_client_creds_fall_back_to_keycloak_vars():
+    from cell_explorer_api.config import Settings
+
+    s = Settings(
+        keycloak_url="https://a", keycloak_realm="r",
+        keycloak_client_id="kc", keycloak_client_secret="kx",
+    )
+    assert s.resolved_client_id == "kc"
+    assert s.resolved_client_secret == "kx"
+
+
+def test_auth_disabled_when_incomplete():
+    from cell_explorer_api.config import Settings
+
+    assert Settings().auth_enabled is False
+    assert Settings(auth_provider="entra", oidc_issuer="https://i").auth_enabled is False
