@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from cell_explorer_api.routes.chat import router as chat_router
+from cell_explorer_api.routes.collections import router as collections_router
 from cell_explorer_api.routes.datasets import router as datasets_router
 from cell_explorer_api.routes.health import router as health_router
 from cell_explorer_api.routes.info import router as info_router
@@ -11,6 +12,7 @@ router = APIRouter(prefix="/api")
 router.include_router(health_router)
 router.include_router(info_router)
 router.include_router(datasets_router)
+router.include_router(collections_router)
 router.include_router(chat_router)
 
 

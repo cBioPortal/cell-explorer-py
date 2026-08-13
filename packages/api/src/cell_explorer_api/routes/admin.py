@@ -11,7 +11,7 @@ from sqlmodel import select
 
 from cell_explorer_api.auth.admin import require_admin
 from cell_explorer_api.db import get_db
-from cell_explorer_api.db.models import Dataset, Datasource, DatasourceType
+from cell_explorer_api.db.models import Collection, Dataset, Datasource, DatasourceType
 from cell_explorer_api.services.default_view import DefaultViewError, validate_default_view
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
@@ -48,11 +48,44 @@ class DatasourceListResponse(BaseModel):
     datasources: list[DatasourceResponse]
 
 
+# --- Collection schemas ---
+
+
+class CollectionCreate(BaseModel):
+    name: str
+    slug: str
+    description: str | None = None
+    publication_url: str | None = None
+    publication_citation: str | None = None
+
+
+class CollectionUpdate(BaseModel):
+    name: str | None = None
+    slug: str | None = None
+    description: str | None = None
+    publication_url: str | None = None
+    publication_citation: str | None = None
+
+
+class CollectionAdminResponse(BaseModel):
+    id: str
+    name: str
+    slug: str
+    description: str | None
+    publication_url: str | None
+    publication_citation: str | None
+
+
+class CollectionAdminListResponse(BaseModel):
+    collections: list[CollectionAdminResponse]
+
+
 # --- Dataset schemas ---
 
 
 class DatasetCreate(BaseModel):
     datasource_id: str
+    collection_id: str | None = None
     name: str
     slug: str
     path: str
@@ -73,11 +106,13 @@ class DatasetUpdate(BaseModel):
     prompt_addendum: str | None = None
     default_view: dict | None = None
     chat_enabled: bool | None = None
+    collection_id: str | None = None
 
 
 class DatasetAdminResponse(BaseModel):
     id: str
     datasource_id: str
+    collection_id: str | None
     name: str
     slug: str
     path: str
@@ -97,6 +132,7 @@ def _dataset_to_admin_response(dataset: Dataset) -> DatasetAdminResponse:
     return DatasetAdminResponse(
         id=str(dataset.id),
         datasource_id=str(dataset.datasource_id),
+        collection_id=str(dataset.collection_id) if dataset.collection_id else None,
         name=dataset.name,
         slug=dataset.slug,
         path=dataset.path,
@@ -202,6 +238,11 @@ async def create_dataset(
         data["datasource_id"] = uuid.UUID(data["datasource_id"])
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid datasource_id format")
+    if data.get("collection_id") is not None:
+        try:
+            data["collection_id"] = uuid.UUID(data["collection_id"])
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid collection_id format")
     if data.get("default_view") is not None:
         try:
             data["default_view"] = validate_default_view(data["default_view"])
@@ -229,6 +270,11 @@ async def update_dataset(
     if dataset is None:
         raise HTTPException(status_code=404, detail="Dataset not found")
     updates = payload.model_dump(exclude_unset=True)
+    if updates.get("collection_id") is not None:
+        try:
+            updates["collection_id"] = uuid.UUID(updates["collection_id"])
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid collection_id format")
     if updates.get("default_view") is not None:
         try:
             updates["default_view"] = validate_default_view(updates["default_view"])
@@ -253,5 +299,81 @@ async def delete_dataset(
     if dataset is None:
         raise HTTPException(status_code=404, detail="Dataset not found")
     await db.delete(dataset)
+    await db.commit()
+    return Response(status_code=204)
+
+
+# --- Collection routes ---
+
+
+def _collection_to_response(collection: Collection) -> CollectionAdminResponse:
+    return CollectionAdminResponse(
+        id=str(collection.id),
+        name=collection.name,
+        slug=collection.slug,
+        description=collection.description,
+        publication_url=collection.publication_url,
+        publication_citation=collection.publication_citation,
+    )
+
+
+async def _get_collection_or_404(slug: str, db: AsyncSession) -> Collection:
+    result = await db.exec(select(Collection).where(Collection.slug == slug))
+    collection = result.first()
+    if collection is None:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    return collection
+
+
+@router.post("/collections", status_code=201)
+async def create_collection(
+    payload: CollectionCreate,
+    db: AsyncSession = Depends(get_db),
+) -> CollectionAdminResponse:
+    collection = Collection(**payload.model_dump())
+    db.add(collection)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Collection slug already exists")
+    await db.refresh(collection)
+    return _collection_to_response(collection)
+
+
+@router.get("/collections")
+async def list_collections_admin(
+    db: AsyncSession = Depends(get_db),
+) -> CollectionAdminListResponse:
+    result = await db.exec(select(Collection))
+    return CollectionAdminListResponse(
+        collections=[_collection_to_response(c) for c in result.all()]
+    )
+
+
+@router.put("/collections/{slug}")
+async def update_collection(
+    slug: str,
+    payload: CollectionUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> CollectionAdminResponse:
+    collection = await _get_collection_or_404(slug, db)
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(collection, key, value)
+    collection.updated_at = datetime.now(timezone.utc)
+    db.add(collection)
+    await db.commit()
+    await db.refresh(collection)
+    return _collection_to_response(collection)
+
+
+@router.delete("/collections/{slug}", status_code=204)
+async def delete_collection(
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    collection = await _get_collection_or_404(slug, db)
+    # Datasets survive: collection_id is ondelete="SET NULL".
+    await db.delete(collection)
     await db.commit()
     return Response(status_code=204)
