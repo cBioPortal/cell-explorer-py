@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from cell_explorer_api.auth.models import User
+from cell_explorer_api.auth.optional import optional_auth
 from cell_explorer_api.config import Settings
 from cell_explorer_api.db.models import Collection, Dataset, Datasource, DatasourceType
 from cell_explorer_api.main import create_app
@@ -88,3 +90,38 @@ def test_fully_gated_collection_is_404_not_403(seeded_app):
 def test_unknown_slug_is_404(seeded_app):
     client = TestClient(seeded_app)
     assert client.get("/api/collections/no-such-thing").status_code == 404
+
+
+def test_authenticated_with_role_sees_previously_gated_collection(seeded_app):
+    """The other half of derived visibility: revealed once the role matches."""
+    seeded_app.dependency_overrides[optional_auth] = lambda: User(
+        sub="user-1", roles=["secret-role"]
+    )
+    try:
+        client = TestClient(seeded_app)
+        body = client.get("/api/collections").json()
+        slugs = [c["slug"] for c in body["collections"]]
+        assert "gated-study" in slugs
+
+        response = client.get("/api/collections/gated-study")
+        assert response.status_code == 200
+        assert [d["slug"] for d in response.json()["datasets"]] == ["private-c"]
+    finally:
+        seeded_app.dependency_overrides.pop(optional_auth, None)
+
+
+def test_authenticated_with_role_expands_dataset_count_and_datasets(seeded_app):
+    """A mixed collection gains its role-gated dataset once the caller qualifies."""
+    seeded_app.dependency_overrides[optional_auth] = lambda: User(
+        sub="user-1", roles=["secret-role"]
+    )
+    try:
+        client = TestClient(seeded_app)
+        body = client.get("/api/collections").json()
+        open_summary = next(c for c in body["collections"] if c["slug"] == "open-study")
+        assert open_summary["dataset_count"] == 2
+
+        detail = client.get("/api/collections/open-study").json()
+        assert sorted(d["slug"] for d in detail["datasets"]) == ["private-b", "public-a"]
+    finally:
+        seeded_app.dependency_overrides.pop(optional_auth, None)

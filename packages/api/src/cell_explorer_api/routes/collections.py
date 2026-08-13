@@ -40,14 +40,22 @@ class CollectionDetail(CollectionSummary):
 
 
 async def _accessible_by_collection(
-    db: AsyncSession, user: User | None
+    db: AsyncSession, user: User | None, *, collection_id: uuid.UUID | None = None
 ) -> dict[uuid.UUID, list[Dataset]]:
     """Group the caller's accessible datasets by collection id.
 
     One query for every dataset, then grouped in Python -- the same shape
     `list_datasets` uses. Never one query per collection.
+
+    `collection_id` narrows the query to a single collection's datasets. The
+    detail endpoint always passes it: without it, an existing-but-inaccessible
+    collection would run the same full-table scan as an unknown slug takes
+    zero of, making the two 404s distinguishable by timing even though their
+    bodies are identical.
     """
     statement = select(Dataset, Datasource, Collection).join(Datasource).outerjoin(Collection)
+    if collection_id is not None:
+        statement = statement.where(Dataset.collection_id == collection_id)
     result = await db.exec(statement)
     grouped: dict[uuid.UUID, list[Dataset]] = {}
     for dataset, datasource, collection in result.all():
@@ -101,7 +109,7 @@ async def get_collection(
     if collection is None:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    grouped = await _accessible_by_collection(db, user)
+    grouped = await _accessible_by_collection(db, user, collection_id=collection.id)
     datasets = grouped.get(collection.id, [])
     if not datasets:
         # 404 rather than 403: a 403 would confirm this collection exists.
