@@ -66,3 +66,15 @@ def test_dataset_without_a_collection_reports_none(seeded_app):
     client = TestClient(seeded_app)
     datasets = {d["slug"]: d for d in client.get("/api/datasets").json()["datasets"]}
     assert datasets["ungrouped"]["collection"] is None
+
+
+def test_get_dataset_in_a_collection_reports_it(seeded_app):
+    client = TestClient(seeded_app)
+    dataset = client.get("/api/datasets/in-study").json()
+    assert dataset["collection"] == {"slug": "a-study", "name": "A Study"}
+
+
+def test_get_dataset_without_a_collection_reports_none(seeded_app):
+    client = TestClient(seeded_app)
+    dataset = client.get("/api/datasets/ungrouped").json()
+    assert dataset["collection"] is None
