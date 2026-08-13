@@ -8,11 +8,16 @@ from sqlmodel import select
 from cell_explorer_api.auth.models import User
 from cell_explorer_api.auth.optional import optional_auth
 from cell_explorer_api.db import get_db
-from cell_explorer_api.db.models import Dataset, Datasource
+from cell_explorer_api.db.models import Collection, Dataset, Datasource
 from cell_explorer_api.services.access import user_can_access
 from cell_explorer_api.services.credentials import CredentialError, mint_credentials
 
 router = APIRouter(tags=["datasets"])
+
+
+class DatasetCollectionRef(BaseModel):
+    slug: str
+    name: str
 
 
 class DatasetResponse(BaseModel):
@@ -23,6 +28,7 @@ class DatasetResponse(BaseModel):
     url: str | None
     chat_enabled: bool
     default_view: dict | None = None
+    collection: DatasetCollectionRef | None = None
 
 
 class DatasetListResponse(BaseModel):
@@ -42,6 +48,11 @@ def _dataset_to_response(dataset: Dataset) -> DatasetResponse:
         url=url,
         chat_enabled=dataset.chat_enabled,
         default_view=dataset.default_view,
+        collection=(
+            DatasetCollectionRef(slug=dataset.collection.slug, name=dataset.collection.name)
+            if dataset.collection is not None
+            else None
+        ),
     )
 
 
@@ -51,11 +62,12 @@ async def list_datasets(
     db: AsyncSession = Depends(get_db),
 ) -> DatasetListResponse:
     """List datasets the caller can access."""
-    statement = select(Dataset, Datasource).join(Datasource)
+    statement = select(Dataset, Datasource, Collection).join(Datasource).outerjoin(Collection)
     result = await db.exec(statement)
     datasets = []
-    for dataset, datasource in result.all():
+    for dataset, datasource, collection in result.all():
         dataset.datasource = datasource
+        dataset.collection = collection
         if user_can_access(dataset, user=user):
             datasets.append(_dataset_to_response(dataset))
     return DatasetListResponse(datasets=datasets)
@@ -68,13 +80,19 @@ async def get_dataset(
     db: AsyncSession = Depends(get_db),
 ) -> DatasetResponse:
     """Get a single dataset by slug."""
-    statement = select(Dataset, Datasource).join(Datasource).where(Dataset.slug == slug)
+    statement = (
+        select(Dataset, Datasource, Collection)
+        .join(Datasource)
+        .outerjoin(Collection)
+        .where(Dataset.slug == slug)
+    )
     result = await db.exec(statement)
     row = result.first()
     if row is None:
         raise HTTPException(status_code=404, detail="Dataset not found")
-    dataset, datasource = row
+    dataset, datasource, collection = row
     dataset.datasource = datasource
+    dataset.collection = collection
     if not user_can_access(dataset, user=user):
         raise HTTPException(status_code=404, detail="Dataset not found")
     return _dataset_to_response(dataset)
