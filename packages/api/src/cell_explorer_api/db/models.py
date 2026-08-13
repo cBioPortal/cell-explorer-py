@@ -42,6 +42,23 @@ class Datasource(SQLModel, table=True):
         return self.internal_base_url or self.base_url
 
 
+class Collection(SQLModel, table=True):
+    """A study or grouping that datasets belong to."""
+
+    __tablename__ = "collections"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    name: str
+    slug: str = Field(unique=True, index=True)
+    description: str | None = None
+    publication_url: str | None = None
+    publication_citation: str | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    datasets: list["Dataset"] = Relationship(back_populates="collection")
+
+
 class Dataset(SQLModel, table=True):
     """A single zarr dataset within a datasource."""
 
@@ -49,6 +66,11 @@ class Dataset(SQLModel, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     datasource_id: uuid.UUID = Field(foreign_key="datasources.id")
+    # Nullable: datasets predating collections stay valid, and deleting a
+    # collection orphans its datasets rather than deleting them.
+    collection_id: uuid.UUID | None = Field(
+        default=None, foreign_key="collections.id", index=True, ondelete="SET NULL"
+    )
     name: str
     slug: str = Field(unique=True, index=True)
     path: str
@@ -62,6 +84,7 @@ class Dataset(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     datasource: Datasource | None = Relationship(back_populates="datasets")
+    collection: Collection | None = Relationship(back_populates="datasets")
 
     @property
     def url(self) -> str | None:
