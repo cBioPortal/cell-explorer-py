@@ -2,6 +2,49 @@
 
 <!-- version list -->
 
+## v0.5.0 (2026-08-14)
+
+### Bug Fixes
+
+- Cover authenticated visibility and scope detail query to collection
+  ([`e7de9d4`](https://github.com/cBioPortal/cell-explorer-py/commit/e7de9d403bd2b9552a47724d66ea70aaa9d8b105))
+
+### Chores
+
+- **auth**: Remove dead oidc_issuer_url alias; note Entra audience in .env.example
+  ([`24f2713`](https://github.com/cBioPortal/cell-explorer-py/commit/24f2713eac96624d7166192211c9650874cb9d0d))
+
+### Features
+
+- Add admin CRUD for collections
+  ([`5e50e80`](https://github.com/cBioPortal/cell-explorer-py/commit/5e50e80afdf5793319d642a3fab789c685b23006))
+
+- Add Collection model and datasets.collection_id
+  ([`7a49b55`](https://github.com/cBioPortal/cell-explorer-py/commit/7a49b5525c107746bf766c50654a675ae301d5d6))
+
+- Add public collection endpoints
+  ([`8d917f6`](https://github.com/cBioPortal/cell-explorer-py/commit/8d917f67d68a76f1985927247c20702a68e52329))
+
+- Include collection in dataset responses
+  ([`68e27d5`](https://github.com/cBioPortal/cell-explorer-py/commit/68e27d5d625f1bc60235ca46d9b0fd657487fe57))
+
+- **auth**: Add generic OidcClient (discovery + configurable role claims)
+  ([`de77344`](https://github.com/cBioPortal/cell-explorer-py/commit/de773446f7f7d5a6fa2dcbd52c09909314c65d64))
+
+- **auth**: Add provider presets + resolved OIDC settings (backward-compatible)
+  ([`7e0d152`](https://github.com/cBioPortal/cell-explorer-py/commit/7e0d15261bd4d47a774d0b32557ed4a11ab79345))
+
+### Refactoring
+
+- **auth**: Cut over to OidcClient (app.state.oidc); remove keycloak module
+  ([`aa0847d`](https://github.com/cBioPortal/cell-explorer-py/commit/aa0847d1730b7dbb19796b64c2010625ff38e242))
+
+### Testing
+
+- Cover get_dataset populated and null collection paths
+  ([`da1f4d6`](https://github.com/cBioPortal/cell-explorer-py/commit/da1f4d67c4af191d80a80fa05301315d10de1ca5))
+
+
 ## v0.4.0 (2026-07-20)
 
 ### Features
