@@ -3,6 +3,7 @@
 import logging
 from contextlib import asynccontextmanager
 from logging.handlers import TimedRotatingFileHandler
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -12,6 +13,24 @@ from cell_explorer_api.config import Settings, validate_static_dir
 from cell_explorer_api.routes import router
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_static_file(static_dir: Path, path: str) -> Path | None:
+    """Map a request path to a real file under static_dir, or None.
+
+    Returns None for empty paths, directories, missing files, and anything
+    that resolves outside static_dir (traversal).
+    """
+    if not path:
+        return None
+    try:
+        root = static_dir.resolve()
+        candidate = (root / path).resolve()
+    except (OSError, ValueError):
+        return None
+    if not candidate.is_relative_to(root):
+        return None
+    return candidate if candidate.is_file() else None
 
 
 def _configure_file_logging(settings: Settings) -> None:
@@ -121,11 +140,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     name="assets",
                 )
 
-            # SPA catch-all: serve index.html for all non-API, non-asset routes
+            # SPA catch-all: serve real files from the static root (Vite copies
+            # public/ there — favicons, site.webmanifest), else index.html.
             @app.get("/{path:path}")
             async def spa_catchall(path: str):
                 if path.startswith("api/"):
                     return JSONResponse(status_code=404, content={"detail": "Not found"})
+                file = _resolve_static_file(validated, path)
+                if file is not None:
+                    return FileResponse(str(file))
                 return FileResponse(str(index_html))
         else:
             # STATIC_DIR was set but invalid
