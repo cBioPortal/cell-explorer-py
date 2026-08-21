@@ -2,6 +2,17 @@
 
 <!-- version list -->
 
+## v0.4.0 (2026-08-21)
+
+### Features
+
+- **cell2zarr**: Add --no-consolidate flag to add command
+  ([`08fefcf`](https://github.com/cBioPortal/cell-explorer-py/commit/08fefcfc6abd6685fb66886ba54602d8140fd95a))
+
+- **cell2zarr**: Add consolidate command
+  ([`c94e2fd`](https://github.com/cBioPortal/cell-explorer-py/commit/c94e2fdbb7f1c39055fc138c4335ee8d722340e2))
+
+
 ## v0.3.0 (2026-07-10)
 
 ### Bug Fixes
