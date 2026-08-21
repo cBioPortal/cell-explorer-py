@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.5.1 (2026-08-21)
+
+### Bug Fixes
+
+- **static**: Serve root-level public assets instead of index.html
+  ([`4864fba`](https://github.com/cBioPortal/cell-explorer-py/commit/4864fba3280792af993ad6c8f80a0b8671289b7f))
+
+
 ## v0.5.0 (2026-08-14)
 
 ### Bug Fixes
