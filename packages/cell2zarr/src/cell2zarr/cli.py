@@ -255,12 +255,17 @@ def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes
 @click.argument("zarr_store", type=click.Path(path_type=Path))
 @click.option("--key", required=True, help="Key to add (e.g. obsm, obsm/X_umap, obs, X, layers/counts).")
 @click.option("--overwrite", is_flag=True, help="Overwrite existing keys.")
+@click.option(
+    "--no-consolidate",
+    is_flag=True,
+    help="Skip rewriting consolidated metadata. Use when adding keys in parallel; run `cell2zarr consolidate` afterwards.",
+)
 @click.option("--encoding-config", type=click.Path(exists=True, path_type=Path), help="Path to JSON encoding config.")
 @click.option("--dtype", type=click.Choice(["float16", "float32", "float64"]), default="float32", help="Target dtype. Default: float32.")
 @click.option("--log-file", type=click.Path(path_type=Path), help="Log file path. Default: <zarr_store>.add.log.")
 @click.option("--log-level", type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False), default="INFO", help="Log level. Default: INFO.")
 @click.option("--temp-dir", type=click.Path(path_type=Path), help="Temp directory for large keys (X, layers).")
-def add(h5ad_file, zarr_store, key, overwrite, encoding_config, dtype, log_file, log_level, temp_dir):
+def add(h5ad_file, zarr_store, key, overwrite, no_consolidate, encoding_config, dtype, log_file, log_level, temp_dir):
     """Add a key from h5ad to an existing Zarr store."""
     if log_file is None:
         log_file = Path(str(zarr_store) + ".add.log")
@@ -281,7 +286,23 @@ def add(h5ad_file, zarr_store, key, overwrite, encoding_config, dtype, log_file,
         dtype=dtype,
         encoding=encoding,
         temp_dir=temp_dir,
+        consolidate=not no_consolidate,
     )
+
+
+@cli.command()
+@click.argument("zarr_store", type=click.Path(exists=True, path_type=Path))
+@click.option("--log-file", type=click.Path(path_type=Path), help="Log file path. Default: <zarr_store>.consolidate.log.")
+@click.option("--log-level", type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False), default="INFO", help="Log level. Default: INFO.")
+def consolidate(zarr_store, log_file, log_level):
+    """Rewrite consolidated metadata for an existing Zarr store."""
+    if log_file is None:
+        log_file = Path(str(zarr_store) + ".consolidate.log")
+    _setup_logging(log_file, getattr(logging, log_level.upper()))
+
+    from .convert import consolidate_store
+
+    consolidate_store(zarr_store)
 
 
 @cli.command()

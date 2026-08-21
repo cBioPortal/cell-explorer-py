@@ -1,4 +1,6 @@
 """Tests for add-key functionality."""
+import json
+
 import numpy as np
 import pytest
 import zarr
@@ -169,3 +171,99 @@ class TestEndToEnd:
         root = open_zarr(sample_store)
         assert "obsm" in root
         assert root["obsm"]["X_umap"].shape == (100, 2)
+
+
+def _root_metadata(store_path):
+    """Read the raw root zarr.json of a store."""
+    return json.loads((store_path / "zarr.json").read_text())
+
+
+class TestAddKeyConsolidation:
+    def test_consolidates_by_default(self, sample_h5ad, sample_store):
+        h5ad_path, _ = sample_h5ad
+        add_key_to_store(h5ad_path, sample_store, key="obs", overwrite=False, dtype="float32")
+
+        meta = _root_metadata(sample_store)
+        assert "consolidated_metadata" in meta
+        assert "obs" in meta["consolidated_metadata"]["metadata"]
+
+    def test_no_consolidate_leaves_root_metadata_untouched(self, sample_h5ad, sample_store):
+        h5ad_path, _ = sample_h5ad
+        add_key_to_store(
+            h5ad_path, sample_store, key="obs", overwrite=False, dtype="float32",
+            consolidate=False,
+        )
+
+        meta = _root_metadata(sample_store)
+        assert "consolidated_metadata" not in meta
+
+    def test_no_consolidate_still_writes_the_group(self, sample_h5ad, sample_store):
+        h5ad_path, _ = sample_h5ad
+        add_key_to_store(
+            h5ad_path, sample_store, key="obs", overwrite=False, dtype="float32",
+            consolidate=False,
+        )
+
+        assert (sample_store / "obs").is_dir()
+        assert (sample_store / "obs" / "zarr.json").exists()
+
+    def test_cli_no_consolidate_flag(self, sample_h5ad, sample_store):
+        h5ad_path, _ = sample_h5ad
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["add", str(h5ad_path), str(sample_store), "--key", "obs", "--no-consolidate"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "consolidated_metadata" not in _root_metadata(sample_store)
+
+    def test_cli_consolidates_without_the_flag(self, sample_h5ad, sample_store):
+        h5ad_path, _ = sample_h5ad
+        runner = CliRunner()
+        result = runner.invoke(
+            cli, ["add", str(h5ad_path), str(sample_store), "--key", "obs"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "consolidated_metadata" in _root_metadata(sample_store)
+
+
+class TestConsolidateStore:
+    def test_consolidates_after_unconsolidated_adds(self, sample_h5ad, sample_store):
+        from cell2zarr.convert import consolidate_store
+
+        h5ad_path, _ = sample_h5ad
+        for key in ("obs", "obsm", "uns"):
+            add_key_to_store(
+                h5ad_path, sample_store, key=key, overwrite=False,
+                dtype="float32", consolidate=False,
+            )
+        assert "consolidated_metadata" not in _root_metadata(sample_store)
+
+        consolidate_store(sample_store)
+
+        listed = _root_metadata(sample_store)["consolidated_metadata"]["metadata"]
+        assert "obs" in listed
+        assert "obsm" in listed
+        assert "uns" in listed
+
+    def test_missing_store_exits_nonzero(self, tmp_path):
+        from cell2zarr.convert import consolidate_store
+
+        with pytest.raises(SystemExit) as excinfo:
+            consolidate_store(tmp_path / "does_not_exist.zarr")
+        assert excinfo.value.code == 1
+
+    def test_cli_consolidate(self, sample_h5ad, sample_store):
+        h5ad_path, _ = sample_h5ad
+        add_key_to_store(
+            h5ad_path, sample_store, key="obs", overwrite=False,
+            dtype="float32", consolidate=False,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["consolidate", str(sample_store)])
+
+        assert result.exit_code == 0, result.output
+        assert "obs" in _root_metadata(sample_store)["consolidated_metadata"]["metadata"]

@@ -767,6 +767,7 @@ def add_key_to_store(
     dtype: str = "float32",
     encoding: EncodingConfig | None = None,
     temp_dir: Path | str | None = None,
+    consolidate: bool = True,
 ) -> None:
     """Add a key from an h5ad file to an existing zarr store.
 
@@ -786,6 +787,11 @@ def add_key_to_store(
         Optional encoding config for chunking/sharding/compression.
     temp_dir : Path or None
         Temporary directory (reserved for future use).
+    consolidate : bool
+        If True (default), rewrite the store's consolidated metadata after
+        writing the key. Set False when adding several keys in parallel
+        processes; each would otherwise write a root document describing only
+        its own key. Call consolidate_store() once when all adds are done.
     """
     h5ad_path = Path(h5ad_path)
     zarr_path = Path(zarr_path)
@@ -842,7 +848,8 @@ def add_key_to_store(
         elif top_key in ("uns", "obsp", "varp"):
             _add_write_elem_key(adata, root, top_key, overwrite)
 
-        zarr.consolidate_metadata(store, zarr_format=3)
+        if consolidate:
+            zarr.consolidate_metadata(store, zarr_format=3)
         logger.info(f"Successfully wrote '{key}' to zarr store.")
 
     finally:
@@ -852,6 +859,29 @@ def add_key_to_store(
                     adata.file.close()
             except Exception:
                 pass
+
+
+def consolidate_store(zarr_path: Path | str) -> None:
+    """Rewrite a zarr store's consolidated metadata.
+
+    Counterpart to `add_key_to_store(..., consolidate=False)`. Several
+    parallel processes can each add a disjoint key without consolidating;
+    one call to this function afterwards produces a root document that
+    describes all of them.
+
+    Parameters
+    ----------
+    zarr_path : Path or str
+        Path to an existing zarr v3 store.
+    """
+    zarr_path = Path(zarr_path)
+    if not zarr_path.exists():
+        logger.error(f"zarr store not found: {zarr_path}")
+        sys.exit(1)
+
+    store = zarr.storage.LocalStore(str(zarr_path))
+    zarr.consolidate_metadata(store, zarr_format=3)
+    logger.info(f"Consolidated metadata for {zarr_path}")
 
 
 def convert_h5ad_to_zarr_chunked(config: ConversionConfig, hooks: dict[str, Callable] | None = None) -> None:
