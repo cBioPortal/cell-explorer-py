@@ -1,4 +1,6 @@
 """Tests for add-key functionality."""
+import json
+
 import numpy as np
 import pytest
 import zarr
@@ -169,3 +171,59 @@ class TestEndToEnd:
         root = open_zarr(sample_store)
         assert "obsm" in root
         assert root["obsm"]["X_umap"].shape == (100, 2)
+
+
+def _root_metadata(store_path):
+    """Read the raw root zarr.json of a store."""
+    return json.loads((store_path / "zarr.json").read_text())
+
+
+class TestAddKeyConsolidation:
+    def test_consolidates_by_default(self, sample_h5ad, sample_store):
+        h5ad_path, _ = sample_h5ad
+        add_key_to_store(h5ad_path, sample_store, key="obs", overwrite=False, dtype="float32")
+
+        meta = _root_metadata(sample_store)
+        assert "consolidated_metadata" in meta
+        assert "obs" in meta["consolidated_metadata"]["metadata"]
+
+    def test_no_consolidate_leaves_root_metadata_untouched(self, sample_h5ad, sample_store):
+        h5ad_path, _ = sample_h5ad
+        add_key_to_store(
+            h5ad_path, sample_store, key="obs", overwrite=False, dtype="float32",
+            consolidate=False,
+        )
+
+        meta = _root_metadata(sample_store)
+        assert "consolidated_metadata" not in meta
+
+    def test_no_consolidate_still_writes_the_group(self, sample_h5ad, sample_store):
+        h5ad_path, _ = sample_h5ad
+        add_key_to_store(
+            h5ad_path, sample_store, key="obs", overwrite=False, dtype="float32",
+            consolidate=False,
+        )
+
+        assert (sample_store / "obs").is_dir()
+        assert (sample_store / "obs" / "zarr.json").exists()
+
+    def test_cli_no_consolidate_flag(self, sample_h5ad, sample_store):
+        h5ad_path, _ = sample_h5ad
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["add", str(h5ad_path), str(sample_store), "--key", "obs", "--no-consolidate"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "consolidated_metadata" not in _root_metadata(sample_store)
+
+    def test_cli_consolidates_without_the_flag(self, sample_h5ad, sample_store):
+        h5ad_path, _ = sample_h5ad
+        runner = CliRunner()
+        result = runner.invoke(
+            cli, ["add", str(h5ad_path), str(sample_store), "--key", "obs"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "consolidated_metadata" in _root_metadata(sample_store)
