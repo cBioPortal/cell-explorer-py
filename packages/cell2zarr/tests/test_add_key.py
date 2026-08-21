@@ -227,3 +227,43 @@ class TestAddKeyConsolidation:
 
         assert result.exit_code == 0, result.output
         assert "consolidated_metadata" in _root_metadata(sample_store)
+
+
+class TestConsolidateStore:
+    def test_consolidates_after_unconsolidated_adds(self, sample_h5ad, sample_store):
+        from cell2zarr.convert import consolidate_store
+
+        h5ad_path, _ = sample_h5ad
+        for key in ("obs", "obsm", "uns"):
+            add_key_to_store(
+                h5ad_path, sample_store, key=key, overwrite=False,
+                dtype="float32", consolidate=False,
+            )
+        assert "consolidated_metadata" not in _root_metadata(sample_store)
+
+        consolidate_store(sample_store)
+
+        listed = _root_metadata(sample_store)["consolidated_metadata"]["metadata"]
+        assert "obs" in listed
+        assert "obsm" in listed
+        assert "uns" in listed
+
+    def test_missing_store_exits_nonzero(self, tmp_path):
+        from cell2zarr.convert import consolidate_store
+
+        with pytest.raises(SystemExit) as excinfo:
+            consolidate_store(tmp_path / "does_not_exist.zarr")
+        assert excinfo.value.code == 1
+
+    def test_cli_consolidate(self, sample_h5ad, sample_store):
+        h5ad_path, _ = sample_h5ad
+        add_key_to_store(
+            h5ad_path, sample_store, key="obs", overwrite=False,
+            dtype="float32", consolidate=False,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["consolidate", str(sample_store)])
+
+        assert result.exit_code == 0, result.output
+        assert "obs" in _root_metadata(sample_store)["consolidated_metadata"]["metadata"]

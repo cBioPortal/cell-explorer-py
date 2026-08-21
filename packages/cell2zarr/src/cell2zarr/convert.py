@@ -861,6 +861,29 @@ def add_key_to_store(
                 pass
 
 
+def consolidate_store(zarr_path: Path | str) -> None:
+    """Rewrite a zarr store's consolidated metadata.
+
+    Counterpart to `add_key_to_store(..., consolidate=False)`. Several
+    parallel processes can each add a disjoint key without consolidating;
+    one call to this function afterwards produces a root document that
+    describes all of them.
+
+    Parameters
+    ----------
+    zarr_path : Path or str
+        Path to an existing zarr v3 store.
+    """
+    zarr_path = Path(zarr_path)
+    if not zarr_path.exists():
+        logger.error(f"zarr store not found: {zarr_path}")
+        sys.exit(1)
+
+    store = zarr.storage.LocalStore(str(zarr_path))
+    zarr.consolidate_metadata(store, zarr_format=3)
+    logger.info(f"Consolidated metadata for {zarr_path}")
+
+
 def convert_h5ad_to_zarr_chunked(config: ConversionConfig, hooks: dict[str, Callable] | None = None) -> None:
     """Convert h5ad to dense zarr using two-phase approach.
 

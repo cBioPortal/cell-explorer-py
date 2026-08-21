@@ -291,6 +291,21 @@ def add(h5ad_file, zarr_store, key, overwrite, no_consolidate, encoding_config, 
 
 
 @cli.command()
+@click.argument("zarr_store", type=click.Path(exists=True, path_type=Path))
+@click.option("--log-file", type=click.Path(path_type=Path), help="Log file path. Default: <zarr_store>.consolidate.log.")
+@click.option("--log-level", type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False), default="INFO", help="Log level. Default: INFO.")
+def consolidate(zarr_store, log_file, log_level):
+    """Rewrite consolidated metadata for an existing Zarr store."""
+    if log_file is None:
+        log_file = Path(str(zarr_store) + ".consolidate.log")
+    _setup_logging(log_file, getattr(logging, log_level.upper()))
+
+    from .convert import consolidate_store
+
+    consolidate_store(zarr_store)
+
+
+@cli.command()
 @click.option("--run-db", required=True, type=click.Path(exists=True, path_type=Path), help="Path to JSON run history database.")
 @click.option("--host", default="127.0.0.1", help="Host to bind to. Default: 127.0.0.1.")
 @click.option("--port", default=8000, type=int, help="Port to bind to. Default: 8000.")

@@ -46,6 +46,19 @@ cell2zarr add atlas.h5ad atlas.zarr --key X --temp-dir /tmp
 cell2zarr add atlas.h5ad atlas.zarr --key layers/counts --temp-dir /tmp
 ```
 
+### Parallel adds
+
+Keys occupy disjoint groups in the store, so several can be added concurrently.
+Each concurrent add must skip metadata consolidation — otherwise each writes a
+root document describing only its own key — and one consolidation runs at the end:
+
+```bash
+cell2zarr add atlas.h5ad atlas.zarr --key obs      --no-consolidate &
+cell2zarr add atlas.h5ad atlas.zarr --key obsm     --no-consolidate &
+wait
+cell2zarr consolidate atlas.zarr
+```
+
 Supported keys: `obsm`, `obs`, `var`, `uns`, `obsp`, `varp`, `X`, `layers`.
 
 ### Logging
@@ -94,6 +107,7 @@ cell2zarr convert input.h5ad output.zarr --two-phase --run-db docs/conversion-ru
 |--------|-------------|
 | `--key TEXT` | Key to add (e.g. obsm, obsm/X_umap, obs, X, layers/counts). Required. |
 | `--overwrite` | Overwrite existing keys. |
+| `--no-consolidate` | Skip rewriting consolidated metadata. Use with parallel adds, then run `cell2zarr consolidate`. |
 | `--encoding-config PATH` | Path to JSON encoding config. |
 | `--dtype CHOICE` | Target dtype. Default: float32. |
 | `--log-file PATH` | Log file path. Default: `<zarr_store>.add.log`. |
