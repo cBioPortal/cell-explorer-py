@@ -74,6 +74,13 @@ LABEL org.opencontainers.image.created="${BUILD_DATE}"
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
+# procps provides `ps`, which Nextflow requires to collect task metrics. Without it
+# the task wrapper aborts before running the script, so the image cannot be used as a
+# Nextflow process container (nf-cell2zarr runs cell2zarr from this image).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends procps \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Install workspace dependencies
