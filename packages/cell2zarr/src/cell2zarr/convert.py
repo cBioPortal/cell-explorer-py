@@ -484,7 +484,15 @@ def _write_metadata(final_root, final_store, metadata: dict, config: ConversionC
         idx_shard_kwarg["shards"] = (idx_enc.shards[0],)
     if "obs" in final_root:
         obs_group = final_root["obs"]
-        if "_index" in obs_group:
+        if "_index" in obs_group and isinstance(obs_group["_index"], zarr.Group):
+            # A pandas nullable-string index is stored under anndata's
+            # "nullable-string-array" encoding: a group holding `values` and
+            # `mask`, not a flat array. Slicing a group is a path lookup in zarr,
+            # so the rechunk below would raise TypeError. Leave anndata's
+            # chunking in place rather than crash.
+            encoding_type = obs_group["_index"].attrs.get("encoding-type", "nested")
+            logger.info(f"obs/_index is a '{encoding_type}' group; leaving its chunking as written.")
+        elif "_index" in obs_group:
             old_index = obs_group["_index"]
             index_data = old_index[:]
             old_attrs = dict(old_index.attrs)
