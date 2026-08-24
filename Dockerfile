@@ -8,17 +8,17 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /backend
 
 # Install workspace dependencies
-COPY pyproject.toml .python-version ./
+COPY pyproject.toml uv.lock .python-version ./
 COPY packages/api/pyproject.toml packages/api/pyproject.toml
 COPY packages/cell-explorer-agent/pyproject.toml packages/cell-explorer-agent/pyproject.toml
 COPY packages/cell2zarr/pyproject.toml packages/cell2zarr/pyproject.toml
 COPY packages/zarr-access/pyproject.toml packages/zarr-access/pyproject.toml
 COPY packages/zarr-auth-proxy/pyproject.toml packages/zarr-auth-proxy/pyproject.toml
-RUN uv sync --no-install-workspace
+RUN uv sync --frozen --no-install-workspace
 
 # Copy source and install workspace packages
 COPY packages/ packages/
-RUN uv sync
+RUN uv sync --frozen
 
 # Generate openapi.json (or use override)
 ARG OPENAPI_SPEC_PATH=""
@@ -77,17 +77,17 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /app
 
 # Install workspace dependencies
-COPY pyproject.toml .python-version ./
+COPY pyproject.toml uv.lock .python-version ./
 COPY packages/api/pyproject.toml packages/api/pyproject.toml
 COPY packages/cell-explorer-agent/pyproject.toml packages/cell-explorer-agent/pyproject.toml
 COPY packages/cell2zarr/pyproject.toml packages/cell2zarr/pyproject.toml
 COPY packages/zarr-access/pyproject.toml packages/zarr-access/pyproject.toml
 COPY packages/zarr-auth-proxy/pyproject.toml packages/zarr-auth-proxy/pyproject.toml
-RUN uv sync --no-install-workspace
+RUN uv sync --frozen --no-install-workspace
 
 # Copy source and install workspace packages
 COPY packages/ packages/
-RUN uv sync
+RUN uv sync --frozen
 
 # Copy built frontend from stage 2
 COPY --from=frontend /frontend/packages/highperformer/dist /app/static
