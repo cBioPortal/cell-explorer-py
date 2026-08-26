@@ -64,12 +64,15 @@ def _metadata_to_response(
     """Expose metadata only once a harvest has succeeded.
 
     fetched_at is the marker: it is set only on success, so a row that exists
-    solely to record a failure yields None rather than a body of nulls. The
-    three value columns (n_obs, n_vars, zarr_version) are checked together
-    because a real harvest (store_harvest_result) writes all three in a
-    single block on success — the response type promises all three are real,
-    so a row missing any of them is not a genuine success and must not be
-    served as though it were.
+    solely to record a failure yields None rather than a body of nulls. All
+    seven value columns (n_obs, n_vars, zarr_version, obsm_keys, obs_columns,
+    var_columns, layers) are checked together because a real harvest
+    (store_harvest_result) writes all of them in a single block on success —
+    the response type promises all seven are real (the list columns are
+    non-optional `list[str]`), so a row missing any of them is not a genuine
+    success and must not be served as though it were: doing so would raise a
+    ValidationError building the response, a 500 on this unauthenticated
+    route.
     """
     if (
         metadata is None
@@ -77,6 +80,10 @@ def _metadata_to_response(
         or metadata.n_obs is None
         or metadata.n_vars is None
         or metadata.zarr_version is None
+        or metadata.obsm_keys is None
+        or metadata.obs_columns is None
+        or metadata.var_columns is None
+        or metadata.layers is None
     ):
         return None
     return DatasetMetadataResponse(

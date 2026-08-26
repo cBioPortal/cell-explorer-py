@@ -134,6 +134,34 @@ async def test_update_path_reharvests(app_with_datasource):
     assert res.json()["metadata"]["n_obs"] == 12
 
 
+async def test_update_path_to_broken_store_clears_stale_values(app_with_datasource):
+    app, datasource_id = app_with_datasource
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post(
+            "/api/admin/datasets",
+            json=_create_payload(datasource_id, "tiny_v3.zarr"),
+            headers=AUTH_HEADER,
+        )
+        assert created.json()["metadata"]["n_obs"] == 12
+
+        res = await client.put(
+            "/api/admin/datasets/tiny",
+            json={"path": "does_not_exist.zarr"},
+            headers=AUTH_HEADER,
+        )
+        assert res.status_code == 200
+        metadata = res.json()["metadata"]
+        assert metadata["status"] == "error"
+        assert (
+            metadata["n_obs"] is None
+        ), "a failed re-harvest after a path change must not keep the old store's counts"
+
+        public = await client.get("/api/datasets/tiny")
+    assert (
+        public.json()["metadata"] is None
+    ), "the public surface must report unknown, not a stale number, after a failed re-harvest"
+
+
 async def test_update_unrelated_field_does_not_reharvest(app_with_datasource):
     app, datasource_id = app_with_datasource
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

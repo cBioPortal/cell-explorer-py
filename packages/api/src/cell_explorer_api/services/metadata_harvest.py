@@ -8,13 +8,12 @@ triggered the harvest still succeeds.
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from zarr_access import ZarrStore
 
-from cell_explorer_api.db.models import Dataset, DatasetMetadata, Datasource
+from cell_explorer_api.db.models import Dataset, DatasetMetadata, Datasource, utcnow
 from cell_explorer_api.services.credentials import credential_to_headers, mint_credentials
 from cell_explorer_api.services.store_metadata import StoreMetadata, extract_store_metadata
 
@@ -22,11 +21,6 @@ logger = logging.getLogger(__name__)
 
 # Truncated so a verbose upstream traceback cannot bloat the row.
 MAX_ERROR_LENGTH = 500
-
-
-def _utcnow() -> datetime:
-    """UTC now, timezone-naive to match what SQLite returns."""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 @dataclass(frozen=True)
@@ -57,6 +51,7 @@ async def harvest_dataset_metadata(
             # HTTP_TOKEN private key file, jwt.exceptions.InvalidKeyError for bad
             # PEM contents). Every un-mintable-credential failure must become a
             # recorded error, never propagate.
+            logger.warning("credential mint failed for dataset %s: %s", dataset.slug, exc)
             message = f"{type(exc).__name__}: {exc}"
             return HarvestOutcome(status="error", error=message[:MAX_ERROR_LENGTH])
 
@@ -72,13 +67,25 @@ async def harvest_dataset_metadata(
 
 
 async def store_harvest_result(
-    db: AsyncSession, dataset_id: uuid.UUID, outcome: HarvestOutcome
+    db: AsyncSession,
+    dataset_id: uuid.UUID,
+    outcome: HarvestOutcome,
+    *,
+    clear_stale_values: bool = False,
 ) -> DatasetMetadata:
     """Upsert the outcome.
 
-    A success overwrites everything and clears the error. A failure updates only
-    the bookkeeping columns, so a transient outage does not blank counts already
-    being served.
+    A success overwrites everything and clears the error. A failure normally
+    updates only the bookkeeping columns, so a transient outage does not blank
+    counts already being served — that is correct when the retained values
+    still describe the store the dataset points at (a refresh).
+
+    `clear_stale_values` is for the one case where that is wrong: the caller
+    just changed which store the dataset points at (an update), and the
+    harvest against the new store failed. The previous values describe a
+    store the dataset no longer points at, so they are cleared rather than
+    preserved — the dataset then correctly reports "unknown" instead of a
+    confident wrong number.
     """
     result = await db.exec(
         select(DatasetMetadata).where(DatasetMetadata.dataset_id == dataset_id)
@@ -87,7 +94,7 @@ async def store_harvest_result(
     if row is None:
         row = DatasetMetadata(dataset_id=dataset_id)
 
-    now = _utcnow()
+    now = utcnow()
     row.last_attempt_at = now
     row.status = outcome.status
 
@@ -106,14 +113,31 @@ async def store_harvest_result(
         row.error = None
     else:
         row.error = outcome.error
+        if clear_stale_values:
+            row.n_obs = None
+            row.n_vars = None
+            row.zarr_version = None
+            row.obsm_keys = []
+            row.obs_columns = []
+            row.var_columns = []
+            row.layers = []
+            row.x_dtype = None
+            row.x_encoding = None
+            row.fetched_at = None
 
     db.add(row)
     return row
 
 
 async def harvest_and_store(
-    db: AsyncSession, dataset: Dataset, datasource: Datasource
+    db: AsyncSession,
+    dataset: Dataset,
+    datasource: Datasource,
+    *,
+    clear_stale_values: bool = False,
 ) -> DatasetMetadata:
     """Harvest and persist in one call. Does not commit."""
     outcome = await harvest_dataset_metadata(dataset, datasource)
-    return await store_harvest_result(db, dataset.id, outcome)
+    return await store_harvest_result(
+        db, dataset.id, outcome, clear_stale_values=clear_stale_values
+    )

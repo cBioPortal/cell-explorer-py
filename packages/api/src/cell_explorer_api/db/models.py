@@ -94,7 +94,7 @@ class Dataset(SQLModel, table=True):
         return f"{self.datasource.base_url}/{self.path}"
 
 
-def _utcnow() -> datetime:
+def utcnow() -> datetime:
     """Return current UTC time as a timezone-naive datetime.
 
     SQLite stores datetimes without timezone info; using naive UTC
@@ -130,7 +130,7 @@ class DatasetMetadata(SQLModel, table=True):
     fetched_at: datetime | None = Field(default=None)
 
     # --- last attempt ---
-    last_attempt_at: datetime = Field(default_factory=_utcnow)
+    last_attempt_at: datetime = Field(default_factory=utcnow)
     status: str = Field(default="error")  # "ok" | "error"
     error: str | None = Field(default=None)
 
@@ -144,8 +144,8 @@ class ChatThread(SQLModel, table=True):
     user_sub: str = Field(index=True)  # Keycloak `sub` claim
     dataset_id: uuid.UUID = Field(foreign_key="datasets.id", index=True)
     title: str
-    created_at: datetime = Field(default_factory=_utcnow)
-    updated_at: datetime = Field(default_factory=_utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 class ChatMessageRow(SQLModel, table=True):
@@ -157,7 +157,7 @@ class ChatMessageRow(SQLModel, table=True):
     thread_id: uuid.UUID = Field(foreign_key="chat_threads.id", index=True, ondelete="CASCADE")
     role: str  # "user" | "assistant"
     content: str
-    created_at: datetime = Field(default_factory=_utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
     # Set on assistant rows when Langfuse tracing is enabled. Used by the
     # feedback PUT route to forward thumbs ratings to Langfuse Scores.
     langfuse_trace_id: str | None = Field(default=None, index=True)
@@ -178,5 +178,5 @@ class ChatFeedback(SQLModel, table=True):
     user_sub: str = Field(index=True)
     rating: str  # "up" | "down"; validated by Pydantic at the route layer
     comment: str | None = None
-    created_at: datetime = Field(default_factory=_utcnow)
-    updated_at: datetime = Field(default_factory=_utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)

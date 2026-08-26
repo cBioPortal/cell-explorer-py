@@ -28,7 +28,7 @@ from cell_explorer_api.db.models import (
     ChatMessageRow,
     ChatThread,
     Dataset,
-    _utcnow,
+    utcnow,
 )
 from cell_explorer_api.services.access import compute_chat_permission
 from cell_explorer_api.services.chat_session import (
@@ -584,7 +584,7 @@ async def put_message_feedback(
             )
         )
     ).first()
-    now = _utcnow()
+    now = utcnow()
     if existing is None:
         fb = ChatFeedback(
             message_id=message_id,

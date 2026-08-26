@@ -96,7 +96,15 @@ def zarr_fixtures(tmp_path_factory) -> Path:
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def zarr_server(zarr_fixtures):
-    """Serve the generated stores over HTTP on a random port."""
+    """Serve the generated stores over HTTP on a random port.
+
+    This fixture is pinned to a session-scoped event loop. Any test module
+    that consumes it (directly or via a fixture that depends on it) MUST set
+    `pytestmark = pytest.mark.asyncio(loop_scope="session")` at module level —
+    the root pyproject.toml defaults async test loops to function scope, and
+    without that marker the test run deadlocks waiting on this fixture, with
+    no error raised.
+    """
     app = web.Application()
     app.router.add_static("/", zarr_fixtures, show_index=True)
 

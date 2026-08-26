@@ -331,10 +331,10 @@ async def create_dataset(
     await db.refresh(dataset)
 
     # Best-effort: a store that cannot be read must not fail the catalog write.
-    dataset.datasource = (
+    datasource = (
         await db.exec(select(Datasource).where(Datasource.id == dataset.datasource_id))
     ).one()
-    metadata = await harvest_and_store(db, dataset, dataset.datasource)
+    metadata = await harvest_and_store(db, dataset, datasource)
     await db.commit()
     # commit() expires every object in the session, dataset included — refresh
     # it too, or the response build below triggers an implicit lazy-load that
@@ -370,6 +370,16 @@ async def refresh_all_dataset_metadata(
 
     results: list[RefreshResult] = []
     for dataset, datasource, metadata in rows:
+        # Every object from the bulk `rows` fetch above may have been expired
+        # by a *previous* iteration's commit (below) — refresh before touching
+        # any attribute, or an access on an expired object triggers an
+        # implicit lazy-load that raises MissingGreenlet under the async
+        # driver (see the same pattern elsewhere in this file).
+        await db.refresh(dataset)
+        await db.refresh(datasource)
+        if metadata is not None:
+            await db.refresh(metadata)
+
         if payload.only_stale:
             # Never successfully harvested, or the last success is old.
             fresh = metadata is not None and metadata.fetched_at is not None and metadata.fetched_at > cutoff
@@ -377,8 +387,14 @@ async def refresh_all_dataset_metadata(
                 continue
         row = await harvest_and_store(db, dataset, datasource)
         results.append(RefreshResult(slug=dataset.slug, status=row.status, error=row.error))
+        # Commit after each dataset, not once at the end: a sweep spans dozens
+        # of sequential harvests, and a gateway timeout or client disconnect
+        # partway through must not discard the work already completed. The
+        # result is read into `results` above first, since commit() expires
+        # `row` and a later attribute access would need an implicit lazy-load
+        # that raises MissingGreenlet under the async driver.
+        await db.commit()
 
-    await db.commit()
     return BulkRefreshResponse(refreshed=len(results), results=results)
 
 
@@ -435,14 +451,25 @@ async def update_dataset(
     await db.refresh(dataset)
 
     store_moved = (
-        dataset.path != previous_path or dataset.datasource_id != previous_datasource_id
+        dataset.path != previous_path
+        # Dormant until DatasetUpdate grows a datasource_id field — do not
+        # remove this clause as dead code. Once that field exists, this is
+        # what makes moving a dataset to a different datasource trigger a
+        # re-harvest; deleting it would make that future addition silently
+        # skip it.
+        or dataset.datasource_id != previous_datasource_id
     )
-    datasource = (
-        await db.exec(select(Datasource).where(Datasource.id == dataset.datasource_id))
-    ).one()
 
     if store_moved:
-        metadata = await harvest_and_store(db, dataset, datasource)
+        datasource = (
+            await db.exec(select(Datasource).where(Datasource.id == dataset.datasource_id))
+        ).one()
+        # The store the dataset now points at differs from the one that
+        # produced the retained values, so a failed re-harvest here must not
+        # preserve them — see store_harvest_result's clear_stale_values.
+        metadata = await harvest_and_store(
+            db, dataset, datasource, clear_stale_values=True
+        )
         await db.commit()
         # See the same refresh in create_dataset: commit() expires dataset too.
         await db.refresh(dataset)
