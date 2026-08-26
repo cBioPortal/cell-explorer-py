@@ -103,6 +103,38 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+class DatasetMetadata(SQLModel, table=True):
+    """Harvested zarr store facts for one dataset.
+
+    Value columns hold the last *successful* harvest; the bookkeeping columns
+    describe the last *attempt*. A failed harvest therefore records the failure
+    without blanking counts already shown in the catalog.
+    """
+
+    __tablename__ = "dataset_metadata"
+
+    dataset_id: uuid.UUID = Field(
+        foreign_key="datasets.id", primary_key=True, ondelete="CASCADE"
+    )
+
+    # --- last successful harvest ---
+    n_obs: int | None = Field(default=None)
+    n_vars: int | None = Field(default=None)
+    zarr_version: int | None = Field(default=None)
+    obsm_keys: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    obs_columns: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    var_columns: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    layers: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    x_dtype: str | None = Field(default=None)
+    x_encoding: str | None = Field(default=None)
+    fetched_at: datetime | None = Field(default=None)
+
+    # --- last attempt ---
+    last_attempt_at: datetime = Field(default_factory=_utcnow)
+    status: str = Field(default="error")  # "ok" | "error"
+    error: str | None = Field(default=None)
+
+
 class ChatThread(SQLModel, table=True):
     """A single chat conversation owned by one user, scoped to one dataset."""
 
