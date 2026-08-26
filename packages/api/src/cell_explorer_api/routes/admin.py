@@ -1,7 +1,7 @@
 """Admin CRUD endpoints for datasources and datasets."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
@@ -155,6 +155,25 @@ class DatasetAdminResponse(BaseModel):
 
 class DatasetAdminListResponse(BaseModel):
     datasets: list[DatasetAdminResponse]
+
+
+class BulkRefreshRequest(BaseModel):
+    only_stale: bool = True
+    older_than_hours: int | None = None
+
+
+class RefreshResult(BaseModel):
+    slug: str
+    status: str
+    error: str | None = None
+
+
+class BulkRefreshResponse(BaseModel):
+    refreshed: int
+    results: list[RefreshResult]
+
+
+DEFAULT_STALE_HOURS = 24
 
 
 def _dataset_to_admin_response(
@@ -323,6 +342,63 @@ async def create_dataset(
     await db.refresh(dataset)
     await db.refresh(metadata)
 
+    return _dataset_to_admin_response(dataset, metadata)
+
+
+@router.post("/datasets/metadata/refresh")
+async def refresh_all_dataset_metadata(
+    payload: BulkRefreshRequest,
+    db: AsyncSession = Depends(get_db),
+) -> BulkRefreshResponse:
+    """Re-harvest metadata for every dataset, or only the stale ones.
+
+    Sequential by design: catalogs hold dozens of datasets, and serial
+    execution keeps the report ordered and datasource load predictable. This is
+    also the endpoint a scheduled job calls for periodic refresh.
+    """
+    cutoff_hours = payload.older_than_hours or DEFAULT_STALE_HOURS
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=cutoff_hours)
+
+    statement = (
+        select(Dataset, Datasource, DatasetMetadata)
+        .join(Datasource)
+        .outerjoin(DatasetMetadata, DatasetMetadata.dataset_id == Dataset.id)
+    )
+    rows = (await db.exec(statement)).all()
+
+    results: list[RefreshResult] = []
+    for dataset, datasource, metadata in rows:
+        if payload.only_stale:
+            # Never successfully harvested, or the last success is old.
+            fresh = metadata is not None and metadata.fetched_at is not None and metadata.fetched_at > cutoff
+            if fresh:
+                continue
+        row = await harvest_and_store(db, dataset, datasource)
+        results.append(RefreshResult(slug=dataset.slug, status=row.status, error=row.error))
+
+    await db.commit()
+    return BulkRefreshResponse(refreshed=len(results), results=results)
+
+
+@router.post("/datasets/{slug}/metadata/refresh")
+async def refresh_dataset_metadata(
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+) -> DatasetAdminResponse:
+    """Re-harvest metadata for one dataset."""
+    statement = select(Dataset, Datasource).join(Datasource).where(Dataset.slug == slug)
+    row = (await db.exec(statement)).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    dataset, datasource = row
+
+    metadata = await harvest_and_store(db, dataset, datasource)
+    await db.commit()
+    # commit() expires every object in the session, dataset included — refresh
+    # it too, or the response build below triggers an implicit lazy-load that
+    # raises MissingGreenlet under the async driver (see create_dataset above).
+    await db.refresh(dataset)
+    await db.refresh(metadata)
     return _dataset_to_admin_response(dataset, metadata)
 
 
