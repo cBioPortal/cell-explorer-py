@@ -397,6 +397,101 @@
         ]
       }
     },
+    "/api/admin/datasets/metadata/refresh": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Refresh All Dataset Metadata",
+        "description": "Re-harvest metadata for every dataset, or only the stale ones.\n\nSequential by design: catalogs hold dozens of datasets, and serial\nexecution keeps the report ordered and datasource load predictable. This is\nalso the endpoint a scheduled job calls for periodic refresh.",
+        "operationId": "refresh_all_dataset_metadata_api_admin_datasets_metadata_refresh_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkRefreshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkRefreshResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/admin/datasets/{slug}/metadata/refresh": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Refresh Dataset Metadata",
+        "description": "Re-harvest metadata for one dataset.",
+        "operationId": "refresh_dataset_metadata_api_admin_datasets__slug__metadata_refresh_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetAdminResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/datasets/{slug}": {
       "put": {
         "tags": [
@@ -459,6 +554,171 @@
         ],
         "summary": "Delete Dataset",
         "operationId": "delete_dataset_api_admin_datasets__slug__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/collections": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Collections Admin",
+        "operationId": "list_collections_admin_api_admin_collections_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionAdminListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create Collection",
+        "operationId": "create_collection_api_admin_collections_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollectionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionAdminResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/admin/collections/{slug}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update Collection",
+        "operationId": "update_collection_api_admin_collections__slug__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollectionUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionAdminResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete Collection",
+        "operationId": "delete_collection_api_admin_collections__slug__delete",
         "security": [
           {
             "HTTPBearer": []
@@ -625,6 +885,71 @@
                   "type": "object",
                   "additionalProperties": true,
                   "title": "Response Access Dataset Api Datasets  Slug  Access Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/collections": {
+      "get": {
+        "tags": [
+          "collections"
+        ],
+        "summary": "List Collections",
+        "description": "List collections containing at least one dataset the caller can access.",
+        "operationId": "list_collections_api_collections_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/collections/{slug}": {
+      "get": {
+        "tags": [
+          "collections"
+        ],
+        "summary": "Get Collection",
+        "description": "Get one collection and the datasets in it the caller can access.",
+        "operationId": "get_collection_api_collections__slug__get",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionDetail"
                 }
               }
             }
@@ -979,6 +1304,49 @@
   },
   "components": {
     "schemas": {
+      "BulkRefreshRequest": {
+        "properties": {
+          "only_stale": {
+            "type": "boolean",
+            "title": "Only Stale",
+            "default": true
+          },
+          "older_than_hours": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Older Than Hours"
+          }
+        },
+        "type": "object",
+        "title": "BulkRefreshRequest"
+      },
+      "BulkRefreshResponse": {
+        "properties": {
+          "refreshed": {
+            "type": "integer",
+            "title": "Refreshed"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/RefreshResult"
+            },
+            "type": "array",
+            "title": "Results"
+          }
+        },
+        "type": "object",
+        "required": [
+          "refreshed",
+          "results"
+        ],
+        "title": "BulkRefreshResponse"
+      },
       "ChatMessage": {
         "properties": {
           "role": {
@@ -1025,6 +1393,335 @@
           "can_chat"
         ],
         "title": "ChatPermissionResponse"
+      },
+      "CollectionAdminListResponse": {
+        "properties": {
+          "collections": {
+            "items": {
+              "$ref": "#/components/schemas/CollectionAdminResponse"
+            },
+            "type": "array",
+            "title": "Collections"
+          }
+        },
+        "type": "object",
+        "required": [
+          "collections"
+        ],
+        "title": "CollectionAdminListResponse"
+      },
+      "CollectionAdminResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "publication_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publication Url"
+          },
+          "publication_citation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publication Citation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "description",
+          "publication_url",
+          "publication_citation"
+        ],
+        "title": "CollectionAdminResponse"
+      },
+      "CollectionCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "publication_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publication Url"
+          },
+          "publication_citation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publication Citation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "slug"
+        ],
+        "title": "CollectionCreate"
+      },
+      "CollectionDetail": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "publication_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publication Url"
+          },
+          "publication_citation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publication Citation"
+          },
+          "dataset_count": {
+            "type": "integer",
+            "title": "Dataset Count"
+          },
+          "datasets": {
+            "items": {
+              "$ref": "#/components/schemas/DatasetResponse"
+            },
+            "type": "array",
+            "title": "Datasets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "description",
+          "publication_url",
+          "publication_citation",
+          "dataset_count",
+          "datasets"
+        ],
+        "title": "CollectionDetail"
+      },
+      "CollectionListResponse": {
+        "properties": {
+          "collections": {
+            "items": {
+              "$ref": "#/components/schemas/CollectionSummary"
+            },
+            "type": "array",
+            "title": "Collections"
+          }
+        },
+        "type": "object",
+        "required": [
+          "collections"
+        ],
+        "title": "CollectionListResponse"
+      },
+      "CollectionSummary": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "publication_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publication Url"
+          },
+          "publication_citation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publication Citation"
+          },
+          "dataset_count": {
+            "type": "integer",
+            "title": "Dataset Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "description",
+          "publication_url",
+          "publication_citation",
+          "dataset_count"
+        ],
+        "title": "CollectionSummary"
+      },
+      "CollectionUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "publication_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publication Url"
+          },
+          "publication_citation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publication Citation"
+          }
+        },
+        "type": "object",
+        "title": "CollectionUpdate"
       },
       "ContextResponse": {
         "properties": {
@@ -1113,6 +1810,17 @@
             "type": "string",
             "title": "Datasource Id"
           },
+          "collection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
+          },
           "name": {
             "type": "string",
             "title": "Name"
@@ -1173,12 +1881,23 @@
           "chat_enabled": {
             "type": "boolean",
             "title": "Chat Enabled"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatasetMetadataAdminResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
         "required": [
           "id",
           "datasource_id",
+          "collection_id",
           "name",
           "slug",
           "path",
@@ -1191,11 +1910,40 @@
         ],
         "title": "DatasetAdminResponse"
       },
+      "DatasetCollectionRef": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug",
+          "name"
+        ],
+        "title": "DatasetCollectionRef"
+      },
       "DatasetCreate": {
         "properties": {
           "datasource_id": {
             "type": "string",
             "title": "Datasource Id"
+          },
+          "collection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
           },
           "name": {
             "type": "string",
@@ -1287,6 +2035,229 @@
         ],
         "title": "DatasetListResponse"
       },
+      "DatasetMetadataAdminResponse": {
+        "properties": {
+          "n_obs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Obs"
+          },
+          "n_vars": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Vars"
+          },
+          "zarr_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zarr Version"
+          },
+          "obsm_keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Obsm Keys"
+          },
+          "obs_columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Obs Columns"
+          },
+          "var_columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Var Columns"
+          },
+          "layers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Layers"
+          },
+          "x_dtype": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "X Dtype"
+          },
+          "x_encoding": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "X Encoding"
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "last_attempt_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Attempt At"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "n_obs",
+          "n_vars",
+          "zarr_version",
+          "obsm_keys",
+          "obs_columns",
+          "var_columns",
+          "layers",
+          "x_dtype",
+          "x_encoding",
+          "fetched_at",
+          "last_attempt_at",
+          "status",
+          "error"
+        ],
+        "title": "DatasetMetadataAdminResponse",
+        "description": "Harvested store metadata, including harvest bookkeeping.\n\nAdmin-only: `error` can contain the datasource's internal_base_url."
+      },
+      "DatasetMetadataResponse": {
+        "properties": {
+          "n_obs": {
+            "type": "integer",
+            "title": "N Obs"
+          },
+          "n_vars": {
+            "type": "integer",
+            "title": "N Vars"
+          },
+          "zarr_version": {
+            "type": "integer",
+            "title": "Zarr Version"
+          },
+          "obsm_keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Obsm Keys"
+          },
+          "obs_columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Obs Columns"
+          },
+          "var_columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Var Columns"
+          },
+          "layers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Layers"
+          },
+          "x_dtype": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "X Dtype"
+          },
+          "x_encoding": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "X Encoding"
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Fetched At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "n_obs",
+          "n_vars",
+          "zarr_version",
+          "obsm_keys",
+          "obs_columns",
+          "var_columns",
+          "layers",
+          "x_dtype",
+          "x_encoding",
+          "fetched_at"
+        ],
+        "title": "DatasetMetadataResponse",
+        "description": "Harvested store facts. Present only once a harvest has succeeded.\n\nDeliberately excludes `status` and `error` \u2014 error strings can contain the\ndatasource's internal_base_url, which must not reach anonymous callers.\nThose live on the admin response instead."
+      },
       "DatasetResponse": {
         "properties": {
           "slug": {
@@ -1338,6 +2309,26 @@
               }
             ],
             "title": "Default View"
+          },
+          "collection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatasetCollectionRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatasetMetadataResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -1444,6 +2435,17 @@
               }
             ],
             "title": "Chat Enabled"
+          },
+          "collection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
           }
         },
         "type": "object",
@@ -1782,6 +2784,35 @@
           "dtype"
         ],
         "title": "ObsColumnInfo"
+      },
+      "RefreshResult": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug",
+          "status"
+        ],
+        "title": "RefreshResult"
       },
       "ThreadDetailResponse": {
         "properties": {
