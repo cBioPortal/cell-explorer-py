@@ -100,6 +100,28 @@ async def test_harvest_private_without_credential_ref_returns_error(zarr_server)
     assert "credential_ref" in outcome.error
 
 
+async def test_harvest_non_credential_error_during_mint_returns_error(zarr_server, monkeypatch):
+    """mint_credentials can raise non-CredentialError exceptions too — e.g. an
+    OSError reading a corrupt/unreadable HTTP_TOKEN private key file. Those must
+    be caught and recorded, not propagated."""
+
+    def _raise_unreadable_key(*_args, **_kwargs):
+        raise OSError("key file unreadable")
+
+    monkeypatch.setattr(
+        "cell_explorer_api.services.metadata_harvest.mint_credentials",
+        _raise_unreadable_key,
+    )
+
+    datasource = _datasource(zarr_server)
+    dataset = _dataset(datasource, "tiny_v3.zarr")
+    dataset.is_public = False
+    outcome = await harvest_dataset_metadata(dataset, datasource)
+    assert outcome.status == "error"
+    assert outcome.metadata is None
+    assert "key file unreadable" in outcome.error
+
+
 async def test_store_result_writes_values_on_success(zarr_server):
     engine, dataset_id = await _engine_with_dataset()
     datasource = _datasource(zarr_server)

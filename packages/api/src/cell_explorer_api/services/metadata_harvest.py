@@ -15,11 +15,7 @@ from sqlmodel import select
 from zarr_access import ZarrStore
 
 from cell_explorer_api.db.models import Dataset, DatasetMetadata, Datasource
-from cell_explorer_api.services.credentials import (
-    CredentialError,
-    credential_to_headers,
-    mint_credentials,
-)
+from cell_explorer_api.services.credentials import credential_to_headers, mint_credentials
 from cell_explorer_api.services.store_metadata import StoreMetadata, extract_store_metadata
 
 logger = logging.getLogger(__name__)
@@ -55,8 +51,14 @@ async def harvest_dataset_metadata(
     else:
         try:
             headers = credential_to_headers(mint_credentials(datasource, dataset.path))
-        except CredentialError as exc:
-            return HarvestOutcome(status="error", error=str(exc)[:MAX_ERROR_LENGTH])
+        except Exception as exc:
+            # Broad on purpose: mint_credentials/credential_to_headers can raise
+            # more than CredentialError (e.g. OSError reading a corrupt/unreadable
+            # HTTP_TOKEN private key file, jwt.exceptions.InvalidKeyError for bad
+            # PEM contents). Every un-mintable-credential failure must become a
+            # recorded error, never propagate.
+            message = f"{type(exc).__name__}: {exc}"
+            return HarvestOutcome(status="error", error=message[:MAX_ERROR_LENGTH])
 
     try:
         zarr_store = await ZarrStore.open(url, headers=headers)
