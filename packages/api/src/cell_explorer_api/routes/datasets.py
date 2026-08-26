@@ -64,19 +64,25 @@ def _metadata_to_response(
     """Expose metadata only once a harvest has succeeded.
 
     fetched_at is the marker: it is set only on success, so a row that exists
-    solely to record a failure yields None rather than a body of nulls.
+    solely to record a failure yields None rather than a body of nulls. The
+    three value columns (n_obs, n_vars, zarr_version) are checked together
+    because a real harvest (store_harvest_result) writes all three in a
+    single block on success — the response type promises all three are real,
+    so a row missing any of them is not a genuine success and must not be
+    served as though it were.
     """
-    if metadata is None or metadata.fetched_at is None or metadata.n_obs is None:
+    if (
+        metadata is None
+        or metadata.fetched_at is None
+        or metadata.n_obs is None
+        or metadata.n_vars is None
+        or metadata.zarr_version is None
+    ):
         return None
     return DatasetMetadataResponse(
         n_obs=metadata.n_obs,
-        # A successful harvest writes n_vars/zarr_version alongside n_obs, but a
-        # row can also be left over from a schema where only n_obs was recorded
-        # before a later failed attempt. fetched_at + n_obs is still a genuine
-        # past success, so fall back to 0 rather than crashing or exposing None
-        # through a field the response type declares non-optional.
-        n_vars=metadata.n_vars if metadata.n_vars is not None else 0,
-        zarr_version=metadata.zarr_version if metadata.zarr_version is not None else 0,
+        n_vars=metadata.n_vars,
+        zarr_version=metadata.zarr_version,
         obsm_keys=metadata.obsm_keys,
         obs_columns=metadata.obs_columns,
         var_columns=metadata.var_columns,

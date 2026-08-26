@@ -30,7 +30,9 @@ def app():
 
 @pytest_asyncio.fixture()
 async def seeded_app(app):
-    """Three datasets: harvested, harvest-then-failed, and never harvested."""
+    """Four datasets: harvested, harvest-then-failed, never harvested, and
+    partially-populated (a row that should never occur from a real harvest,
+    but must still not be served as real metadata if it does)."""
     engine = create_engine("sqlite+aiosqlite://")
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
@@ -41,7 +43,7 @@ async def seeded_app(app):
         session.add(ds)
         await session.flush()
 
-        for slug in ("harvested", "stale", "never"):
+        for slug in ("harvested", "stale", "never", "partial"):
             session.add(Dataset(
                 datasource_id=ds.id, name=slug.title(), slug=slug,
                 path=f"{slug}.zarr", is_public=True,
@@ -56,11 +58,16 @@ async def seeded_app(app):
             fetched_at=_utcnow(), status="ok",
         ))
         session.add(DatasetMetadata(
-            dataset_id=ids["stale"], n_obs=99, fetched_at=_utcnow(),
+            dataset_id=ids["stale"], n_obs=99, n_vars=7, zarr_version=2,
+            fetched_at=_utcnow(),
             status="error", error="boom at https://internal.example.com",
         ))
         session.add(DatasetMetadata(
             dataset_id=ids["never"], status="error", error="never worked",
+        ))
+        session.add(DatasetMetadata(
+            dataset_id=ids["partial"], n_obs=42, fetched_at=_utcnow(),
+            status="error", error="partial write",
         ))
         await session.commit()
     app.state.db_engine = engine
@@ -90,6 +97,13 @@ def test_metadata_retained_when_latest_attempt_failed(seeded_app):
 def test_metadata_null_when_never_harvested(seeded_app):
     datasets = _by_slug(TestClient(seeded_app))
     assert datasets["never"]["metadata"] is None
+
+
+def test_metadata_null_when_partially_populated(seeded_app):
+    datasets = _by_slug(TestClient(seeded_app))
+    assert datasets["partial"]["metadata"] is None, (
+        "a partially-populated row must not be served as real metadata"
+    )
 
 
 def test_status_and_error_never_exposed_publicly(seeded_app):
