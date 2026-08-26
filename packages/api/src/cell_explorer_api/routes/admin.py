@@ -356,7 +356,9 @@ async def refresh_all_dataset_metadata(
     execution keeps the report ordered and datasource load predictable. This is
     also the endpoint a scheduled job calls for periodic refresh.
     """
-    cutoff_hours = payload.older_than_hours or DEFAULT_STALE_HOURS
+    cutoff_hours = (
+        payload.older_than_hours if payload.older_than_hours is not None else DEFAULT_STALE_HOURS
+    )
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=cutoff_hours)
 
     statement = (

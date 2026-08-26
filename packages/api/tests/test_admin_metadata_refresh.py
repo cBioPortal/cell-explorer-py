@@ -12,12 +12,12 @@ against the same cached filesystem instance dies with "Event loop is closed".
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlmodel import SQLModel
+from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from cell_explorer_api.config import Settings
 from cell_explorer_api.db import create_engine
-from cell_explorer_api.db.models import Dataset, Datasource, DatasourceType
+from cell_explorer_api.db.models import Dataset, DatasetMetadata, Datasource, DatasourceType
 from cell_explorer_api.main import create_app
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
@@ -121,6 +121,43 @@ async def test_bulk_refresh_only_stale_skips_fresh(seeded_app):
     slugs = {r["slug"] for r in res.json()["results"]}
     assert "good" not in slugs, "a just-harvested dataset is not stale"
     assert "broken" in slugs, "never-succeeded datasets are always stale"
+
+
+async def test_bulk_refresh_only_stale_includes_never_succeeded(seeded_app):
+    """A row that exists but has only ever failed (fetched_at=None) must still
+    be treated as stale.
+
+    Seeds a DatasetMetadata row directly (bypassing the refresh endpoint, so
+    the row exists without ever having a successful harvest) with
+    status="error" and fetched_at=None. This closes a gap a simplified
+    predicate like `fresh = metadata is not None` would sail through: a
+    dataset that has only ever failed would be permanently classified
+    "fresh" and skipped by every future only_stale=True call — exactly the
+    dataset a nightly cron most needs to retry.
+    """
+    engine = seeded_app.state.db_engine
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        result = await session.exec(select(Dataset).where(Dataset.slug == "broken"))
+        broken = result.one()
+        session.add(
+            DatasetMetadata(
+                dataset_id=broken.id,
+                status="error",
+                error="previous failure",
+                fetched_at=None,
+            )
+        )
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=seeded_app), base_url="http://test") as client:
+        res = await client.post(
+            "/api/admin/datasets/metadata/refresh",
+            json={"only_stale": True},
+            headers=AUTH_HEADER,
+        )
+    assert res.status_code == 200
+    slugs = {r["slug"] for r in res.json()["results"]}
+    assert "broken" in slugs, "a row that has only ever failed must still be stale"
 
 
 async def test_refresh_requires_admin_auth(seeded_app):
