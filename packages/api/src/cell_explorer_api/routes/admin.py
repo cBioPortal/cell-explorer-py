@@ -11,8 +11,15 @@ from sqlmodel import select
 
 from cell_explorer_api.auth.admin import require_admin
 from cell_explorer_api.db import get_db
-from cell_explorer_api.db.models import Collection, Dataset, Datasource, DatasourceType
+from cell_explorer_api.db.models import (
+    Collection,
+    Dataset,
+    DatasetMetadata,
+    Datasource,
+    DatasourceType,
+)
 from cell_explorer_api.services.default_view import DefaultViewError, validate_default_view
+from cell_explorer_api.services.metadata_harvest import harvest_and_store
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 
@@ -109,6 +116,27 @@ class DatasetUpdate(BaseModel):
     collection_id: str | None = None
 
 
+class DatasetMetadataAdminResponse(BaseModel):
+    """Harvested store metadata, including harvest bookkeeping.
+
+    Admin-only: `error` can contain the datasource's internal_base_url.
+    """
+
+    n_obs: int | None
+    n_vars: int | None
+    zarr_version: int | None
+    obsm_keys: list[str]
+    obs_columns: list[str]
+    var_columns: list[str]
+    layers: list[str]
+    x_dtype: str | None
+    x_encoding: str | None
+    fetched_at: datetime | None
+    last_attempt_at: datetime
+    status: str
+    error: str | None
+
+
 class DatasetAdminResponse(BaseModel):
     id: str
     datasource_id: str
@@ -122,13 +150,16 @@ class DatasetAdminResponse(BaseModel):
     prompt_addendum: str | None
     default_view: dict | None
     chat_enabled: bool
+    metadata: DatasetMetadataAdminResponse | None = None
 
 
 class DatasetAdminListResponse(BaseModel):
     datasets: list[DatasetAdminResponse]
 
 
-def _dataset_to_admin_response(dataset: Dataset) -> DatasetAdminResponse:
+def _dataset_to_admin_response(
+    dataset: Dataset, metadata: DatasetMetadata | None = None
+) -> DatasetAdminResponse:
     return DatasetAdminResponse(
         id=str(dataset.id),
         datasource_id=str(dataset.datasource_id),
@@ -142,6 +173,25 @@ def _dataset_to_admin_response(dataset: Dataset) -> DatasetAdminResponse:
         prompt_addendum=dataset.prompt_addendum,
         default_view=dataset.default_view,
         chat_enabled=dataset.chat_enabled,
+        metadata=(
+            DatasetMetadataAdminResponse(
+                n_obs=metadata.n_obs,
+                n_vars=metadata.n_vars,
+                zarr_version=metadata.zarr_version,
+                obsm_keys=metadata.obsm_keys,
+                obs_columns=metadata.obs_columns,
+                var_columns=metadata.var_columns,
+                layers=metadata.layers,
+                x_dtype=metadata.x_dtype,
+                x_encoding=metadata.x_encoding,
+                fetched_at=metadata.fetched_at,
+                last_attempt_at=metadata.last_attempt_at,
+                status=metadata.status,
+                error=metadata.error,
+            )
+            if metadata is not None
+            else None
+        ),
     )
 
 
@@ -223,9 +273,13 @@ async def update_datasource(
 async def list_datasets_admin(
     db: AsyncSession = Depends(get_db),
 ) -> DatasetAdminListResponse:
-    result = await db.exec(select(Dataset))
-    datasets = [_dataset_to_admin_response(dataset) for dataset in result.all()]
-    return DatasetAdminListResponse(datasets=datasets)
+    statement = select(Dataset, DatasetMetadata).outerjoin(
+        DatasetMetadata, DatasetMetadata.dataset_id == Dataset.id
+    )
+    result = await db.exec(statement)
+    return DatasetAdminListResponse(
+        datasets=[_dataset_to_admin_response(d, m) for d, m in result.all()]
+    )
 
 
 @router.post("/datasets", status_code=201)
@@ -256,7 +310,20 @@ async def create_dataset(
         await db.rollback()
         raise HTTPException(status_code=409, detail="Dataset with this slug already exists")
     await db.refresh(dataset)
-    return _dataset_to_admin_response(dataset)
+
+    # Best-effort: a store that cannot be read must not fail the catalog write.
+    dataset.datasource = (
+        await db.exec(select(Datasource).where(Datasource.id == dataset.datasource_id))
+    ).one()
+    metadata = await harvest_and_store(db, dataset, dataset.datasource)
+    await db.commit()
+    # commit() expires every object in the session, dataset included — refresh
+    # it too, or the response build below triggers an implicit lazy-load that
+    # raises MissingGreenlet under the async driver.
+    await db.refresh(dataset)
+    await db.refresh(metadata)
+
+    return _dataset_to_admin_response(dataset, metadata)
 
 
 @router.put("/datasets/{slug}")
@@ -280,13 +347,36 @@ async def update_dataset(
             updates["default_view"] = validate_default_view(updates["default_view"])
         except DefaultViewError as exc:
             raise HTTPException(status_code=422, detail=f"invalid default_view: {exc}")
+    previous_path = dataset.path
+    previous_datasource_id = dataset.datasource_id
     for key, value in updates.items():
         setattr(dataset, key, value)
     dataset.updated_at = datetime.now(timezone.utc)
     db.add(dataset)
     await db.commit()
     await db.refresh(dataset)
-    return _dataset_to_admin_response(dataset)
+
+    store_moved = (
+        dataset.path != previous_path or dataset.datasource_id != previous_datasource_id
+    )
+    datasource = (
+        await db.exec(select(Datasource).where(Datasource.id == dataset.datasource_id))
+    ).one()
+
+    if store_moved:
+        metadata = await harvest_and_store(db, dataset, datasource)
+        await db.commit()
+        # See the same refresh in create_dataset: commit() expires dataset too.
+        await db.refresh(dataset)
+        await db.refresh(metadata)
+    else:
+        metadata = (
+            await db.exec(
+                select(DatasetMetadata).where(DatasetMetadata.dataset_id == dataset.id)
+            )
+        ).first()
+
+    return _dataset_to_admin_response(dataset, metadata)
 
 
 @router.delete("/datasets/{slug}", status_code=204)
