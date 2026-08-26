@@ -19,6 +19,7 @@ from cryptography.hazmat.primitives.serialization import (
 from cell_explorer_api.db.models import Datasource, DatasourceType
 from cell_explorer_api.services.credentials import (
     CredentialError,
+    credential_to_headers,
     mint_credentials,
 )
 
@@ -152,3 +153,24 @@ def test_mint_cloudfront_bad_private_key(cloudfront_datasource, monkeypatch):
     monkeypatch.setenv("DATASOURCE_TEST_PRIVATE_KEY", "-----BEGIN PRIVATE KEY-----\nnope\n-----END PRIVATE KEY-----")
     with pytest.raises(CredentialError, match="[Ii]nvalid private key"):
         mint_credentials(cloudfront_datasource, "protected/spectrum.zarr")
+
+
+def test_credential_to_headers_public_is_empty():
+    assert credential_to_headers({"credential_type": "public"}) == {}
+
+
+def test_credential_to_headers_bearer_token():
+    result = credential_to_headers({"credential_type": "bearer_token", "token": "abc"})
+    assert result == {"Authorization": "Bearer abc"}
+
+
+def test_credential_to_headers_signed_cookies():
+    result = credential_to_headers(
+        {"credential_type": "signed_cookies", "cookies": {"a": "1", "b": "2"}}
+    )
+    assert result == {"Cookie": "a=1; b=2"}
+
+
+def test_credential_to_headers_unknown_type_raises():
+    with pytest.raises(CredentialError, match="unknown credential_type"):
+        credential_to_headers({"credential_type": "carrier_pigeon"})

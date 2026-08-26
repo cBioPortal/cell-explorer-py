@@ -5,7 +5,6 @@ Used by the CLI today; will be reused by the future /api/chat HTTP route
 """
 
 from datetime import datetime
-from typing import Any
 
 from cell_explorer_agent.prompt import DatasetContext
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +20,11 @@ from cell_explorer_api.auth.models import User
 from cell_explorer_api.config import Settings
 from cell_explorer_api.db.models import Dataset, Datasource
 from cell_explorer_api.services.access import user_can_access
-from cell_explorer_api.services.credentials import CredentialError, mint_credentials
+from cell_explorer_api.services.credentials import (
+    CredentialError,
+    credential_to_headers,
+    mint_credentials,
+)
 from cell_explorer_api.services.zarr_adapter import (
     AnnDataZarrAccess,
     StrataZarrAccess,
@@ -93,20 +96,6 @@ class ChatDisabledError(ChatSessionError):
     """Raised when chat is not enabled for the requested dataset."""
 
 
-def _credential_to_headers(credential: dict[str, Any]) -> dict[str, str]:
-    """Translate mint_credentials output into HTTP headers for ZarrStore.open."""
-    kind = credential.get("credential_type")
-    if kind == "public":
-        return {}
-    if kind == "bearer_token":
-        return {"Authorization": f"Bearer {credential['token']}"}
-    if kind == "signed_cookies":
-        cookies = credential.get("cookies") or {}
-        cookie_header = "; ".join(f"{k}={v}" for k, v in cookies.items())
-        return {"Cookie": cookie_header}
-    raise CredentialMintError(f"unknown credential_type {kind!r}")
-
-
 async def assert_chat_access(
     *,
     user: User,
@@ -176,10 +165,10 @@ async def make_chat_agent(
     else:
         try:
             credential = mint_credentials(datasource, dataset.path)
+            headers = credential_to_headers(credential)
         except CredentialError as exc:
             raise CredentialMintError(str(exc)) from exc
         url = f"{datasource.fetch_base_url}/{dataset.path}"
-        headers = _credential_to_headers(credential)
 
     # 4. Open the zarr stack
     try:

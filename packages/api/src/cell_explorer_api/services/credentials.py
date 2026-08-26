@@ -168,3 +168,17 @@ def _mint_cloudfront(
         },
         "expires_at": expires_at.isoformat(),
     }
+
+
+def credential_to_headers(credential: dict) -> dict[str, str]:
+    """Translate mint_credentials output into HTTP headers for ZarrStore.open."""
+    kind = credential.get("credential_type")
+    if kind == "public":
+        return {}
+    if kind == "bearer_token":
+        return {"Authorization": f"Bearer {credential['token']}"}
+    if kind == "signed_cookies":
+        cookies = credential.get("cookies") or {}
+        cookie_header = "; ".join(f"{k}={v}" for k, v in cookies.items())
+        return {"Cookie": cookie_header}
+    raise CredentialError(f"unknown credential_type {kind!r}")

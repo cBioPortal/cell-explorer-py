@@ -94,13 +94,45 @@ class Dataset(SQLModel, table=True):
         return f"{self.datasource.base_url}/{self.path}"
 
 
-def _utcnow() -> datetime:
+def utcnow() -> datetime:
     """Return current UTC time as a timezone-naive datetime.
 
     SQLite stores datetimes without timezone info; using naive UTC
     keeps in-memory values consistent with what the DB returns.
     """
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+class DatasetMetadata(SQLModel, table=True):
+    """Harvested zarr store facts for one dataset.
+
+    Value columns hold the last *successful* harvest; the bookkeeping columns
+    describe the last *attempt*. A failed harvest therefore records the failure
+    without blanking counts already shown in the catalog.
+    """
+
+    __tablename__ = "dataset_metadata"
+
+    dataset_id: uuid.UUID = Field(
+        foreign_key="datasets.id", primary_key=True, ondelete="CASCADE"
+    )
+
+    # --- last successful harvest ---
+    n_obs: int | None = Field(default=None)
+    n_vars: int | None = Field(default=None)
+    zarr_version: int | None = Field(default=None)
+    obsm_keys: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    obs_columns: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    var_columns: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    layers: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    x_dtype: str | None = Field(default=None)
+    x_encoding: str | None = Field(default=None)
+    fetched_at: datetime | None = Field(default=None)
+
+    # --- last attempt ---
+    last_attempt_at: datetime = Field(default_factory=utcnow)
+    status: str = Field(default="error")  # "ok" | "error"
+    error: str | None = Field(default=None)
 
 
 class ChatThread(SQLModel, table=True):
@@ -112,8 +144,8 @@ class ChatThread(SQLModel, table=True):
     user_sub: str = Field(index=True)  # Keycloak `sub` claim
     dataset_id: uuid.UUID = Field(foreign_key="datasets.id", index=True)
     title: str
-    created_at: datetime = Field(default_factory=_utcnow)
-    updated_at: datetime = Field(default_factory=_utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 class ChatMessageRow(SQLModel, table=True):
@@ -125,7 +157,7 @@ class ChatMessageRow(SQLModel, table=True):
     thread_id: uuid.UUID = Field(foreign_key="chat_threads.id", index=True, ondelete="CASCADE")
     role: str  # "user" | "assistant"
     content: str
-    created_at: datetime = Field(default_factory=_utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
     # Set on assistant rows when Langfuse tracing is enabled. Used by the
     # feedback PUT route to forward thumbs ratings to Langfuse Scores.
     langfuse_trace_id: str | None = Field(default=None, index=True)
@@ -146,5 +178,5 @@ class ChatFeedback(SQLModel, table=True):
     user_sub: str = Field(index=True)
     rating: str  # "up" | "down"; validated by Pydantic at the route layer
     comment: str | None = None
-    created_at: datetime = Field(default_factory=_utcnow)
-    updated_at: datetime = Field(default_factory=_utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)

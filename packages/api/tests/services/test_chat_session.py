@@ -101,37 +101,8 @@ async def test_private_dataset_without_role_raises_403():
         )
 
 
-from cell_explorer_api.services.chat_session import (
-    CredentialMintError,
-    _credential_to_headers,
-)
+from cell_explorer_api.services.chat_session import CredentialMintError
 from cell_explorer_api.services.credentials import CredentialError
-
-
-def test_credential_to_headers_public():
-    assert _credential_to_headers({"credential_type": "public"}) == {}
-
-
-def test_credential_to_headers_bearer_token():
-    headers = _credential_to_headers({
-        "credential_type": "bearer_token",
-        "token": "abc123",
-    })
-    assert headers == {"Authorization": "Bearer abc123"}
-
-
-def test_credential_to_headers_signed_cookies():
-    headers = _credential_to_headers({
-        "credential_type": "signed_cookies",
-        "cookies": {"CloudFront-Policy": "p", "CloudFront-Signature": "s"},
-    })
-    # Order preserved
-    assert headers == {"Cookie": "CloudFront-Policy=p; CloudFront-Signature=s"}
-
-
-def test_credential_to_headers_unknown_raises():
-    with pytest.raises(CredentialMintError, match="unknown credential_type"):
-        _credential_to_headers({"credential_type": "bogus"})
 
 
 @pytest.mark.asyncio
@@ -189,6 +160,28 @@ async def test_credential_mint_error_propagates_as_chat_session_error():
         mock_mint.side_effect = CredentialError("private key missing")
 
         with pytest.raises(CredentialMintError, match="private key missing"):
+            await make_chat_agent(
+                user=user, dataset_slug="brca", db=db, settings=settings, llm=llm
+            )
+
+
+@pytest.mark.asyncio
+async def test_credential_to_headers_error_propagates_as_chat_session_error():
+    """credential_to_headers runs inside make_chat_agent's try block, so a
+    CredentialError it raises (e.g. an unrecognized credential_type) must
+    convert to CredentialMintError just like a mint_credentials failure does."""
+    dataset = MagicMock(slug="brca", is_public=False,
+                         required_roles=["researcher"], chat_enabled=True, path="brca.zarr")
+    datasource = MagicMock()
+    db = await _mk_db_session(_make_db_row(dataset, datasource))
+    settings = MagicMock()
+    user = _FakeUser(roles=["researcher"])
+    llm = FakeLLMClient(scripts=[])
+
+    with patch("cell_explorer_api.services.chat_session.mint_credentials") as mock_mint:
+        mock_mint.return_value = {"credential_type": "bogus"}
+
+        with pytest.raises(CredentialMintError, match="unknown credential_type"):
             await make_chat_agent(
                 user=user, dataset_slug="brca", db=db, settings=settings, llm=llm
             )
