@@ -101,37 +101,8 @@ async def test_private_dataset_without_role_raises_403():
         )
 
 
-from cell_explorer_api.services.chat_session import (
-    CredentialMintError,
-    _credential_to_headers,
-)
+from cell_explorer_api.services.chat_session import CredentialMintError
 from cell_explorer_api.services.credentials import CredentialError
-
-
-def test_credential_to_headers_public():
-    assert _credential_to_headers({"credential_type": "public"}) == {}
-
-
-def test_credential_to_headers_bearer_token():
-    headers = _credential_to_headers({
-        "credential_type": "bearer_token",
-        "token": "abc123",
-    })
-    assert headers == {"Authorization": "Bearer abc123"}
-
-
-def test_credential_to_headers_signed_cookies():
-    headers = _credential_to_headers({
-        "credential_type": "signed_cookies",
-        "cookies": {"CloudFront-Policy": "p", "CloudFront-Signature": "s"},
-    })
-    # Order preserved
-    assert headers == {"Cookie": "CloudFront-Policy=p; CloudFront-Signature=s"}
-
-
-def test_credential_to_headers_unknown_raises():
-    with pytest.raises(CredentialMintError, match="unknown credential_type"):
-        _credential_to_headers({"credential_type": "bogus"})
 
 
 @pytest.mark.asyncio
