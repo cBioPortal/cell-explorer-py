@@ -37,7 +37,10 @@ async def test_extracts_shape_from_v2_store(zarr_server):
 async def test_extracts_obsm_and_columns(zarr_server):
     md = await _extract(zarr_server, "tiny_v3.zarr")
     assert md.obsm_keys == ["X_umap"]
-    assert set(md.obs_columns) == {"cell_type", "n_counts"}
+    assert set(md.obs_columns) == {
+        "cell_type", "tissue", "tissue_ontology_term_id",
+        "observation_joinid", "n_counts",
+    }
     assert md.var_columns == ["feature_name"]
 
 
@@ -56,3 +59,58 @@ async def test_non_anndata_store_raises(zarr_server):
 async def test_anndata_without_x_raises(zarr_server):
     with pytest.raises(Exception):
         await _extract(zarr_server, "no_x.zarr")
+
+
+async def test_reads_values_for_a_categorical_column_under_the_cap(zarr_server):
+    md = await _extract(zarr_server, "tiny_v3.zarr")
+    tissue = md.obs_facets["tissue"]
+    assert tissue.dtype == "categorical"
+    assert tissue.cardinality == 3
+    assert sorted(tissue.values) == ["brain", "liver", "lung"]
+
+
+async def test_reads_values_from_a_v2_store_too(zarr_server):
+    md = await _extract(zarr_server, "tiny_v2.zarr")
+    assert sorted(md.obs_facets["tissue"].values) == ["brain", "liver", "lung"]
+
+
+async def test_reports_cardinality_but_no_values_over_the_cap(zarr_server, monkeypatch):
+    from cell_explorer_api.services import store_metadata as sm
+    monkeypatch.setattr(sm, "FACET_VALUE_CAP", 2)
+    md = await _extract(zarr_server, "tiny_v3.zarr")
+    col = md.obs_facets["tissue"]
+    assert col.cardinality == 3, "cardinality is free from metadata, always reported"
+    assert col.values is None, "over the cap, values must not be read"
+
+
+async def test_excludes_ontology_term_id_columns(zarr_server):
+    md = await _extract(zarr_server, "tiny_v3.zarr")
+    twin = md.obs_facets["tissue_ontology_term_id"]
+    assert twin.cardinality == 1
+    assert twin.values is None, "ontology ids are never shipped as facet values"
+
+
+async def test_records_numeric_columns_without_values(zarr_server):
+    md = await _extract(zarr_server, "tiny_v3.zarr")
+    numeric = md.obs_facets["n_counts"]
+    assert numeric.dtype == "numeric"
+    assert numeric.cardinality is None
+    assert numeric.values is None
+
+
+async def test_a_failing_values_read_does_not_fail_the_harvest(zarr_server, monkeypatch):
+    # One unreadable column must cost that column, not the dataset.
+    from cell_explorer_api.services import store_metadata as sm
+
+    real = sm._read_categories
+
+    async def flaky(store, column):
+        if column == "tissue":
+            raise OSError("chunk unreadable")
+        return await real(store, column)
+
+    monkeypatch.setattr(sm, "_read_categories", flaky)
+    md = await _extract(zarr_server, "tiny_v3.zarr")
+    assert md.obs_facets["tissue"].values is None
+    assert md.obs_facets["cell_type"].values is not None, "other columns still read"
+    assert md.n_obs == 12, "counts unaffected"
