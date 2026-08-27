@@ -30,6 +30,7 @@ from cell_explorer_api.db.models import (
     Dataset,
     utcnow,
 )
+from cell_explorer_api.schemas.obs import ObsColumnInfo
 from cell_explorer_api.services.access import compute_chat_permission
 from cell_explorer_api.services.chat_session import (
     AccessDeniedError,
@@ -115,13 +116,6 @@ class TurnRequest(BaseModel):
                     f"messages[{i}].role must be {expected!r} (alternating from user)"
                 )
         return v
-
-
-class ObsColumnInfo(BaseModel):
-    name: str
-    dtype: Literal["categorical", "numeric", "string"]
-    cardinality: int | None = None
-    values: list[str] | None = None
 
 
 class ChatPermissionResponse(BaseModel):

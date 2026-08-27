@@ -109,7 +109,7 @@ def test_get_context_happy_path(seeded_app):
     assert data["n_var"] == 50
     assert data["obs_columns"] == [
         {"name": "cell_type", "dtype": "categorical", "cardinality": 5,
-         "values": ["T", "B", "M", "NK", "Mono"]},
+         "values": ["T", "B", "M", "NK", "Mono"], "facet": None},
     ]
     assert data["embedding_keys"] == ["X_umap"]
     assert data["available_tools"] == ["get_dataset_schema"]
