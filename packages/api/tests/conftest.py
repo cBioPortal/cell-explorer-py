@@ -50,7 +50,16 @@ def _tiny_adata() -> "ad.AnnData":
     X = np.arange(n_obs * n_vars, dtype="float32").reshape(n_obs, n_vars)
     obs = pd.DataFrame(
         {
+            # categorical, under the cap — values must be read
             "cell_type": pd.Categorical(["T"] * 6 + ["B"] * 6),
+            "tissue": pd.Categorical(["lung"] * 4 + ["liver"] * 4 + ["brain"] * 4),
+            # categorical ontology twin — excluded by name, never read
+            "tissue_ontology_term_id": pd.Categorical(["UBERON:0002048"] * 12),
+            # categorical, one distinct value per cell — the shape of a real id
+            # column. At 12 cells this is still under the default cap; the cap
+            # itself is exercised by monkeypatching FACET_VALUE_CAP.
+            "observation_joinid": pd.Categorical([f"cell{i}" for i in range(n_obs)]),
+            # numeric — recorded, never carries values
             "n_counts": np.arange(n_obs, dtype="float32"),
         },
         index=[f"cell{i}" for i in range(n_obs)],

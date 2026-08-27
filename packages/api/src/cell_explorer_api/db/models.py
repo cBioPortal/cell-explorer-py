@@ -124,6 +124,10 @@ class DatasetMetadata(SQLModel, table=True):
     obsm_keys: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     obs_columns: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     var_columns: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    # Facet-relevant facts per obs column, keyed by the column's REAL name.
+    # Deliberately uninterpreted: canonical facet identity is resolved when the
+    # response is built, so a mapping correction never requires a re-harvest.
+    obs_facets: dict = Field(default_factory=dict, sa_column=Column(JSON))
     layers: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     x_dtype: str | None = Field(default=None)
     x_encoding: str | None = Field(default=None)

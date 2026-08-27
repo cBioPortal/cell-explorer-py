@@ -160,3 +160,58 @@ async def test_failed_harvest_preserves_previous_values(zarr_server):
     assert row.error
     assert row.n_obs == 12, "a failed harvest must not blank previously good values"
     assert row.fetched_at == first_fetched_at, "fetched_at tracks the last SUCCESS"
+
+
+async def test_stores_obs_facets_on_success(zarr_server):
+    engine, dataset_id = await _engine_with_dataset()
+    datasource = _datasource(zarr_server)
+    outcome = await harvest_dataset_metadata(_dataset(datasource, "tiny_v3.zarr"), datasource)
+
+    async with AsyncSession(engine) as session:
+        await store_harvest_result(session, dataset_id, outcome)
+        await session.commit()
+        row = (await session.exec(select(DatasetMetadata))).one()
+
+    assert sorted(row.obs_facets["tissue"]["values"]) == ["brain", "liver", "lung"]
+    assert row.obs_facets["tissue"]["cardinality"] == 3
+    assert row.obs_facets["n_counts"]["values"] is None
+
+
+async def test_failed_harvest_preserves_obs_facets(zarr_server):
+    # Same rule as the other value columns: a transient outage must not blank
+    # facets the catalogue is already serving.
+    engine, dataset_id = await _engine_with_dataset()
+    datasource = _datasource(zarr_server)
+    good = await harvest_dataset_metadata(_dataset(datasource, "tiny_v3.zarr"), datasource)
+    bad = await harvest_dataset_metadata(_dataset(datasource, "gone.zarr"), datasource)
+
+    async with AsyncSession(engine) as session:
+        await store_harvest_result(session, dataset_id, good)
+        await session.commit()
+        await store_harvest_result(session, dataset_id, bad)
+        await session.commit()
+        session.expire_all()
+        row = (await session.exec(select(DatasetMetadata))).one()
+
+    assert row.status == "error"
+    assert row.obs_facets["tissue"]["cardinality"] == 3
+
+
+async def test_clear_stale_values_clears_obs_facets(zarr_server):
+    # When the dataset's path changed, retained facets describe a store the
+    # dataset no longer points at — they must go with the counts.
+    engine, dataset_id = await _engine_with_dataset()
+    datasource = _datasource(zarr_server)
+    good = await harvest_dataset_metadata(_dataset(datasource, "tiny_v3.zarr"), datasource)
+    bad = await harvest_dataset_metadata(_dataset(datasource, "gone.zarr"), datasource)
+
+    async with AsyncSession(engine) as session:
+        await store_harvest_result(session, dataset_id, good)
+        await session.commit()
+        await store_harvest_result(session, dataset_id, bad, clear_stale_values=True)
+        await session.commit()
+        session.expire_all()
+        row = (await session.exec(select(DatasetMetadata))).one()
+
+    assert row.obs_facets == {}
+    assert row.n_obs is None

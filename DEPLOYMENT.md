@@ -48,3 +48,7 @@ Cookie lifetimes are configurable via `ACCESS_COOKIE_MAX_AGE` and `REFRESH_COOKI
 ## Admin API
 
 `ADMIN_API_KEY` enables admin endpoints (`/api/admin/datasets`, etc.). Required for managing the dataset catalog (create/list/update/delete datasets and datasources) without going through Keycloak admin role.
+
+## Post-migration backfill: obs facet values
+
+After deploying the dataset-facet-values migration, every existing `DatasetMetadata` row has `obs_facets` NULL, so `/api/datasets` reports no facets for the whole catalogue until a refresh runs. Run `POST /api/admin/datasets/metadata/refresh` with `{"only_stale": false}` once after deploying to populate facet values for all existing datasets.

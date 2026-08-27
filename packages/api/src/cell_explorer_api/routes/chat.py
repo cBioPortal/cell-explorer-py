@@ -30,6 +30,7 @@ from cell_explorer_api.db.models import (
     Dataset,
     utcnow,
 )
+from cell_explorer_api.schemas.obs import ObsColumnInfo
 from cell_explorer_api.services.access import compute_chat_permission
 from cell_explorer_api.services.chat_session import (
     AccessDeniedError,
@@ -41,6 +42,7 @@ from cell_explorer_api.services.chat_session import (
     assert_chat_access,
     make_chat_agent,
 )
+from cell_explorer_api.services.facets import resolve_facet
 from cell_explorer_api.services.threads import (
     ThreadAccessDeniedError,
     ThreadNotFoundError,
@@ -115,13 +117,6 @@ class TurnRequest(BaseModel):
                     f"messages[{i}].role must be {expected!r} (alternating from user)"
                 )
         return v
-
-
-class ObsColumnInfo(BaseModel):
-    name: str
-    dtype: Literal["categorical", "numeric", "string"]
-    cardinality: int | None = None
-    values: list[str] | None = None
 
 
 class ChatPermissionResponse(BaseModel):
@@ -309,6 +304,7 @@ async def get_chat_context(
                 dtype=c.dtype,
                 cardinality=c.cardinality,
                 values=c.values,
+                facet=resolve_facet(c.name),
             )
             for c in ctx.obs_columns
         ],

@@ -327,6 +327,33 @@
         }
       }
     },
+    "/api/admin/facets/unmapped": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Unmapped Columns",
+        "description": "Obs columns that matched no facet definition, most common first.\n\nAn unmapped column is a dataset quietly missing a facet it should have.\nSurfacing it is what turns \"add an alias\" into a decision someone can make,\nrather than a silence nobody notices.",
+        "operationId": "list_unmapped_columns_api_admin_facets_unmapped_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnmappedFacetsResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/admin/datasets": {
       "get": {
         "tags": [
@@ -2079,7 +2106,7 @@
           },
           "obs_columns": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ObsColumnInfo"
             },
             "type": "array",
             "title": "Obs Columns"
@@ -2195,7 +2222,7 @@
           },
           "obs_columns": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ObsColumnInfo"
             },
             "type": "array",
             "title": "Obs Columns"
@@ -2776,6 +2803,17 @@
               }
             ],
             "title": "Values"
+          },
+          "facet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Facet"
           }
         },
         "type": "object",
@@ -2783,7 +2821,8 @@
           "name",
           "dtype"
         ],
-        "title": "ObsColumnInfo"
+        "title": "ObsColumnInfo",
+        "description": "One obs column as described to API callers.\n\n`name` is always the column's real name in the file. `facet` is the\ncanonical facet it was resolved to, or None when it matched no definition \u2014\nthe interpretation, kept separate from the fact.\n\n`values` and `cardinality` are produced by two different paths with\ndifferent limits, not one shared computation: the catalogue\n(`/api/datasets`) serves values harvested and capped at\n`FACET_VALUE_CAP` (100) at store-discovery time, while chat\n(`/api/chat/{slug}/context`) derives them live from the open store under\nits own separate cap. The two routes can legitimately disagree \u2014 e.g. a\ncolumn may report values on one route and not the other, or ontology\ncolumns may appear on chat's response but never the catalogue's. Do not\nassume the two routes describe the same column identically."
       },
       "RefreshResult": {
         "properties": {
@@ -3006,6 +3045,40 @@
           "messages"
         ],
         "title": "TurnRequest"
+      },
+      "UnmappedColumn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "dataset_count": {
+            "type": "integer",
+            "title": "Dataset Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "dataset_count"
+        ],
+        "title": "UnmappedColumn"
+      },
+      "UnmappedFacetsResponse": {
+        "properties": {
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/UnmappedColumn"
+            },
+            "type": "array",
+            "title": "Columns"
+          }
+        },
+        "type": "object",
+        "required": [
+          "columns"
+        ],
+        "title": "UnmappedFacetsResponse"
       },
       "User": {
         "properties": {
