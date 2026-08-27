@@ -42,6 +42,7 @@ from cell_explorer_api.services.chat_session import (
     assert_chat_access,
     make_chat_agent,
 )
+from cell_explorer_api.services.facets import resolve_facet
 from cell_explorer_api.services.threads import (
     ThreadAccessDeniedError,
     ThreadNotFoundError,
@@ -303,6 +304,7 @@ async def get_chat_context(
                 dtype=c.dtype,
                 cardinality=c.cardinality,
                 values=c.values,
+                facet=resolve_facet(c.name),
             )
             for c in ctx.obs_columns
         ],

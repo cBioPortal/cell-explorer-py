@@ -109,10 +109,31 @@ def test_get_context_happy_path(seeded_app):
     assert data["n_var"] == 50
     assert data["obs_columns"] == [
         {"name": "cell_type", "dtype": "categorical", "cardinality": 5,
-         "values": ["T", "B", "M", "NK", "Mono"], "facet": None},
+         "values": ["T", "B", "M", "NK", "Mono"], "facet": "cell_type"},
     ]
     assert data["embedding_keys"] == ["X_umap"]
     assert data["available_tools"] == ["get_dataset_schema"]
+
+
+def test_get_context_resolves_facet_for_a_known_column(seeded_app):
+    """The chat context route resolves `facet` the same way the catalogue
+    does — a column named `tissue` must carry facet="tissue", not None."""
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app)
+
+    fake = _FakeChatAgent(ctx=_FakeDatasetCtx(
+        obs_columns=[_FakeObsCol(name="tissue", values=["lung", "liver"])],
+    ))
+
+    async def _make_agent(**_):
+        return fake
+
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        response = client.get("/api/chat/public-atlas/context")
+
+    assert response.status_code == 200, response.text
+    cols = {c["name"]: c for c in response.json()["obs_columns"]}
+    assert cols["tissue"]["facet"] == "tissue"
 
 
 def test_get_context_anonymous_does_not_401(seeded_app):
