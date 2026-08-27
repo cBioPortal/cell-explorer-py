@@ -76,6 +76,21 @@ async def seeded_app(app):
             dataset_id=ids["partial"], n_obs=42, fetched_at=_utcnow(),
             status="error", error="partial write",
         ))
+        session.add(Dataset(
+            datasource_id=ds.id, name="No Facets", slug="no-facets",
+            path="no-facets.zarr", is_public=True,
+        ))
+        await session.flush()
+        no_facets_id = (
+            await session.exec(select(Dataset).where(Dataset.slug == "no-facets"))
+        ).first().id
+        session.add(DatasetMetadata(
+            dataset_id=no_facets_id, n_obs=8, n_vars=3, zarr_version=3,
+            obsm_keys=[], obs_columns=["tissue", "n_counts"], var_columns=["feature_name"],
+            layers=[], x_dtype="float32", x_encoding="array",
+            fetched_at=_utcnow(), status="ok",
+            obs_facets={},
+        ))
         await session.commit()
     app.state.db_engine = engine
     return app
@@ -160,6 +175,19 @@ def test_name_is_the_real_column_not_the_canonical_key(seeded_app):
 def test_numeric_columns_carry_no_values(seeded_app):
     cols = _cols(TestClient(seeded_app), "harvested")
     assert cols["n_counts"]["values"] is None
+    assert cols["n_counts"]["facet"] is None
+
+
+def test_empty_obs_facets_falls_back_to_bare_column_list(seeded_app):
+    # A row with empty obs_facets (e.g. harvested from a store with no
+    # consolidated metadata) must still report its obs_columns, resolved as
+    # ObsColumnInfo objects — not silently drop them.
+    cols = _cols(TestClient(seeded_app), "no-facets")
+    assert set(cols.keys()) == {"tissue", "n_counts"}
+    assert cols["tissue"] == {
+        "name": "tissue", "dtype": "string", "cardinality": None,
+        "values": None, "facet": "tissue",
+    }
     assert cols["n_counts"]["facet"] is None
 
 
