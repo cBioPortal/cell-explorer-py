@@ -51,4 +51,23 @@ Cookie lifetimes are configurable via `ACCESS_COOKIE_MAX_AGE` and `REFRESH_COOKI
 
 ## Post-migration backfill: obs facet values
 
-After deploying the dataset-facet-values migration, every existing `DatasetMetadata` row has `obs_facets` NULL, so `/api/datasets` reports no facets for the whole catalogue until a refresh runs. Run `POST /api/admin/datasets/metadata/refresh` with `{"only_stale": false}` once after deploying to populate facet values for all existing datasets.
+After deploying the dataset-facet-values migration, every existing `DatasetMetadata` row has `obs_facets` NULL, so `/api/datasets` reports no facets for the whole catalogue until a refresh runs.
+
+Run this once after deploying, and re-run it until `refreshed` comes back at or near zero:
+
+```bash
+curl -s -X POST https://cell-explorer.cbioportal.org/api/admin/datasets/metadata/refresh \
+  -H "Authorization: Bearer $ADMIN_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"only_stale": true}'
+```
+
+**Use `only_stale: true`, not `false`.** For a backfill the two select the same datasets — nothing has been harvested, so everything is stale — but `true` is resumable and `false` is not. The sweep commits per dataset and a successful harvest sets `fetched_at`, so a re-run skips what already succeeded and continues from where it stopped. That matters because the sweep is sequential and takes roughly two seconds per dataset, which can exceed an ingress idle timeout: the request returns 504 while the work continues and persists server-side. Re-running converges. `only_stale: false` re-harvests everything on every attempt and never converges.
+
+Reach for `only_stale: false` only when you deliberately want to re-read datasets whose metadata is already fresh — after fixing an extractor bug, for example.
+
+Two alternatives that avoid the gateway timeout entirely, if you want the whole per-dataset report in one response:
+
+- `kubectl exec` into the pod and curl `http://localhost:8000`, which also keeps `ADMIN_API_KEY` inside the cluster since it resolves from the pod's own environment.
+- Call `POST /api/admin/datasets/{slug}/metadata/refresh` per dataset in a loop. Each call is short, and you see progress as it goes.
+
+Expect a small number of `status: "error"` results. Datasets whose store cannot be read are recorded as errors and do not fail the sweep.
