@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # The image bundles the frontend, cloned from cbioportal-cell-explorer at
+  # build time. A frontend-only change never touches this repo, so nothing
+  # would rebuild it. Dispatching gets a fresh run id, which busts
+  # FRONTEND_CACHE_BUST and forces a current clone — re-running an existing run
+  # would not, since the run id is unchanged and the clone layer stays cached.
+  workflow_dispatch:
 
 jobs:
   test:
