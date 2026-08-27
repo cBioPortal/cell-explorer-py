@@ -106,6 +106,14 @@ async def store_harvest_result(
         row.obsm_keys = list(md.obsm_keys)
         row.obs_columns = list(md.obs_columns)
         row.var_columns = list(md.var_columns)
+        row.obs_facets = {
+            name: {
+                "dtype": facet.dtype,
+                "cardinality": facet.cardinality,
+                "values": list(facet.values) if facet.values is not None else None,
+            }
+            for name, facet in md.obs_facets.items()
+        }
         row.layers = list(md.layers)
         row.x_dtype = md.x_dtype
         row.x_encoding = md.x_encoding
@@ -120,6 +128,7 @@ async def store_harvest_result(
             row.obsm_keys = []
             row.obs_columns = []
             row.var_columns = []
+            row.obs_facets = {}
             row.layers = []
             row.x_dtype = None
             row.x_encoding = None
