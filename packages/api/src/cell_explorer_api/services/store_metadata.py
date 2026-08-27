@@ -121,7 +121,14 @@ def _discover_obs_facets(zarr_store: ZarrStore, obs_columns: list[str]) -> dict[
     Cardinality comes from the categories node's shape, so the cap can be
     applied before any read: a 927,205-category column costs nothing to skip.
     """
-    cm = zarr_store.consolidated_metadata or {}
+    cm = zarr_store.consolidated_metadata
+    if not cm:
+        # No consolidated metadata document means we have not looked at any
+        # column, not that every column is a plain string. Recording
+        # ObsFacet("string", None, None) here would be a fabricated fact
+        # (we know its dtype) rather than an absent one (we don't). An empty
+        # dict correctly says "unknown", matching the spec's error table.
+        return {}
     version = zarr_store.zarr_version
     facets: dict[str, ObsFacet] = {}
 

@@ -119,6 +119,20 @@ async def test_records_numeric_columns_in_a_v2_store_too(zarr_server):
     assert numeric.values is None
 
 
+async def test_no_consolidated_metadata_yields_empty_obs_facets(zarr_server):
+    # A store lacking both zarr.json consolidated metadata and .zmetadata has
+    # consolidated_metadata == None. Fabricating dtype "string" for every
+    # column here would be a false positive claim ("looked, it's a string")
+    # rather than the true state ("never looked"). The harvest must still
+    # succeed on counts even though obs_facets comes back empty.
+    store = await ZarrStore.open(f"{zarr_server}/tiny_v3.zarr")
+    store._consolidated_metadata = None
+    md = await extract_store_metadata(store)
+    assert md.obs_facets == {}
+    assert md.n_obs == 12
+    assert md.n_vars == 5
+
+
 async def test_a_failing_values_read_does_not_fail_the_harvest(zarr_server, monkeypatch):
     # One unreadable column must cost that column, not the dataset.
     from cell_explorer_api.services import store_metadata as sm
