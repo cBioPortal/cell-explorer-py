@@ -76,11 +76,22 @@ async def test_reads_values_from_a_v2_store_too(zarr_server):
 
 async def test_reports_cardinality_but_no_values_over_the_cap(zarr_server, monkeypatch):
     from cell_explorer_api.services import store_metadata as sm
+
+    calls: list[str] = []
+    real = sm._read_categories
+
+    async def spy(store, column):
+        calls.append(column)
+        return await real(store, column)
+
+    monkeypatch.setattr(sm, "_read_categories", spy)
     monkeypatch.setattr(sm, "FACET_VALUE_CAP", 2)
     md = await _extract(zarr_server, "tiny_v3.zarr")
-    col = md.obs_facets["tissue"]
-    assert col.cardinality == 3, "cardinality is free from metadata, always reported"
-    assert col.values is None, "over the cap, values must not be read"
+
+    assert md.obs_facets["tissue"].cardinality == 3, "cardinality is free from metadata, always reported"
+    assert md.obs_facets["tissue"].values is None, "over the cap, values must not be read"
+    assert "tissue" not in calls, "an over-cap column must never be read at all"
+    assert "cell_type" in calls, "the spy is wired up and under-cap columns still read"
 
 
 async def test_excludes_ontology_term_id_columns(zarr_server):
@@ -92,6 +103,16 @@ async def test_excludes_ontology_term_id_columns(zarr_server):
 
 async def test_records_numeric_columns_without_values(zarr_server):
     md = await _extract(zarr_server, "tiny_v3.zarr")
+    numeric = md.obs_facets["n_counts"]
+    assert numeric.dtype == "numeric"
+    assert numeric.cardinality is None
+    assert numeric.values is None
+
+
+async def test_records_numeric_columns_in_a_v2_store_too(zarr_server):
+    # v2's dtype lives on .zarray, not .zattrs — a regression here silently
+    # reports every v2 numeric column as "string" instead of "numeric".
+    md = await _extract(zarr_server, "tiny_v2.zarr")
     numeric = md.obs_facets["n_counts"]
     assert numeric.dtype == "numeric"
     assert numeric.cardinality is None

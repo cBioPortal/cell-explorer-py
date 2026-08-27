@@ -94,8 +94,14 @@ def _categories_key(zarr_version: int, column: str) -> str:
     return base if zarr_version == 3 else f"{base}/.zarray"
 
 
-def _column_attrs_key(zarr_version: int, column: str) -> str:
-    return f"obs/{column}" if zarr_version == 3 else f"obs/{column}/.zattrs"
+def _column_dtype_key(zarr_version: int, column: str) -> str:
+    """Consolidated-metadata key holding a non-categorical column's dtype.
+
+    v3 carries `data_type` on the array node itself. v2 carries `dtype` on
+    `.zarray` — `.zattrs` holds only `encoding-type`/`encoding-version`, never
+    the dtype, so it must not be used here.
+    """
+    return f"obs/{column}" if zarr_version == 3 else f"obs/{column}/.zarray"
 
 
 def _node_shape(node: dict | None) -> list | None:
@@ -129,7 +135,7 @@ def _discover_obs_facets(zarr_store: ZarrStore, obs_columns: list[str]) -> dict[
             facets[column] = ObsFacet("categorical", cardinality, None)
             continue
 
-        node = cm.get(_column_attrs_key(version, column)) or {}
+        node = cm.get(_column_dtype_key(version, column)) or {}
         raw = node.get("data_type") or node.get("dtype") or ""
         numeric = str(raw).lstrip("|<>").startswith(("i", "u", "f", "b"))
         facets[column] = ObsFacet("numeric" if numeric else "string", None, None)
