@@ -55,8 +55,3 @@ def resolve_facet_with(
 def resolve_facet(column_name: str) -> str | None:
     """Resolve against the module's definitions."""
     return resolve_facet_with(FACET_DEFINITIONS, column_name)
-
-
-def unmapped_columns(stored: dict[str, dict]) -> list[str]:
-    """Column names in a stored facet dict that matched no definition."""
-    return [name for name in stored if resolve_facet(name) is None]
