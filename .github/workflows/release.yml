@@ -26,14 +26,14 @@ jobs:
 
       - name: Release cell-explorer-api
         id: release-api
-        uses: python-semantic-release/python-semantic-release@v10.5.3
+        uses: python-semantic-release/python-semantic-release@v10.6.1
         with:
           directory: packages/api
           github_token: ${{ secrets.GITHUB_TOKEN }}
           force: ${{ inputs.force_level }}
 
       - name: Publish cell-explorer-api GitHub Release
-        uses: python-semantic-release/publish-action@v10.5.3
+        uses: python-semantic-release/publish-action@v10.6.1
         if: steps.release-api.outputs.released == 'true'
         with:
           directory: packages/api
@@ -42,14 +42,14 @@ jobs:
 
       - name: Release cell2zarr
         id: release-cell2zarr
-        uses: python-semantic-release/python-semantic-release@v10.5.3
+        uses: python-semantic-release/python-semantic-release@v10.6.1
         with:
           directory: packages/cell2zarr
           github_token: ${{ secrets.GITHUB_TOKEN }}
           force: ${{ inputs.force_level }}
 
       - name: Publish cell2zarr GitHub Release
-        uses: python-semantic-release/publish-action@v10.5.3
+        uses: python-semantic-release/publish-action@v10.6.1
         if: steps.release-cell2zarr.outputs.released == 'true'
         with:
           directory: packages/cell2zarr
