@@ -327,6 +327,33 @@
         }
       }
     },
+    "/api/admin/facets/unmapped": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Unmapped Columns",
+        "description": "Obs columns that matched no facet definition, most common first.\n\nAn unmapped column is a dataset quietly missing a facet it should have.\nSurfacing it is what turns \"add an alias\" into a decision someone can make,\nrather than a silence nobody notices.",
+        "operationId": "list_unmapped_columns_api_admin_facets_unmapped_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnmappedFacetsResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/admin/datasets": {
       "get": {
         "tags": [
@@ -3018,6 +3045,40 @@
           "messages"
         ],
         "title": "TurnRequest"
+      },
+      "UnmappedColumn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "dataset_count": {
+            "type": "integer",
+            "title": "Dataset Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "dataset_count"
+        ],
+        "title": "UnmappedColumn"
+      },
+      "UnmappedFacetsResponse": {
+        "properties": {
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/UnmappedColumn"
+            },
+            "type": "array",
+            "title": "Columns"
+          }
+        },
+        "type": "object",
+        "required": [
+          "columns"
+        ],
+        "title": "UnmappedFacetsResponse"
       },
       "User": {
         "properties": {

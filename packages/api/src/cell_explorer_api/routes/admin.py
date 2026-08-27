@@ -1,6 +1,7 @@
 """Admin CRUD endpoints for datasources and datasets."""
 
 import uuid
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -21,6 +22,7 @@ from cell_explorer_api.db.models import (
 from cell_explorer_api.routes.datasets import _obs_columns_response
 from cell_explorer_api.schemas.obs import ObsColumnInfo
 from cell_explorer_api.services.default_view import DefaultViewError, validate_default_view
+from cell_explorer_api.services.facets import resolve_facet
 from cell_explorer_api.services.metadata_harvest import harvest_and_store
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
@@ -175,6 +177,18 @@ class BulkRefreshResponse(BaseModel):
     results: list[RefreshResult]
 
 
+# --- Facet schemas ---
+
+
+class UnmappedColumn(BaseModel):
+    name: str
+    dataset_count: int
+
+
+class UnmappedFacetsResponse(BaseModel):
+    columns: list[UnmappedColumn]
+
+
 DEFAULT_STALE_HOURS = 24
 
 
@@ -284,6 +298,30 @@ async def update_datasource(
         base_url=ds.base_url,
         internal_base_url=ds.internal_base_url,
         credential_ref=ds.credential_ref,
+    )
+
+
+# --- Facet routes ---
+
+
+@router.get("/facets/unmapped")
+async def list_unmapped_columns(
+    db: AsyncSession = Depends(get_db),
+) -> UnmappedFacetsResponse:
+    """Obs columns that matched no facet definition, most common first.
+
+    An unmapped column is a dataset quietly missing a facet it should have.
+    Surfacing it is what turns "add an alias" into a decision someone can make,
+    rather than a silence nobody notices.
+    """
+    rows = (await db.exec(select(DatasetMetadata))).all()
+    counts: Counter[str] = Counter()
+    for row in rows:
+        for name in row.obs_facets or {}:
+            if resolve_facet(name) is None:
+                counts[name] += 1
+    return UnmappedFacetsResponse(
+        columns=[UnmappedColumn(name=n, dataset_count=c) for n, c in counts.most_common()]
     )
 
 
