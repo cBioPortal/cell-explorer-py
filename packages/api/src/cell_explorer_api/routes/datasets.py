@@ -11,8 +11,10 @@ from cell_explorer_api.auth.models import User
 from cell_explorer_api.auth.optional import optional_auth
 from cell_explorer_api.db import get_db
 from cell_explorer_api.db.models import Collection, Dataset, DatasetMetadata, Datasource
+from cell_explorer_api.schemas.obs import ObsColumnInfo
 from cell_explorer_api.services.access import user_can_access
 from cell_explorer_api.services.credentials import CredentialError, mint_credentials
+from cell_explorer_api.services.facets import resolve_facet
 
 router = APIRouter(tags=["datasets"])
 
@@ -34,7 +36,7 @@ class DatasetMetadataResponse(BaseModel):
     n_vars: int
     zarr_version: int
     obsm_keys: list[str]
-    obs_columns: list[str]
+    obs_columns: list[ObsColumnInfo]
     var_columns: list[str]
     layers: list[str]
     x_dtype: str | None
@@ -56,6 +58,34 @@ class DatasetResponse(BaseModel):
 
 class DatasetListResponse(BaseModel):
     datasets: list[DatasetResponse]
+
+
+def _obs_columns_response(metadata: DatasetMetadata) -> list[ObsColumnInfo]:
+    """Resolve stored facets into described columns.
+
+    Stored data is keyed by the real column name and carries no interpretation.
+    The canonical facet is attached here, at read time, so correcting a mapping
+    takes effect on the next request rather than requiring a re-harvest.
+
+    Falls back to the bare column list for rows harvested before facets existed,
+    so an un-refreshed dataset still reports which columns it has.
+    """
+    facets = metadata.obs_facets or {}
+    if not facets:
+        return [
+            ObsColumnInfo(name=name, dtype="string", facet=resolve_facet(name))
+            for name in (metadata.obs_columns or [])
+        ]
+    return [
+        ObsColumnInfo(
+            name=name,
+            dtype=facet.get("dtype", "string"),
+            cardinality=facet.get("cardinality"),
+            values=facet.get("values"),
+            facet=resolve_facet(name),
+        )
+        for name, facet in facets.items()
+    ]
 
 
 def _metadata_to_response(
@@ -91,7 +121,7 @@ def _metadata_to_response(
         n_vars=metadata.n_vars,
         zarr_version=metadata.zarr_version,
         obsm_keys=metadata.obsm_keys,
-        obs_columns=metadata.obs_columns,
+        obs_columns=_obs_columns_response(metadata),
         var_columns=metadata.var_columns,
         layers=metadata.layers,
         x_dtype=metadata.x_dtype,

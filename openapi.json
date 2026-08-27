@@ -2079,7 +2079,7 @@
           },
           "obs_columns": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ObsColumnInfo"
             },
             "type": "array",
             "title": "Obs Columns"
@@ -2195,7 +2195,7 @@
           },
           "obs_columns": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ObsColumnInfo"
             },
             "type": "array",
             "title": "Obs Columns"
@@ -2776,6 +2776,17 @@
               }
             ],
             "title": "Values"
+          },
+          "facet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Facet"
           }
         },
         "type": "object",
@@ -2783,7 +2794,8 @@
           "name",
           "dtype"
         ],
-        "title": "ObsColumnInfo"
+        "title": "ObsColumnInfo",
+        "description": "One obs column as described to API callers.\n\n`name` is always the column's real name in the file. `facet` is the\ncanonical facet it was resolved to, or None when it matched no definition \u2014\nthe interpretation, kept separate from the fact."
       },
       "RefreshResult": {
         "properties": {

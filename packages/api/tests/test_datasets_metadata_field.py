@@ -56,6 +56,13 @@ async def seeded_app(app):
             obsm_keys=["X_umap"], obs_columns=["cell_type"], var_columns=["feature_name"],
             layers=["counts"], x_dtype="float32", x_encoding="array",
             fetched_at=_utcnow(), status="ok",
+            obs_facets={
+                "tissue": {"dtype": "categorical", "cardinality": 3,
+                           "values": ["lung", "liver", "brain"]},
+                "organ_unknown": {"dtype": "categorical", "cardinality": 2,
+                                  "values": ["a", "b"]},
+                "n_counts": {"dtype": "numeric", "cardinality": None, "values": None},
+            },
         ))
         session.add(DatasetMetadata(
             dataset_id=ids["stale"], n_obs=99, n_vars=7, zarr_version=2,
@@ -120,3 +127,46 @@ def test_single_dataset_route_includes_metadata(seeded_app):
     res = TestClient(seeded_app).get("/api/datasets/harvested")
     assert res.status_code == 200
     assert res.json()["metadata"]["n_obs"] == 12
+
+
+def _cols(client: TestClient, slug: str) -> dict:
+    datasets = _by_slug(client)
+    return {c["name"]: c for c in datasets[slug]["metadata"]["obs_columns"]}
+
+
+def test_obs_columns_are_objects_not_strings(seeded_app):
+    cols = _cols(TestClient(seeded_app), "harvested")
+    assert cols["tissue"]["dtype"] == "categorical"
+    assert cols["tissue"]["values"] == ["lung", "liver", "brain"]
+
+
+def test_a_known_column_carries_its_canonical_facet(seeded_app):
+    cols = _cols(TestClient(seeded_app), "harvested")
+    assert cols["tissue"]["facet"] == "tissue"
+
+
+def test_an_unmapped_column_is_served_with_a_null_facet(seeded_app):
+    # It must still appear — absent would mean "no such column", which is false.
+    cols = _cols(TestClient(seeded_app), "harvested")
+    assert cols["organ_unknown"]["facet"] is None
+    assert cols["organ_unknown"]["values"] == ["a", "b"]
+
+
+def test_name_is_the_real_column_not_the_canonical_key(seeded_app):
+    cols = _cols(TestClient(seeded_app), "harvested")
+    assert "tissue" in cols
+
+
+def test_numeric_columns_carry_no_values(seeded_app):
+    cols = _cols(TestClient(seeded_app), "harvested")
+    assert cols["n_counts"]["values"] is None
+    assert cols["n_counts"]["facet"] is None
+
+
+def test_status_and_error_still_never_exposed(seeded_app):
+    body = TestClient(seeded_app).get("/api/datasets").text
+    assert "internal.example.com" not in body
+    for dataset in TestClient(seeded_app).get("/api/datasets").json()["datasets"]:
+        md = dataset["metadata"]
+        if md is not None:
+            assert "status" not in md and "error" not in md

@@ -18,6 +18,8 @@ from cell_explorer_api.db.models import (
     Datasource,
     DatasourceType,
 )
+from cell_explorer_api.routes.datasets import _obs_columns_response
+from cell_explorer_api.schemas.obs import ObsColumnInfo
 from cell_explorer_api.services.default_view import DefaultViewError, validate_default_view
 from cell_explorer_api.services.metadata_harvest import harvest_and_store
 
@@ -126,7 +128,7 @@ class DatasetMetadataAdminResponse(BaseModel):
     n_vars: int | None
     zarr_version: int | None
     obsm_keys: list[str]
-    obs_columns: list[str]
+    obs_columns: list[ObsColumnInfo]
     var_columns: list[str]
     layers: list[str]
     x_dtype: str | None
@@ -198,7 +200,7 @@ def _dataset_to_admin_response(
                 n_vars=metadata.n_vars,
                 zarr_version=metadata.zarr_version,
                 obsm_keys=metadata.obsm_keys,
-                obs_columns=metadata.obs_columns,
+                obs_columns=_obs_columns_response(metadata),
                 var_columns=metadata.var_columns,
                 layers=metadata.layers,
                 x_dtype=metadata.x_dtype,
