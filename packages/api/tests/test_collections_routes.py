@@ -1,17 +1,29 @@
 """Public collection endpoints and their derived visibility."""
 
+from datetime import datetime, timezone
+
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import create_async_engine
-from sqlmodel import SQLModel
+from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from cell_explorer_api.auth.models import User
 from cell_explorer_api.auth.optional import optional_auth
 from cell_explorer_api.config import Settings
-from cell_explorer_api.db.models import Collection, Dataset, Datasource, DatasourceType
+from cell_explorer_api.db.models import (
+    Collection,
+    Dataset,
+    DatasetMetadata,
+    Datasource,
+    DatasourceType,
+)
 from cell_explorer_api.main import create_app
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 @pytest.fixture()
@@ -55,6 +67,15 @@ async def seeded_app(app):
                     path="d.zarr", is_public=True),
         ])
         await session.commit()
+
+        dataset_ids = {d.slug: d.id for d in (await session.exec(select(Dataset))).all()}
+        session.add(DatasetMetadata(
+            dataset_id=dataset_ids["public-a"], n_obs=12, n_vars=5, zarr_version=3,
+            obsm_keys=["X_umap"], obs_columns=["cell_type"], var_columns=["feature_name"],
+            layers=["counts"], x_dtype="float32", x_encoding="array",
+            fetched_at=_utcnow(), status="ok",
+        ))
+        await session.commit()
     app.state.db_engine = engine
     return app
 
@@ -79,6 +100,18 @@ def test_collection_detail_returns_metadata_and_accessible_datasets(seeded_app):
     assert body["publication_url"] == "https://example.org/paper"
     assert body["publication_citation"] == "Author et al. 2025"
     assert [d["slug"] for d in body["datasets"]] == ["public-a"]
+
+
+def test_collection_detail_carries_dataset_metadata(seeded_app):
+    client = TestClient(seeded_app)
+    body = client.get("/api/collections/open-study").json()
+    dataset = next(d for d in body["datasets"] if d["slug"] == "public-a")
+    assert dataset["metadata"] is not None, (
+        "the collection page renders the same table as the catalogue and needs the same counts"
+    )
+    assert dataset["metadata"]["n_obs"] == 12, (
+        "the collection page renders the same table as the catalogue and needs the same counts"
+    )
 
 
 def test_fully_gated_collection_is_404_not_403(seeded_app):

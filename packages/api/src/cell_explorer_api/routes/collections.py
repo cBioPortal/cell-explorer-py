@@ -15,7 +15,7 @@ from sqlmodel import select
 from cell_explorer_api.auth.models import User
 from cell_explorer_api.auth.optional import optional_auth
 from cell_explorer_api.db import get_db
-from cell_explorer_api.db.models import Collection, Dataset, Datasource
+from cell_explorer_api.db.models import Collection, Dataset, DatasetMetadata, Datasource
 from cell_explorer_api.routes.datasets import DatasetResponse, _dataset_to_response
 from cell_explorer_api.services.access import user_can_access
 
@@ -41,7 +41,7 @@ class CollectionDetail(CollectionSummary):
 
 async def _accessible_by_collection(
     db: AsyncSession, user: User | None, *, collection_id: uuid.UUID | None = None
-) -> dict[uuid.UUID, list[Dataset]]:
+) -> dict[uuid.UUID, list[tuple[Dataset, DatasetMetadata | None]]]:
     """Group the caller's accessible datasets by collection id.
 
     One query for every dataset, then grouped in Python -- the same shape
@@ -52,20 +52,28 @@ async def _accessible_by_collection(
     collection would run the same full-table scan as an unknown slug takes
     zero of, making the two 404s distinguishable by timing even though their
     bodies are identical.
+
+    Metadata is outer-joined in the same query, never fetched per dataset, so
+    the collection detail route can render the same table as the catalogue.
     """
-    statement = select(Dataset, Datasource, Collection).join(Datasource).outerjoin(Collection)
+    statement = (
+        select(Dataset, Datasource, Collection, DatasetMetadata)
+        .join(Datasource)
+        .outerjoin(Collection)
+        .outerjoin(DatasetMetadata, DatasetMetadata.dataset_id == Dataset.id)
+    )
     if collection_id is not None:
         statement = statement.where(Dataset.collection_id == collection_id)
     result = await db.exec(statement)
-    grouped: dict[uuid.UUID, list[Dataset]] = {}
-    for dataset, datasource, collection in result.all():
+    grouped: dict[uuid.UUID, list[tuple[Dataset, DatasetMetadata | None]]] = {}
+    for dataset, datasource, collection, metadata in result.all():
         if dataset.collection_id is None:
             continue
         dataset.datasource = datasource
         dataset.collection = collection
         if not user_can_access(dataset, user=user):
             continue
-        grouped.setdefault(dataset.collection_id, []).append(dataset)
+        grouped.setdefault(dataset.collection_id, []).append((dataset, metadata))
     return grouped
 
 
@@ -118,5 +126,5 @@ async def get_collection(
     summary = _summary(collection, len(datasets))
     return CollectionDetail(
         **summary.model_dump(),
-        datasets=[_dataset_to_response(dataset) for dataset in datasets],
+        datasets=[_dataset_to_response(dataset, metadata) for dataset, metadata in datasets],
     )
