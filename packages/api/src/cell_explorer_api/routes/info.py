@@ -14,6 +14,8 @@ class InfoResponse(BaseModel):
     git_sha: str | None
     auth_enabled: bool
     chat_enabled: bool
+    # Null when unset, which the frontend reads as "load no analytics".
+    google_analytics_id: str | None
 
 
 @router.get("/info")
@@ -25,4 +27,5 @@ async def info(request: Request) -> InfoResponse:
         git_sha=settings.git_sha,
         auth_enabled=settings.auth_enabled,
         chat_enabled=settings.chat_enabled,
+        google_analytics_id=settings.google_analytics_id,
     )

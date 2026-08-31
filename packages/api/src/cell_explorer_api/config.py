@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     environment: str = "development"
     git_sha: str | None = None
 
+    # GA4 measurement ID (G-XXXXXXXXXX), served to the frontend by /api/info.
+    # Set per environment rather than baked into the frontend build, because one
+    # image is deployed to several environments. Unset means untracked: the
+    # frontend loads no analytics script at all. Not a secret — a measurement id
+    # is public in the page source of every site that uses one.
+    google_analytics_id: str | None = None
+
     # App data directory
     app_data_dir: Path = Path("./data")
 
