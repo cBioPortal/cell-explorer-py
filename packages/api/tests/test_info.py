@@ -65,3 +65,19 @@ def test_info_includes_chat_enabled_true():
 def test_info_chat_disabled_by_default(client: TestClient):
     response = client.get("/api/info")
     assert response.json()["chat_enabled"] is False
+
+
+def test_info_includes_google_analytics_id_when_configured():
+    settings = Settings(google_analytics_id="G-ABC1234567")
+    app = create_app(settings)
+    client = TestClient(app)
+    response = client.get("/api/info")
+    assert response.status_code == 200
+    assert response.json()["google_analytics_id"] == "G-ABC1234567"
+
+
+def test_info_google_analytics_id_is_null_by_default(client: TestClient):
+    # Unset means untracked. The frontend loads no script when this is null,
+    # which is also how the GitHub Pages build ends up untracked — it has no
+    # backend to ask.
+    assert client.get("/api/info").json()["google_analytics_id"] is None

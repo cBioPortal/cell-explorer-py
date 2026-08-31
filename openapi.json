@@ -2752,6 +2752,17 @@
           "chat_enabled": {
             "type": "boolean",
             "title": "Chat Enabled"
+          },
+          "google_analytics_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Google Analytics Id"
           }
         },
         "type": "object",
@@ -2760,7 +2771,8 @@
           "environment",
           "git_sha",
           "auth_enabled",
-          "chat_enabled"
+          "chat_enabled",
+          "google_analytics_id"
         ],
         "title": "InfoResponse"
       },
