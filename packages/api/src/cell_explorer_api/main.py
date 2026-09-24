@@ -126,6 +126,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # 1. API routes (highest precedence)
     app.include_router(router)
 
+    # 1b. Operator-supplied brand assets. Registered before the SPA catch-all so
+    # /brand/* resolves to the bundle rather than falling through to index.html.
+    if settings.brand_dir is not None and settings.brand_dir.is_dir():
+        app.mount(
+            "/brand",
+            StaticFiles(directory=str(settings.brand_dir)),
+            name="brand",
+        )
+
     # 2 & 3. Static serving (if configured)
     if settings.static_dir is not None:
         validated = validate_static_dir(settings.static_dir)
