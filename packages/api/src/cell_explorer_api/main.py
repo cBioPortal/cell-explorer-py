@@ -131,15 +131,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # 1b. Operator-supplied brand assets. Registered before the SPA catch-all so
     # /brand/* resolves to the bundle rather than falling through to index.html.
     #
-    # BRAND_DIR is never re-stat'd here: the load already stat'd it, and a
-    # second stat can raise EACCES where the first one warned, taking
-    # create_app down over an ordinary operator misconfiguration.
+    # Only the filenames brand.json actually resolved onto are served. BRAND_DIR
+    # is as often as not an operator's working directory, and a blanket mount
+    # would publish whatever else is sitting in it — a stray .env, a key, a
+    # draft asset — none of which the extension allowlist constrains, because
+    # that allowlist governs what brand.json may *reference*, not what the
+    # directory *contains*. The bundle decides; BRAND_DIR is never re-stat'd
+    # here, so the mount decision cannot diverge from the load decision (and
+    # cannot raise EACCES where the load warned).
     if brand_bundle.directory is not None:
-        app.mount(
-            "/brand",
-            StaticFiles(directory=str(brand_bundle.directory)),
-            name="brand",
-        )
+        brand_root = brand_bundle.directory
+        brand_assets = brand_bundle.asset_filenames
+
+        @app.get("/brand/{filename:path}", include_in_schema=False)
+        async def brand_asset(filename: str):
+            if filename not in brand_assets:
+                return JSONResponse(status_code=404, content={"detail": "Not found"})
+            # Resolved even though the name is a validated bare filename: it may
+            # still be a symlink pointing out of the bundle.
+            file = _resolve_static_file(brand_root, filename)
+            if file is None:
+                return JSONResponse(status_code=404, content={"detail": "Not found"})
+            return FileResponse(str(file))
 
     # 2 & 3. Static serving (if configured)
     if settings.static_dir is not None:

@@ -11,7 +11,11 @@ from cell_explorer_api.main import create_app
 def _brand_dir(tmp_path: Path) -> Path:
     brand_dir = tmp_path / "brand"
     brand_dir.mkdir()
-    (brand_dir / "brand.json").write_text(json.dumps({"name": "BTC"}))
+    # The logo is *referenced*, not merely present: only filenames brand.json
+    # resolves onto are served.
+    (brand_dir / "brand.json").write_text(
+        json.dumps({"name": "BTC", "logo": {"onDark": "logo-white.svg"}})
+    )
     (brand_dir / "logo-white.svg").write_text("<svg id='btc'/>")
     return brand_dir
 
@@ -75,6 +79,66 @@ def test_traversal_outside_brand_dir_is_refused(tmp_path: Path):
     response = client.get("/brand/%2e%2e/secret.txt")
     assert response.status_code != 200
     assert "do not serve me" not in response.text
+
+
+# --- Only referenced assets are served ------------------------------------
+
+
+def test_unreferenced_file_in_brand_dir_is_not_served(tmp_path: Path):
+    """BRAND_DIR is an operator directory; only what brand.json points at is web-reachable."""
+    brand_dir = _brand_dir(tmp_path)
+    (brand_dir / "notes.txt").write_text("internal planning notes")
+    (brand_dir / "draft.svg").write_text("<svg id='unshipped'/>")
+
+    client = TestClient(create_app(Settings(brand_dir=brand_dir)))
+
+    # Referenced: served.
+    assert client.get("/brand/logo-white.svg").status_code == 200
+
+    # Present but unreferenced: not served, whatever the extension.
+    for name, body in (("notes.txt", "internal"), ("draft.svg", "unshipped")):
+        response = client.get(f"/brand/{name}")
+        assert response.status_code == 404, name
+        assert body not in response.text
+
+
+def test_brand_json_itself_is_not_served(tmp_path: Path):
+    """The config is input to the server, not a public document."""
+    client = TestClient(create_app(Settings(brand_dir=_brand_dir(tmp_path))))
+
+    response = client.get("/brand/brand.json")
+    assert response.status_code == 404
+    assert "logo-white.svg" not in response.text
+
+
+def test_asset_referenced_but_missing_on_disk_is_not_served(tmp_path: Path):
+    """A filename dropped by the existence check never enters the served set."""
+    brand_dir = tmp_path / "brand"
+    brand_dir.mkdir()
+    (brand_dir / "brand.json").write_text(
+        json.dumps({"name": "BTC", "favicon": {"ico": "absent.ico"}})
+    )
+
+    client = TestClient(create_app(Settings(brand_dir=brand_dir)))
+    assert client.get("/brand/absent.ico").status_code == 404
+
+
+def test_symlink_out_of_brand_dir_is_refused(tmp_path: Path):
+    """A referenced name may still be a symlink pointing out of the bundle."""
+    brand_dir = tmp_path / "brand"
+    brand_dir.mkdir()
+    secret = tmp_path / "secret.svg"
+    secret.write_text("<svg id='do-not-serve-me'/>")
+    (brand_dir / "logo.svg").symlink_to(secret)
+    (brand_dir / "brand.json").write_text(
+        json.dumps({"name": "BTC", "logo": {"onDark": "logo.svg"}})
+    )
+
+    client = TestClient(create_app(Settings(brand_dir=brand_dir)))
+
+    response = client.get("/brand/logo.svg")
+    assert response.status_code == 404
+    assert "do-not-serve-me" not in response.text
 
 
 # --- An unreadable BRAND_DIR must not stop the app booting -----------------
