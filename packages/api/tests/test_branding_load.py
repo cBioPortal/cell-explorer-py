@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from cell_explorer_api.branding import DEFAULT_BRAND, load_brand, load_bundle
+from cell_explorer_api.branding import (
+    DEFAULT_BRAND,
+    _existing_asset,
+    load_brand,
+    load_bundle,
+)
 
 
 def _bundle(tmp_path: Path, config: dict, assets: tuple[str, ...] = ()) -> Path:
@@ -203,3 +208,40 @@ def test_bundle_asset_filenames_are_exactly_the_resolved_ones(tmp_path: Path):
     assert load_bundle(brand_dir).asset_filenames == frozenset(
         {"logo.svg", "btc.ico"}
     )
+
+
+# --- An over-long filename must not raise out of the load -----------------
+
+
+def test_overlong_asset_filename_degrades_the_field_not_the_load(
+    tmp_path: Path, caplog
+):
+    """A stat the OS refuses to answer (ENAMETOOLONG) used to escape load_bundle
+    and take create_app with it. The field drops; the rest of the brand stands."""
+    brand_dir = _bundle(
+        tmp_path,
+        {
+            "name": "BTC",
+            "logo": {"onDark": "a" * 5000 + ".svg", "onLight": "ok.svg"},
+        },
+        assets=("ok.svg",),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        bundle = load_bundle(brand_dir)
+
+    assert bundle.brand.name == "BTC"
+    assert bundle.brand.logo.on_dark is None
+    assert bundle.brand.logo.on_light == "ok.svg"
+    assert bundle.asset_filenames == frozenset({"ok.svg"})
+    assert any("onDark" in r.getMessage() for r in caplog.records)
+
+
+def test_existing_asset_guard_survives_a_stat_that_cannot_be_answered(
+    tmp_path: Path, caplog
+):
+    """The second layer, exercised directly: _asset's cap is what stops the
+    known trigger, so this is the only way to reach the guard behind it."""
+    with caplog.at_level(logging.WARNING):
+        assert _existing_asset(tmp_path, "a" * 5000 + ".svg") is None
+    assert any("Could not stat brand asset" in r.getMessage() for r in caplog.records)

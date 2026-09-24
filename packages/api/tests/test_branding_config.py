@@ -185,3 +185,35 @@ def test_invalid_favicon_filename_rejected():
     brand, warnings = _parse({"favicon": {"ico": "evil/../../../etc/passwd.ico"}})
     assert brand.favicon.ico is None
     assert any("ico" in w for w in warnings)
+
+
+# --- Filename length: a byte limit, not a character limit ------------------
+
+
+def test_overlong_asset_filename_rejected():
+    """Unbounded filenames reach a stat the OS refuses to answer (ENAMETOOLONG)."""
+    brand, warnings = _parse({"logo": {"onDark": "a" * 252 + ".svg"}})  # 256 bytes
+    assert brand.logo.on_dark is None
+    assert any("onDark" in w and "255 bytes" in w for w in warnings)
+
+
+def test_asset_filename_at_the_limit_accepted():
+    name = "a" * 251 + ".svg"  # 255 bytes exactly
+    assert len(name.encode("utf-8")) == 255
+    brand, warnings = _parse({"logo": {"onDark": name}})
+    assert brand.logo.on_dark == name
+    assert warnings == []
+
+
+def test_asset_filename_cap_counts_bytes_not_characters():
+    """The sneaky case: comfortably under 256 characters, over 255 bytes.
+
+    Each 'é' costs two bytes in UTF-8, so a 200-character name is 396 bytes and
+    a character-based cap would wave it through into the raising stat.
+    """
+    name = "é" * 196 + ".svg"  # 200 characters, 396 bytes
+    assert len(name) < 256 and len(name.encode("utf-8")) > 255
+
+    brand, warnings = _parse({"logo": {"onDark": name}})
+    assert brand.logo.on_dark is None
+    assert any("onDark" in w and "255 bytes" in w for w in warnings)

@@ -176,17 +176,17 @@ cBioPortal defaults below.
 | `title` (browser tab title) | string | 160 | `"{name} Cell Explorer"` |
 | `tagline` | string | 200 | `"Explore millions of cells in your browser."` |
 | `logoHref` | absolute `http(s)` URL | — | none (logo is not a link) |
-| `logo.onLight` | filename | — | none |
-| `logo.onDark` | filename | — | none |
+| `logo.onLight` | filename | 255 bytes | none |
+| `logo.onDark` | filename | 255 bytes | none |
 | `logo.alt` | string | 120 | the resolved `name` |
 | `colors.ink` | `#RRGGBB` | — | `"#0d2c48"` |
 | `colors.inkDeep` | `#RRGGBB` | — | none |
 | `colors.themeColor` | `#RRGGBB` | — | the operator's own `ink`, if supplied and valid — otherwise `"#123a5e"` |
-| `favicon.ico` | filename | — | none |
-| `favicon.svg` | filename | — | none |
-| `favicon.png192` | filename | — | none |
-| `favicon.png512` | filename | — | none |
-| `favicon.appleTouch` | filename | — | none |
+| `favicon.ico` | filename | 255 bytes | none |
+| `favicon.svg` | filename | 255 bytes | none |
+| `favicon.png192` | filename | 255 bytes | none |
+| `favicon.png512` | filename | 255 bytes | none |
+| `favicon.appleTouch` | filename | 255 bytes | none |
 
 **`colors.ink` must be dark.** It's the background of a light-on-dark identity band —
 header text is rendered light on top of it — so a value whose WCAG relative luminance
@@ -217,8 +217,10 @@ bundle carries both and the shell picks whichever fits the surface it's renderin
 
 **Asset filenames** (`logo.onLight`, `logo.onDark`, and every `favicon.*` field) must be
 a bare filename: no `/`, no `..` anywhere in the string (not just as a `../` path
-segment — `my..logo.svg` is rejected too), and not empty or `.`. The extension must be
-one of `.svg`, `.png`, `.ico`, `.jpg`, `.jpeg`, `.webp` (case-insensitive). The file must
+segment — `my..logo.svg` is rejected too), not empty or `.`, and at most **255 bytes**
+once UTF-8 encoded — bytes, not characters, matching the filesystem's own limit, so a
+name with accented or non-Latin characters hits the cap sooner than its length suggests.
+The extension must be one of `.svg`, `.png`, `.ico`, `.jpg`, `.jpeg`, `.webp` (case-insensitive). The file must
 also actually exist in `BRAND_DIR` — a validated filename pointing at nothing is dropped
 the same as an invalid one.
 

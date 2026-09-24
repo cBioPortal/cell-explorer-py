@@ -234,3 +234,32 @@ def test_unstattable_brand_dir_registers_no_brand_route(
 
     client = TestClient(create_app(Settings(static_dir=static_dir, brand_dir=brand_dir)))
     assert "<!doctype html>" in client.get("/brand/logo-white.svg").text
+
+
+def test_overlong_asset_filename_does_not_stop_create_app(tmp_path: Path):
+    """The invariant is stated at create_app, so it is asserted at create_app.
+
+    No monkeypatching: an unbounded filename in brand.json is enough on its own,
+    because the OS refuses to answer whether a >255-byte name exists rather than
+    reporting absence, and that OSError used to escape the factory.
+    """
+    brand_dir = tmp_path / "brand"
+    brand_dir.mkdir()
+    (brand_dir / "brand.json").write_text(
+        json.dumps(
+            {
+                "name": "BTC",
+                "logo": {"onDark": "a" * 5000 + ".svg", "onLight": "logo.svg"},
+            }
+        )
+    )
+    (brand_dir / "logo.svg").write_text("<svg id='btc'/>")
+
+    client = TestClient(create_app(Settings(brand_dir=brand_dir)))
+
+    # Booted, branded, and only the one bad field was dropped.
+    brand = client.get("/api/info").json()["brand"]
+    assert brand["name"] == "BTC"
+    assert brand["logo_on_dark"] is None
+    assert brand["logo_on_light"] == "/brand/logo.svg"
+    assert client.get("/brand/logo.svg").status_code == 200

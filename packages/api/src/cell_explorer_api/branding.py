@@ -22,6 +22,9 @@ HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 ALLOWED_ASSET_SUFFIXES = frozenset({".svg", ".png", ".ico", ".jpg", ".jpeg", ".webp"})
 
+# The near-universal per-component filename limit on Linux and macOS.
+MAX_ASSET_FILENAME_BYTES = 255
+
 # `ink` is the background of a light-on-dark identity band. Anything paler makes
 # the header text unreadable, so it is rejected rather than rendered illegibly.
 MAX_INK_LUMINANCE = 0.35
@@ -139,6 +142,16 @@ def _asset(raw: dict, section: str, key: str, warn: Callable[[str], None]) -> st
     if "/" in value or ".." in value or value in {"", "."}:
         warn(f"brand.json: {section}.{key} must be a bare filename; ignoring")
         return None
+    # Bytes, not characters: the kernel's limit is on the encoded name, and a
+    # filename well under 256 characters can exceed it once non-ASCII
+    # characters cost 2-4 bytes each. Over the limit the OS refuses to answer
+    # whether the file exists (ENAMETOOLONG) rather than reporting absence, so
+    # this has to be caught here rather than left to the existence check.
+    if len(value.encode("utf-8")) > MAX_ASSET_FILENAME_BYTES:
+        warn(
+            f"brand.json: {section}.{key} exceeds {MAX_ASSET_FILENAME_BYTES} bytes; ignoring"
+        )
+        return None
     if PurePosixPath(value).suffix.lower() not in ALLOWED_ASSET_SUFFIXES:
         warn(
             f"brand.json: {section}.{key} has a disallowed extension; "
@@ -223,7 +236,19 @@ def _existing_asset(brand_dir: Path, filename: str | None) -> str | None:
     """Keep a validated filename only when it is a real file in the bundle."""
     if filename is None:
         return None
-    if not (brand_dir / filename).is_file():
+    # Path.is_file() swallows "not found" but re-raises anything else — most
+    # easily ENAMETOOLONG, but also e.g. a total path over PATH_MAX or an I/O
+    # error on the mount. A stat that cannot be answered is treated as "not
+    # present": the field degrades like any other unusable one, and nothing
+    # here may raise out of load_bundle.
+    try:
+        exists = (brand_dir / filename).is_file()
+    except OSError as exc:
+        logger.warning(
+            "Could not stat brand asset %r in %s (%s); ignoring", filename, brand_dir, exc
+        )
+        return None
+    if not exists:
         logger.warning(
             "Brand asset %r referenced by brand.json is not a file in %s; ignoring",
             filename,
