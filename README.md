@@ -66,6 +66,7 @@ than "broken".
 | Variable | Default | Notes |
 |---|---|---|
 | `STATIC_DIR` | unset | Path to the built frontend. Unset means API-only, no static serving |
+| `BRAND_DIR` | unset | Directory holding an operator-supplied brand bundle (`brand.json` plus assets). Unset means built-in cBioPortal branding. Mount read-only |
 | `ENVIRONMENT` | `development` | Reported on `/api/info` |
 | `GIT_SHA` | auto-detected | Read from git at startup. Set explicitly in containers, where git is unavailable |
 

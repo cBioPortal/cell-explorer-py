@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from cell_explorer_api.branding import load_brand
 from cell_explorer_api.config import Settings, validate_static_dir
 from cell_explorer_api.routes import router
 
@@ -66,6 +67,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         swagger_ui_parameters={"persistAuthorization": True},
     )
     app.state.settings = settings
+    app.state.brand = load_brand(settings.brand_dir)
 
     # CORS middleware
     if settings.cors_origin_list:
