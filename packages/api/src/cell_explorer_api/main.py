@@ -155,16 +155,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # The shell carries brand values the browser needs before any
             # JavaScript runs, so it is templated once here rather than per
             # request — the brand cannot change without a restart.
+            # Reading the shell is new work at startup — the old FileResponse
+            # never decoded it. An unreadable or undecodable file degrades to
+            # exactly the previous behavior rather than stopping the app.
             brand = app.state.brand
-            index_body = render_index_html(index_html.read_text(), brand)
             index_path = index_html.resolve()
+            try:
+                index_body = render_index_html(
+                    index_html.read_text(encoding="utf-8"), brand
+                )
+            except (OSError, ValueError) as exc:
+                logger.warning(
+                    "Could not read %s (%s); serving it unbranded and uncached-as-before",
+                    index_html,
+                    exc,
+                )
+                index_body = None
 
             manifest_path = validated / "site.webmanifest"
-            manifest_body = (
-                render_webmanifest(manifest_path.read_text(), brand)
-                if manifest_path.is_file()
-                else None
-            )
+            manifest_body = None
+            if manifest_path.is_file():
+                try:
+                    manifest_body = render_webmanifest(
+                        manifest_path.read_text(encoding="utf-8"), brand
+                    )
+                except (OSError, ValueError) as exc:
+                    logger.warning(
+                        "Could not read %s (%s); serving it as a static file",
+                        manifest_path,
+                        exc,
+                    )
 
             # SPA catch-all: serve the templated shell and webmanifest, real
             # files from the static root (Vite copies public/ there — favicons),
@@ -182,6 +202,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 file = _resolve_static_file(validated, path)
                 if file is not None and file != index_path:
                     return FileResponse(str(file))
+                if index_body is None:
+                    return FileResponse(str(index_html))
                 return HTMLResponse(index_body, headers={"Cache-Control": "no-cache"})
         else:
             # STATIC_DIR was set but invalid

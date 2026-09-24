@@ -13,10 +13,13 @@ Safety comes from escaping the injected values, which happens either way.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from html import escape
 
 from cell_explorer_api.branding import DEFAULT_BRAND, Brand
+
+logger = logging.getLogger(__name__)
 
 _TITLE_RE = re.compile(r"<title>.*?</title>", re.DOTALL)
 _THEME_RE = re.compile(r'(<meta\s+name="theme-color"\s+content=")[^"]*(")')
@@ -24,6 +27,24 @@ _THEME_RE = re.compile(r'(<meta\s+name="theme-color"\s+content=")[^"]*(")')
 
 def _asset_url(filename: str | None) -> str | None:
     return f"/brand/{filename}" if filename else None
+
+
+def _sub_once(pattern: re.Pattern[str], repl, html: str, *, anchor: str) -> str:
+    """Substitute once, warning when the anchor found nothing.
+
+    The anchors hardcode attribute order in a file built in another repo, so a
+    build-tool change could silently stop branding one element. A miss leaves
+    the shell's built-in value in place — degraded, never broken — but the
+    operator gets told which anchor stopped matching.
+    """
+    out, count = pattern.subn(repl, html, count=1)
+    if count == 0:
+        logger.warning(
+            "Brand substitution found no match for %r in index.html; that element "
+            "keeps its built-in value. The shell's markup may have changed shape.",
+            anchor,
+        )
+    return out
 
 
 def _replace_link_href(html: str, anchor: str, url: str | None) -> str:
@@ -43,7 +64,9 @@ def _replace_link_href(html: str, anchor: str, url: str | None) -> str:
     # A lambda, not a template string: a replacement template would read
     # backslashes in an operator-supplied filename as regex escapes.
     value = escape(url, quote=True)
-    return pattern.sub(lambda m: f"{m.group(1)}{value}{m.group(2)}", html, count=1)
+    return _sub_once(
+        pattern, lambda m: f"{m.group(1)}{value}{m.group(2)}", html, anchor=anchor
+    )
 
 
 def render_index_html(html: str, brand: Brand) -> str:
@@ -51,11 +74,14 @@ def render_index_html(html: str, brand: Brand) -> str:
         return html
 
     title = escape(brand.title)
-    html = _TITLE_RE.sub(lambda m: f"<title>{title}</title>", html, count=1)
-    html = _THEME_RE.sub(
+    html = _sub_once(
+        _TITLE_RE, lambda m: f"<title>{title}</title>", html, anchor="<title>"
+    )
+    html = _sub_once(
+        _THEME_RE,
         lambda m: f"{m.group(1)}{escape(brand.colors.theme_color)}{m.group(2)}",
         html,
-        count=1,
+        anchor='<meta name="theme-color">',
     )
     html = _replace_link_href(html, '<link rel="icon" href=', _asset_url(brand.favicon.ico))
     html = _replace_link_href(
@@ -71,13 +97,27 @@ def render_webmanifest(manifest_json: str, brand: Brand) -> str:
     """Substitute brand values into site.webmanifest.
 
     JSON, unlike the HTML shell, round-trips losslessly — so this parses.
+
+    Nothing here may raise: this runs at startup, and a hand-edited manifest
+    under STATIC_DIR must degrade to the file as written rather than stop the
+    app from booting. Parsing is only the first shape check — valid JSON can
+    still be a list, a string, or carry an `icons` that is not a list of
+    objects.
     """
     if brand == DEFAULT_BRAND:
         return manifest_json
 
     try:
         manifest = json.loads(manifest_json)
-    except json.JSONDecodeError:
+    except ValueError:
+        logger.warning("site.webmanifest is not valid JSON; serving it unbranded")
+        return manifest_json
+
+    if not isinstance(manifest, dict):
+        logger.warning(
+            "site.webmanifest is a JSON %s, not an object; serving it unbranded",
+            type(manifest).__name__,
+        )
         return manifest_json
 
     manifest["name"] = brand.title
@@ -86,8 +126,14 @@ def render_webmanifest(manifest_json: str, brand: Brand) -> str:
     manifest["background_color"] = brand.colors.ink
 
     by_size = {"192x192": brand.favicon.png192, "512x512": brand.favicon.png512}
-    for icon in manifest.get("icons", []):
-        replacement = _asset_url(by_size.get(icon.get("sizes")))
+    icons = manifest.get("icons")
+    if icons is not None and not isinstance(icons, list):
+        logger.warning("site.webmanifest 'icons' is not a list; leaving icons unbranded")
+    for icon in icons if isinstance(icons, list) else []:
+        if not isinstance(icon, dict):
+            continue
+        sizes = icon.get("sizes")
+        replacement = _asset_url(by_size.get(sizes)) if isinstance(sizes, str) else None
         if replacement:
             icon["src"] = replacement
 
