@@ -134,6 +134,148 @@ and remain supported aliases for the generic names above.
 | `CHAT_REQUIRED_ROLE` | unset | Role required for chat. Unset means any authenticated user, still subject to each dataset's own `chat_enabled` |
 | `CLI_STATE_SECRET` | unset | Signs the CLI login callback state |
 
+## Branding
+
+`BRAND_DIR` (see [Configuration](#configuration) above) points at an operator-supplied
+brand bundle: a `brand.json` plus the image assets it references. Setting it re-skins the
+tab title, favicon, web app manifest, and the header identity surfaced through
+`/api/info` (name, tagline, logo, colors) with the operator's own deployment identity.
+It is co-branding, not white-labeling — the "Cell Explorer" name and the cBioPortal
+footer attribution are fixed regardless of what `BRAND_DIR` contains; see
+[What isn't configurable](#what-isnt-configurable) below.
+
+### Bundle layout
+
+```
+/opt/cell-explorer/brand/
+├── brand.json
+├── logo-light.svg
+├── logo-dark.svg
+├── favicon.ico
+├── favicon.svg
+├── icon-192.png
+├── icon-512.png
+└── apple-touch-icon.png
+```
+
+`brand.json` is the only filename that matters — it must be named exactly that. Every
+other file in the directory is named whatever the operator likes; `brand.json`'s `logo`
+and `favicon` fields say which filename plays which role. Asset files must live directly
+in `BRAND_DIR` — no subdirectories.
+
+### `brand.json` schema
+
+Every field is optional and falls back to its own default independently. A one-field
+file such as `{"name": "My Institute"}` is valid — everything else keeps the built-in
+cBioPortal defaults below.
+
+| Field | Type | Max length | Default |
+|---|---|---|---|
+| `name` | string | 120 | `"cBioPortal"` |
+| `shortName` | string | 40 | the resolved `name` |
+| `title` (browser tab title) | string | 160 | `"{name} Cell Explorer"` |
+| `tagline` | string | 200 | `"Explore millions of cells in your browser."` |
+| `logoHref` | absolute `http(s)` URL | — | none (logo is not a link) |
+| `logo.onLight` | filename | — | none |
+| `logo.onDark` | filename | — | none |
+| `logo.alt` | string | 120 | the resolved `name` |
+| `colors.ink` | `#RRGGBB` | — | `"#0d2c48"` |
+| `colors.inkDeep` | `#RRGGBB` | — | none (the frontend derives a value from `ink` when unset) |
+| `colors.themeColor` | `#RRGGBB` | — | the resolved `ink`, else `"#123a5e"` |
+| `favicon.ico` | filename | — | none |
+| `favicon.svg` | filename | — | none |
+| `favicon.png192` | filename | — | none |
+| `favicon.png512` | filename | — | none |
+| `favicon.appleTouch` | filename | — | none |
+
+**`colors.ink` must be dark.** It's the background of a light-on-dark identity band —
+header text is rendered light on top of it — so a value whose WCAG relative luminance
+exceeds `0.35` is rejected outright (the field falls back to the default rather than
+shipping unreadable text). `colors.inkDeep` and `colors.themeColor` carry no such
+constraint.
+
+**`logo.onLight` and `logo.onDark` are two separate assets, not one logo recolored by
+CSS.** Brand marks usually arrive as artwork with a fill already baked in (e.g. a white
+knockout mark for a dark header, a full-color mark for a light background), so the
+bundle carries both and the shell picks whichever fits the surface it's rendering on.
+
+**Asset filenames** (`logo.onLight`, `logo.onDark`, and every `favicon.*` field) must be
+a bare filename: no `/`, no `..` anywhere in the string (not just as a `../` path
+segment — `my..logo.svg` is rejected too), and not empty or `.`. The extension must be
+one of `.svg`, `.png`, `.ico`, `.jpg`, `.jpeg`, `.webp` (case-insensitive). The file must
+also actually exist in `BRAND_DIR` — a validated filename pointing at nothing is dropped
+the same as an invalid one.
+
+**`logoHref`**, if set, must be an absolute `http://` or `https://` URL with a host —
+anything else (a relative path, a `javascript:` URL, a bare string) is rejected.
+
+### When something is wrong
+
+Every field validates independently and fails soft: an invalid value — wrong type,
+malformed hex, oversized text, a filename that fails the traversal/extension checks, an
+asset that doesn't exist on disk, an `ink` that isn't dark enough — is dropped with a
+warning in the container logs, and that one field falls back to its default. A bad
+bundle can make the deployment look wrong; it can never stop the application from
+starting.
+
+### Deploying the bundle
+
+Mount the directory **read-only** and point `BRAND_DIR` at the mount:
+
+```yaml
+services:
+  cell-explorer:
+    volumes:
+      - /opt/cell-explorer/brand:/brand:ro
+    environment:
+      BRAND_DIR: /brand
+```
+
+The bundle is read once, at container startup — changing `brand.json` or an asset
+requires restarting the container, not just replacing the file on disk.
+
+On Kubernetes, the equivalent is a ConfigMap mount:
+
+```yaml
+volumes:
+  - name: brand
+    configMap: { name: brand }
+volumeMounts:
+  - name: brand
+    mountPath: /brand
+    readOnly: true
+env:
+  - name: BRAND_DIR
+    value: /brand
+```
+
+A ConfigMap base64-encodes binary assets and caps out around 1 MB, so a full favicon
+set plus multiple logo variants can approach the limit. Larger bundles need a PVC or a
+derived image (`FROM cell-explorer / COPY brand/ /brand`) instead.
+
+### Preparing assets
+
+Brand assets rarely arrive web-ready. A few conversions come up repeatedly:
+
+- **EPS → SVG**: `inkscape in.eps --export-type=svg`. Text in EPS source is typically
+  outlined already, so the converted SVG has no font dependency.
+- **Favicons need a finished set, not a single SVG.** Safari and Windows still want an
+  `.ico`; PWA installs want 192×192 and 512×512 PNGs. Ship all of `favicon.ico`,
+  `favicon.svg`, `favicon.png192`, and `favicon.png512` rather than relying on the
+  browser to synthesize the rest from one file.
+- **Print-derived colors need remapping.** Brand colors supplied as CMYK or spot values
+  render differently once naively converted to RGB than the brand's own on-screen
+  master. Check hex values against the brand's digital style guide, not the print one,
+  before dropping them into `brand.json`.
+
+### What isn't configurable
+
+The cBioPortal footer attribution is fixed and deliberately not a `brand.json` field —
+there is no way to move, restyle, or suppress it. This is co-branding: the operator's
+identity is primary in the header, and cBioPortal remains visibly present as the
+underlying platform. Likewise, "Cell Explorer" itself isn't renamed by any field — the
+operator brands the surrounding identity, not the tool.
+
 ## License
 
 MIT
