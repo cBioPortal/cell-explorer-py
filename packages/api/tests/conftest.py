@@ -24,6 +24,49 @@ def static_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture()
+def shell_dir(tmp_path: Path) -> Path:
+    """A static dir whose index.html mirrors the real frontend shell."""
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text(
+        "<!doctype html>\n"
+        '<html lang="en">\n'
+        "  <head>\n"
+        '    <meta charset="UTF-8" />\n'
+        '    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />\n'
+        '    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />\n'
+        '    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />\n'
+        '    <link rel="manifest" href="/site.webmanifest" />\n'
+        '    <meta name="theme-color" content="#123a5e" />\n'
+        "    <title>cBioPortal Cell Explorer</title>\n"
+        "    <script>\n"
+        "      (function(l) {\n"
+        "        if (l.search[1] === '/') {\n"
+        "          window.history.replaceState(null, null, l.pathname);\n"
+        "        }\n"
+        "      }(window.location))\n"
+        "    </script>\n"
+        "  </head>\n"
+        '  <body><div id="root"></div></body>\n'
+        "</html>\n"
+    )
+    (dist / "site.webmanifest").write_text(
+        '{\n  "name": "cBioPortal Cell Explorer",\n'
+        '  "short_name": "Cell Explorer",\n'
+        '  "background_color": "#0d2c48",\n'
+        '  "theme_color": "#123a5e",\n'
+        '  "icons": [\n'
+        '    { "src": "./favicon-192x192.png", "sizes": "192x192", "type": "image/png" },\n'
+        '    { "src": "./favicon-512x512.png", "sizes": "512x512", "type": "image/png" }\n'
+        "  ]\n}\n"
+    )
+    assets = dist / "assets"
+    assets.mkdir()
+    (assets / "main.js").write_text("console.log('hello')")
+    return dist
+
+
+@pytest.fixture()
 def client() -> TestClient:
     """Test client with no static serving (API-only mode)."""
     from cell_explorer_api.main import create_app

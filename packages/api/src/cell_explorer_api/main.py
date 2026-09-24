@@ -6,12 +6,13 @@ from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from cell_explorer_api.branding import load_brand
 from cell_explorer_api.config import Settings, validate_static_dir
 from cell_explorer_api.routes import router
+from cell_explorer_api.shell import render_index_html, render_webmanifest
 
 logger = logging.getLogger(__name__)
 
@@ -151,16 +152,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     name="assets",
                 )
 
-            # SPA catch-all: serve real files from the static root (Vite copies
-            # public/ there — favicons, site.webmanifest), else index.html.
+            # The shell carries brand values the browser needs before any
+            # JavaScript runs, so it is templated once here rather than per
+            # request — the brand cannot change without a restart.
+            brand = app.state.brand
+            index_body = render_index_html(index_html.read_text(), brand)
+            index_path = index_html.resolve()
+
+            manifest_path = validated / "site.webmanifest"
+            manifest_body = (
+                render_webmanifest(manifest_path.read_text(), brand)
+                if manifest_path.is_file()
+                else None
+            )
+
+            # SPA catch-all: serve the templated shell and webmanifest, real
+            # files from the static root (Vite copies public/ there — favicons),
+            # else index.html.
             @app.get("/{path:path}")
             async def spa_catchall(path: str):
                 if path.startswith("api/"):
                     return JSONResponse(status_code=404, content={"detail": "Not found"})
+                if path == "site.webmanifest" and manifest_body is not None:
+                    return Response(
+                        manifest_body,
+                        media_type="application/manifest+json",
+                        headers={"Cache-Control": "no-cache"},
+                    )
                 file = _resolve_static_file(validated, path)
-                if file is not None:
+                if file is not None and file != index_path:
                     return FileResponse(str(file))
-                return FileResponse(str(index_html))
+                return HTMLResponse(index_body, headers={"Cache-Control": "no-cache"})
         else:
             # STATIC_DIR was set but invalid
             @app.get("/{path:path}")
