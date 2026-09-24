@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -277,6 +278,37 @@ def test_undecodable_shell_degrades_to_the_previous_behavior(
     assert "etag" in response.headers
 
 
+# --- The anchor-miss log is the sole mitigation for a real residual risk ---
+
+
+def test_anchor_miss_is_logged_as_an_error(shell_dir: Path, caplog):
+    """The shell is built in another repo; an attribute reorder there would
+    otherwise silently drop that element's branding with nothing in the logs."""
+    html = _read(shell_dir, "index.html").replace(
+        '<meta name="theme-color" content="#123a5e" />',
+        '<meta content="#123a5e" name="theme-color" />',
+    )
+
+    with caplog.at_level(logging.ERROR, logger="cell_explorer_api.shell"):
+        out = render_index_html(html, _branded(colors={"themeColor": "#112233"}))
+
+    # Degraded, not broken: the shell's own value survives.
+    assert '<meta content="#123a5e" name="theme-color" />' in out
+    assert "#112233" not in out
+    # And the operator is told which anchor stopped matching.
+    misses = [
+        r for r in caplog.records
+        if r.levelno == logging.ERROR and "theme-color" in r.getMessage()
+    ]
+    assert len(misses) == 1, caplog.records
+
+
+def test_matching_anchors_log_nothing(shell_dir: Path, caplog):
+    with caplog.at_level(logging.WARNING, logger="cell_explorer_api.shell"):
+        render_index_html(_read(shell_dir, "index.html"), _branded())
+    assert caplog.records == []
+
+
 # --- Fix 7: awkward filenames in generated hrefs ---------------------------
 
 
@@ -296,6 +328,29 @@ def test_asset_filenames_are_percent_encoded_in_the_webmanifest(shell_dir: Path)
     )
     icons = {i["sizes"]: i["src"] for i in json.loads(out)["icons"]}
     assert icons["192x192"] == "/brand/icon%20192.png"
+
+
+# --- Fix 5: the webmanifest decode-failure twin ----------------------------
+
+
+def test_undecodable_webmanifest_degrades_to_the_previous_behavior(
+    tmp_path: Path, shell_dir: Path
+):
+    """The twin of test_undecodable_shell_degrades_to_the_previous_behavior:
+    a manifest that cannot be decoded must not stop the app from booting."""
+    raw = b'{"name": "caf\xe9"}'  # latin-1: invalid utf-8
+    (shell_dir / "site.webmanifest").write_bytes(raw)
+    brand_dir = tmp_path / "brand"
+    brand_dir.mkdir()
+    (brand_dir / "brand.json").write_text(json.dumps({"name": "BTC"}))
+
+    client = TestClient(create_app(Settings(static_dir=shell_dir, brand_dir=brand_dir)))
+
+    response = client.get("/site.webmanifest")
+    assert response.status_code == 200
+    assert response.content == raw
+    # Falls back to serving it as a plain static file, and the shell is fine.
+    assert "<title>BTC Cell Explorer</title>" in client.get("/route").text
 
 
 # --- Fix 6: no-cache with a validator still 304s ---------------------------

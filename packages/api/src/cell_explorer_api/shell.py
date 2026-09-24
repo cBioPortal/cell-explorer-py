@@ -43,7 +43,10 @@ def _sub_once(pattern: re.Pattern[str], repl, html: str, *, anchor: str) -> str:
     """
     out, count = pattern.subn(repl, html, count=1)
     if count == 0:
-        logger.warning(
+        # error, not warning: this function returns early for DEFAULT_BRAND, so
+        # a miss only ever happens on a branded boot, where it means the
+        # operator's branding demonstrably did not apply to that element.
+        logger.error(
             "Brand substitution found no match for %r in index.html; that element "
             "keeps its built-in value. The shell's markup may have changed shape.",
             anchor,
