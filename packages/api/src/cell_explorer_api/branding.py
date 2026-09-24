@@ -8,10 +8,12 @@ it must never stop the app from serving.
 
 from __future__ import annotations
 
+import json
+import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
 
 HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -213,3 +215,61 @@ def parse_brand(raw: dict, *, warn: Callable[[str], None]) -> Brand:
         colors=colors,
         favicon=favicon,
     )
+
+
+logger = logging.getLogger(__name__)
+
+
+def _existing_asset(brand_dir: Path, filename: str | None) -> str | None:
+    """Keep a validated filename only when it is a real file in the bundle."""
+    if filename is None:
+        return None
+    if not (brand_dir / filename).is_file():
+        logger.warning(
+            "Brand asset %r referenced by brand.json is not a file in %s; ignoring",
+            filename,
+            brand_dir,
+        )
+        return None
+    return filename
+
+
+def load_brand(brand_dir: Path | None) -> Brand:
+    """Load and validate a brand bundle. Never raises; defaults on any failure."""
+    if brand_dir is None:
+        return DEFAULT_BRAND
+
+    if not brand_dir.is_dir():
+        logger.warning("BRAND_DIR %s is not a directory; using default branding", brand_dir)
+        return DEFAULT_BRAND
+
+    config_path = brand_dir / "brand.json"
+    try:
+        raw = json.loads(config_path.read_text())
+    except FileNotFoundError:
+        logger.warning("No brand.json in %s; using default branding", brand_dir)
+        return DEFAULT_BRAND
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Could not read brand.json in %s (%s); using default branding", brand_dir, exc)
+        return DEFAULT_BRAND
+
+    if not isinstance(raw, dict):
+        logger.warning("brand.json in %s is not a JSON object; using default branding", brand_dir)
+        return DEFAULT_BRAND
+
+    brand = parse_brand(raw, warn=logger.warning)
+
+    # Filenames passed validation; now confirm they exist on disk.
+    logo = BrandLogo(
+        on_light=_existing_asset(brand_dir, brand.logo.on_light),
+        on_dark=_existing_asset(brand_dir, brand.logo.on_dark),
+        alt=brand.logo.alt,
+    )
+    favicon = BrandFavicon(
+        ico=_existing_asset(brand_dir, brand.favicon.ico),
+        svg=_existing_asset(brand_dir, brand.favicon.svg),
+        png192=_existing_asset(brand_dir, brand.favicon.png192),
+        png512=_existing_asset(brand_dir, brand.favicon.png512),
+        apple_touch=_existing_asset(brand_dir, brand.favicon.apple_touch),
+    )
+    return replace(brand, logo=logo, favicon=favicon)
