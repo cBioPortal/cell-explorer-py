@@ -132,7 +132,7 @@ def _asset(raw: dict, section: str, key: str, warn: Callable[[str], None]) -> st
         return None
     # A bare basename only. Anything with a separator or a parent reference is a
     # traversal attempt or a mistake; both are rejected the same way.
-    if value != PurePosixPath(value).name or value in {"", ".", ".."}:
+    if "/" in value or ".." in value or value in {"", "."}:
         warn(f"brand.json: {section}.{key} must be a bare filename; ignoring")
         return None
     if PurePosixPath(value).suffix.lower() not in ALLOWED_ASSET_SUFFIXES:

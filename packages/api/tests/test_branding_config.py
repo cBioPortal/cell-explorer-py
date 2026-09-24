@@ -153,3 +153,35 @@ def test_non_dict_nested_value_does_not_raise():
     brand, warnings = _parse({"colors": "navy"})
     assert brand.colors.ink == DEFAULT_BRAND.colors.ink
     assert any("colors" in w for w in warnings)
+
+
+def test_asset_filename_with_backslash_traversal_rejected():
+    brand, warnings = _parse({"logo": {"onDark": "..\\..\\evil.svg"}})
+    assert brand.logo.on_dark is None
+    assert any("onDark" in w for w in warnings)
+
+
+def test_valid_favicon_bundle_parses():
+    brand, warnings = _parse(
+        {
+            "favicon": {
+                "ico": "favicon.ico",
+                "svg": "favicon.svg",
+                "png192": "favicon-192.png",
+                "png512": "favicon-512.png",
+                "appleTouch": "apple-touch-icon.png",
+            }
+        }
+    )
+    assert brand.favicon.ico == "favicon.ico"
+    assert brand.favicon.svg == "favicon.svg"
+    assert brand.favicon.png192 == "favicon-192.png"
+    assert brand.favicon.png512 == "favicon-512.png"
+    assert brand.favicon.apple_touch == "apple-touch-icon.png"
+    assert warnings == []
+
+
+def test_invalid_favicon_filename_rejected():
+    brand, warnings = _parse({"favicon": {"ico": "evil/../../../etc/passwd.ico"}})
+    assert brand.favicon.ico is None
+    assert any("ico" in w for w in warnings)
