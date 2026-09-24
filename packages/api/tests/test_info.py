@@ -139,4 +139,28 @@ def test_info_brand_colors_include_derived_theme_color(tmp_path: Path):
     colors = client.get("/api/info").json()["brand"]["colors"]
 
     assert colors["ink"] == "#240D00"
-    assert colors["themeColor"] == "#240D00"
+    assert colors["theme_color"] == "#240D00"
+
+
+def test_info_logo_alt_uses_explicit_value(tmp_path: Path):
+    brand_dir = tmp_path / "brand"
+    brand_dir.mkdir()
+    (brand_dir / "brand.json").write_text(
+        json.dumps({"name": "Break Through Cancer", "logo": {"alt": "BTC logo"}})
+    )
+
+    client = TestClient(create_app(Settings(brand_dir=brand_dir)))
+    brand = client.get("/api/info").json()["brand"]
+
+    assert brand["logo_alt"] == "BTC logo"
+
+
+def test_info_logo_alt_falls_back_to_name(tmp_path: Path):
+    brand_dir = tmp_path / "brand"
+    brand_dir.mkdir()
+    (brand_dir / "brand.json").write_text(json.dumps({"name": "Break Through Cancer"}))
+
+    client = TestClient(create_app(Settings(brand_dir=brand_dir)))
+    brand = client.get("/api/info").json()["brand"]
+
+    assert brand["logo_alt"] == "Break Through Cancer"

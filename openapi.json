@@ -1331,6 +1331,36 @@
   },
   "components": {
     "schemas": {
+      "BrandColorsInfo": {
+        "properties": {
+          "ink": {
+            "type": "string",
+            "title": "Ink"
+          },
+          "ink_deep": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ink Deep"
+          },
+          "theme_color": {
+            "type": "string",
+            "title": "Theme Color"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ink",
+          "ink_deep",
+          "theme_color"
+        ],
+        "title": "BrandColorsInfo"
+      },
       "BrandInfo": {
         "properties": {
           "name": {
@@ -1378,12 +1408,12 @@
             ],
             "title": "Logo On Dark"
           },
+          "logo_alt": {
+            "type": "string",
+            "title": "Logo Alt"
+          },
           "colors": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object",
-            "title": "Colors"
+            "$ref": "#/components/schemas/BrandColorsInfo"
           }
         },
         "type": "object",
@@ -1394,6 +1424,7 @@
           "logo_href",
           "logo_on_light",
           "logo_on_dark",
+          "logo_alt",
           "colors"
         ],
         "title": "BrandInfo"

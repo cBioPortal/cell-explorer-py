@@ -10,6 +10,12 @@ from cell_explorer_api.branding import DEFAULT_BRAND, Brand
 router = APIRouter(tags=["status"])
 
 
+class BrandColorsInfo(BaseModel):
+    ink: str
+    ink_deep: str | None
+    theme_color: str
+
+
 class BrandInfo(BaseModel):
     name: str
     short_name: str
@@ -18,7 +24,8 @@ class BrandInfo(BaseModel):
     # Resolved URLs, not filenames: the frontend never builds /brand/ paths.
     logo_on_light: str | None
     logo_on_dark: str | None
-    colors: dict[str, str]
+    logo_alt: str
+    colors: BrandColorsInfo
 
 
 class InfoResponse(BaseModel):
@@ -41,9 +48,11 @@ def _asset_url(filename: str | None) -> str | None:
 def _brand_info(brand: Brand) -> BrandInfo | None:
     if brand == DEFAULT_BRAND:
         return None
-    colors = {"ink": brand.colors.ink, "themeColor": brand.colors.theme_color}
-    if brand.colors.ink_deep is not None:
-        colors["inkDeep"] = brand.colors.ink_deep
+    colors = BrandColorsInfo(
+        ink=brand.colors.ink,
+        ink_deep=brand.colors.ink_deep,
+        theme_color=brand.colors.theme_color,
+    )
     return BrandInfo(
         name=brand.name,
         short_name=brand.short_name,
@@ -51,6 +60,7 @@ def _brand_info(brand: Brand) -> BrandInfo | None:
         logo_href=brand.logo_href,
         logo_on_light=_asset_url(brand.logo.on_light),
         logo_on_dark=_asset_url(brand.logo.on_dark),
+        logo_alt=brand.logo.alt,
         colors=colors,
     )
 
