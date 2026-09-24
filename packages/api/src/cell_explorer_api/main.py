@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from cell_explorer_api.branding import load_brand
+from cell_explorer_api.branding import load_bundle
 from cell_explorer_api.config import Settings, validate_static_dir
 from cell_explorer_api.routes import router
 from cell_explorer_api.shell import render_index_html, render_webmanifest
@@ -68,7 +68,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         swagger_ui_parameters={"persistAuthorization": True},
     )
     app.state.settings = settings
-    app.state.brand = load_brand(settings.brand_dir)
+    brand_bundle = load_bundle(settings.brand_dir)
+    app.state.brand = brand_bundle.brand
 
     # CORS middleware
     if settings.cors_origin_list:
@@ -129,10 +130,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # 1b. Operator-supplied brand assets. Registered before the SPA catch-all so
     # /brand/* resolves to the bundle rather than falling through to index.html.
-    if settings.brand_dir is not None and settings.brand_dir.is_dir():
+    #
+    # BRAND_DIR is never re-stat'd here: the load already stat'd it, and a
+    # second stat can raise EACCES where the first one warned, taking
+    # create_app down over an ordinary operator misconfiguration.
+    if brand_bundle.directory is not None:
         app.mount(
             "/brand",
-            StaticFiles(directory=str(settings.brand_dir)),
+            StaticFiles(directory=str(brand_bundle.directory)),
             name="brand",
         )
 

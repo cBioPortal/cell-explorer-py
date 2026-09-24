@@ -2,7 +2,9 @@ import json
 import logging
 from pathlib import Path
 
-from cell_explorer_api.branding import DEFAULT_BRAND, load_brand
+import pytest
+
+from cell_explorer_api.branding import DEFAULT_BRAND, load_brand, load_bundle
 
 
 def _bundle(tmp_path: Path, config: dict, assets: tuple[str, ...] = ()) -> Path:
@@ -131,3 +133,73 @@ def test_unstattable_directory_yields_default(tmp_path: Path, monkeypatch, caplo
         brand = load_brand(tmp_path / "brand")
     assert brand == DEFAULT_BRAND
     assert "BRAND_DIR" in caplog.text
+
+
+# --- The bundle: one stat, and the exact set of servable filenames ---------
+
+
+def test_bundle_directory_is_the_dir_when_usable(tmp_path: Path):
+    brand_dir = tmp_path / "brand"
+    brand_dir.mkdir()
+    (brand_dir / "brand.json").write_text(json.dumps({"name": "BTC"}))
+
+    assert load_bundle(brand_dir).directory == brand_dir
+
+
+@pytest.mark.parametrize("case", ["unset", "missing", "not_a_dir"])
+def test_bundle_directory_is_none_when_unusable(tmp_path: Path, case: str):
+    """`directory is None` is the single signal callers mount off."""
+    if case == "unset":
+        brand_dir = None
+    elif case == "missing":
+        brand_dir = tmp_path / "nope"
+    else:
+        brand_dir = tmp_path / "file"
+        brand_dir.write_text("not a directory")
+
+    bundle = load_bundle(brand_dir)
+    assert bundle.directory is None
+    assert bundle.brand == DEFAULT_BRAND
+
+
+def test_bundle_directory_is_none_when_brand_dir_cannot_be_stat_d(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """EACCES is the one errno Path.is_dir() re-raises instead of swallowing."""
+    brand_dir = tmp_path / "brand"
+    brand_dir.mkdir()
+    real_is_dir = Path.is_dir
+
+    def is_dir(self: Path, *args, **kwargs):
+        if self == brand_dir:
+            raise PermissionError(13, "Permission denied")
+        return real_is_dir(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "is_dir", is_dir)
+
+    bundle = load_bundle(brand_dir)
+    assert bundle.directory is None
+    assert bundle.brand == DEFAULT_BRAND
+
+
+def test_bundle_asset_filenames_are_exactly_the_resolved_ones(tmp_path: Path):
+    brand_dir = tmp_path / "brand"
+    brand_dir.mkdir()
+    (brand_dir / "brand.json").write_text(
+        json.dumps(
+            {
+                "name": "BTC",
+                "logo": {"onDark": "logo.svg", "onLight": "gone.svg"},
+                "favicon": {"ico": "btc.ico", "svg": "../escape.svg"},
+            }
+        )
+    )
+    (brand_dir / "logo.svg").write_text("<svg/>")
+    (brand_dir / "btc.ico").write_bytes(b"\x00")
+    (brand_dir / "unreferenced.png").write_bytes(b"\x00")
+
+    # `gone.svg` does not exist, `../escape.svg` fails validation, and
+    # `unreferenced.png` is nobody's asset.
+    assert load_bundle(brand_dir).asset_filenames == frozenset(
+        {"logo.svg", "btc.ico"}
+    )

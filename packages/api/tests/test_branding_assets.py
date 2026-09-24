@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from cell_explorer_api.config import Settings
@@ -74,3 +75,60 @@ def test_traversal_outside_brand_dir_is_refused(tmp_path: Path):
     response = client.get("/brand/%2e%2e/secret.txt")
     assert response.status_code != 200
     assert "do not serve me" not in response.text
+
+
+# --- An unreadable BRAND_DIR must not stop the app booting -----------------
+
+
+def test_unstattable_brand_dir_does_not_stop_create_app(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+):
+    """The outage case: a non-root container with a root-owned mount parent.
+
+    Path.is_dir() swallows ENOENT/ENOTDIR but re-raises EACCES, so any second
+    stat of BRAND_DIR outside load_bundle's guard takes create_app down. Forced
+    deterministically rather than via chmod, because CI runs as root, where
+    permission bits are bypassed and a chmod-based test asserts nothing.
+    """
+    brand_dir = tmp_path / "brand"
+    brand_dir.mkdir()
+    (brand_dir / "brand.json").write_text(json.dumps({"name": "BTC"}))
+
+    real_is_dir = Path.is_dir
+
+    def is_dir(self: Path, *args, **kwargs):
+        if self == brand_dir:
+            raise PermissionError(13, "Permission denied")
+        return real_is_dir(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "is_dir", is_dir)
+
+    with caplog.at_level("WARNING", logger="cell_explorer_api.branding"):
+        app = create_app(Settings(brand_dir=brand_dir))
+
+    client = TestClient(app)
+    assert client.get("/api/health").json() == {"status": "ok"}
+    # Degraded to unbranded, and loudly.
+    assert client.get("/api/info").json()["brand"] is None
+    assert any("Could not stat BRAND_DIR" in r.getMessage() for r in caplog.records)
+
+
+def test_unstattable_brand_dir_registers_no_brand_route(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, static_dir: Path
+):
+    """The mount decision follows the load decision, so /brand/* falls through."""
+    brand_dir = tmp_path / "brand"
+    brand_dir.mkdir()
+    (brand_dir / "brand.json").write_text(json.dumps({"name": "BTC"}))
+
+    real_is_dir = Path.is_dir
+
+    def is_dir(self: Path, *args, **kwargs):
+        if self == brand_dir:
+            raise PermissionError(13, "Permission denied")
+        return real_is_dir(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "is_dir", is_dir)
+
+    client = TestClient(create_app(Settings(static_dir=static_dir, brand_dir=brand_dir)))
+    assert "<!doctype html>" in client.get("/brand/logo-white.svg").text

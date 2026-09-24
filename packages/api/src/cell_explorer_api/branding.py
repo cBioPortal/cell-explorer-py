@@ -234,33 +234,70 @@ def _existing_asset(brand_dir: Path, filename: str | None) -> str | None:
     return filename
 
 
-def load_brand(brand_dir: Path | None) -> Brand:
+@dataclass(frozen=True)
+class BrandBundle:
+    """A validated brand together with the directory it may be served from.
+
+    `directory` is the single source of truth for "is there a bundle on disk
+    worth serving": it is None whenever there is no BRAND_DIR, the path cannot
+    be stat'd, or it is not a directory. Callers mount off this rather than
+    stat'ing BRAND_DIR a second time — a second stat can raise (EACCES) where
+    this one warned, and can disagree with what was actually loaded.
+    """
+
+    brand: Brand
+    directory: Path | None
+
+    @property
+    def asset_filenames(self) -> frozenset[str]:
+        """The bundle filenames that passed validation and exist on disk.
+
+        Exactly the set `/brand/` may serve. Anything else in BRAND_DIR is the
+        operator's business, not the web's.
+        """
+        b = self.brand
+        names = (
+            b.logo.on_light,
+            b.logo.on_dark,
+            b.favicon.ico,
+            b.favicon.svg,
+            b.favicon.png192,
+            b.favicon.png512,
+            b.favicon.apple_touch,
+        )
+        return frozenset(name for name in names if name is not None)
+
+
+_NO_BUNDLE = BrandBundle(brand=DEFAULT_BRAND, directory=None)
+
+
+def load_bundle(brand_dir: Path | None) -> BrandBundle:
     """Load and validate a brand bundle. Never raises; defaults on any failure."""
     if brand_dir is None:
-        return DEFAULT_BRAND
+        return _NO_BUNDLE
 
     try:
         is_dir = brand_dir.is_dir()
     except OSError as exc:
         logger.warning("Could not stat BRAND_DIR %s (%s); using default branding", brand_dir, exc)
-        return DEFAULT_BRAND
+        return _NO_BUNDLE
     if not is_dir:
         logger.warning("BRAND_DIR %s is not a directory; using default branding", brand_dir)
-        return DEFAULT_BRAND
+        return _NO_BUNDLE
 
     config_path = brand_dir / "brand.json"
     try:
         raw = json.loads(config_path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         logger.warning("No brand.json in %s; using default branding", brand_dir)
-        return DEFAULT_BRAND
+        return _NO_BUNDLE
     except (OSError, ValueError) as exc:
         logger.warning("Could not read brand.json in %s (%s); using default branding", brand_dir, exc)
-        return DEFAULT_BRAND
+        return _NO_BUNDLE
 
     if not isinstance(raw, dict):
         logger.warning("brand.json in %s is not a JSON object; using default branding", brand_dir)
-        return DEFAULT_BRAND
+        return _NO_BUNDLE
 
     brand = parse_brand(raw, warn=logger.warning)
 
@@ -277,4 +314,11 @@ def load_brand(brand_dir: Path | None) -> Brand:
         png512=_existing_asset(brand_dir, brand.favicon.png512),
         apple_touch=_existing_asset(brand_dir, brand.favicon.apple_touch),
     )
-    return replace(brand, logo=logo, favicon=favicon)
+    return BrandBundle(
+        brand=replace(brand, logo=logo, favicon=favicon), directory=brand_dir
+    )
+
+
+def load_brand(brand_dir: Path | None) -> Brand:
+    """The brand alone, for callers that do not serve the bundle's assets."""
+    return load_bundle(brand_dir).brand
