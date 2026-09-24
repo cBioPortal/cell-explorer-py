@@ -1331,6 +1331,73 @@
   },
   "components": {
     "schemas": {
+      "BrandInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "short_name": {
+            "type": "string",
+            "title": "Short Name"
+          },
+          "tagline": {
+            "type": "string",
+            "title": "Tagline"
+          },
+          "logo_href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logo Href"
+          },
+          "logo_on_light": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logo On Light"
+          },
+          "logo_on_dark": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logo On Dark"
+          },
+          "colors": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Colors"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "short_name",
+          "tagline",
+          "logo_href",
+          "logo_on_light",
+          "logo_on_dark",
+          "colors"
+        ],
+        "title": "BrandInfo"
+      },
       "BulkRefreshRequest": {
         "properties": {
           "only_stale": {
@@ -2763,6 +2830,16 @@
               }
             ],
             "title": "Google Analytics Id"
+          },
+          "brand": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BrandInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -2772,7 +2849,8 @@
           "git_sha",
           "auth_enabled",
           "chat_enabled",
-          "google_analytics_id"
+          "google_analytics_id",
+          "brand"
         ],
         "title": "InfoResponse"
       },
