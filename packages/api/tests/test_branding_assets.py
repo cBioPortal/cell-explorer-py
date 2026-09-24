@@ -141,6 +141,18 @@ def test_symlink_out_of_brand_dir_is_refused(tmp_path: Path):
     assert "do-not-serve-me" not in response.text
 
 
+# --- Caching --------------------------------------------------------------
+
+
+def test_brand_asset_carries_a_short_cache_control(tmp_path: Path):
+    """Distinct from /assets/* — those are content-hashed, these are not."""
+    client = TestClient(create_app(Settings(brand_dir=_brand_dir(tmp_path))))
+
+    response = client.get("/brand/logo-white.svg")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "public, max-age=300"
+
+
 # --- An unreadable BRAND_DIR must not stop the app booting -----------------
 
 

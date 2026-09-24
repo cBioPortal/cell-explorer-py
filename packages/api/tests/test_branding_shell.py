@@ -271,3 +271,60 @@ def test_undecodable_shell_degrades_to_the_previous_behavior(
     assert response.content == raw
     # Falls all the way back to the old FileResponse, etag and all.
     assert "etag" in response.headers
+
+
+# --- Fix 6: no-cache with a validator still 304s ---------------------------
+
+
+def _shell_client(tmp_path: Path, shell_dir: Path) -> TestClient:
+    brand_dir = tmp_path / "brand"
+    brand_dir.mkdir()
+    (brand_dir / "brand.json").write_text(json.dumps({"name": "BTC"}))
+    return TestClient(create_app(Settings(static_dir=shell_dir, brand_dir=brand_dir)))
+
+
+def test_shell_carries_an_etag_and_revalidates_to_304(tmp_path: Path, shell_dir: Path):
+    client = _shell_client(tmp_path, shell_dir)
+
+    first = client.get("/some/spa/route")
+    assert first.status_code == 200
+    etag = first.headers["etag"]
+    assert first.headers["cache-control"] == "no-cache"
+
+    second = client.get("/some/spa/route", headers={"If-None-Match": etag})
+    assert second.status_code == 304
+    assert second.content == b""
+    assert second.headers["etag"] == etag
+
+
+def test_webmanifest_carries_an_etag_and_revalidates_to_304(
+    tmp_path: Path, shell_dir: Path
+):
+    client = _shell_client(tmp_path, shell_dir)
+
+    first = client.get("/site.webmanifest")
+    etag = first.headers["etag"]
+
+    second = client.get("/site.webmanifest", headers={"If-None-Match": etag})
+    assert second.status_code == 304
+    assert second.content == b""
+
+
+def test_a_stale_etag_still_gets_the_body(tmp_path: Path, shell_dir: Path):
+    client = _shell_client(tmp_path, shell_dir)
+
+    response = client.get("/some/spa/route", headers={"If-None-Match": '"stale"'})
+    assert response.status_code == 200
+    assert "<title>BTC Cell Explorer</title>" in response.text
+
+
+def test_the_shell_etag_tracks_the_brand(tmp_path: Path, shell_dir: Path):
+    """Two deployments of the same shell under different brands must not share
+    a validator — otherwise a rebrand serves a 304 for the old markup."""
+    unbranded = TestClient(create_app(Settings(static_dir=shell_dir)))
+    branded = _shell_client(tmp_path, shell_dir)
+
+    assert (
+        unbranded.get("/route").headers["etag"]
+        != branded.get("/route").headers["etag"]
+    )
