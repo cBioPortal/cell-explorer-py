@@ -13,6 +13,10 @@ def _brand(raw: dict):
     return parse_brand(raw, warn=lambda _msg: None)
 
 
+def _branded(**raw):
+    return _brand({"name": "BTC", **raw})
+
+
 def _read(shell_dir: Path, name: str) -> str:
     return (shell_dir / name).read_text()
 
@@ -271,6 +275,27 @@ def test_undecodable_shell_degrades_to_the_previous_behavior(
     assert response.content == raw
     # Falls all the way back to the old FileResponse, etag and all.
     assert "etag" in response.headers
+
+
+# --- Fix 7: awkward filenames in generated hrefs ---------------------------
+
+
+def test_asset_filenames_are_percent_encoded_in_the_shell(shell_dir: Path):
+    out = render_index_html(
+        _read(shell_dir, "index.html"),
+        _branded(favicon={"ico": "logo#1.ico", "appleTouch": "apple touch.png"}),
+    )
+    assert 'href="/brand/logo%231.ico"' in out
+    assert 'href="/brand/apple%20touch.png"' in out
+
+
+def test_asset_filenames_are_percent_encoded_in_the_webmanifest(shell_dir: Path):
+    out = render_webmanifest(
+        _read(shell_dir, "site.webmanifest"),
+        _branded(favicon={"png192": "icon 192.png"}),
+    )
+    icons = {i["sizes"]: i["src"] for i in json.loads(out)["icons"]}
+    assert icons["192x192"] == "/brand/icon%20192.png"
 
 
 # --- Fix 6: no-cache with a validator still 304s ---------------------------

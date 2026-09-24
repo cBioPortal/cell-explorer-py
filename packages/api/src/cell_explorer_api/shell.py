@@ -16,6 +16,7 @@ import json
 import logging
 import re
 from html import escape
+from urllib.parse import quote
 
 from cell_explorer_api.branding import DEFAULT_BRAND, Brand
 
@@ -26,7 +27,10 @@ _THEME_RE = re.compile(r'(<meta\s+name="theme-color"\s+content=")[^"]*(")')
 
 
 def _asset_url(filename: str | None) -> str | None:
-    return f"/brand/{filename}" if filename else None
+    # Operator filenames are validated as bare names, not as URL-safe ones: a
+    # `#`, `?`, `%`, space or backslash in one would otherwise build a URL the
+    # browser reparses into something that 404s silently.
+    return f"/brand/{quote(filename, safe='')}" if filename else None
 
 
 def _sub_once(pattern: re.Pattern[str], repl, html: str, *, anchor: str) -> str:

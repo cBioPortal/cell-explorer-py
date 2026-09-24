@@ -153,6 +153,32 @@ def test_brand_asset_carries_a_short_cache_control(tmp_path: Path):
     assert response.headers["cache-control"] == "public, max-age=300"
 
 
+# --- Percent-encoded filenames --------------------------------------------
+
+
+@pytest.mark.parametrize("filename", ["logo one.svg", "logo#1.svg", "100%.svg"])
+def test_awkward_filenames_round_trip_through_the_generated_url(
+    tmp_path: Path, filename: str
+):
+    """The URL /api/info advertises must be the URL that actually fetches the file."""
+    brand_dir = tmp_path / "brand"
+    brand_dir.mkdir()
+    (brand_dir / "brand.json").write_text(
+        json.dumps({"name": "BTC", "logo": {"onDark": filename}})
+    )
+    (brand_dir / filename).write_text("<svg id='btc'/>")
+
+    client = TestClient(create_app(Settings(brand_dir=brand_dir)))
+
+    url = client.get("/api/info").json()["brand"]["logo_on_dark"]
+    assert url is not None
+    # Percent-encoded, so no character in the name is reparsed as URL syntax.
+    assert filename not in url
+    response = client.get(url)
+    assert response.status_code == 200
+    assert "btc" in response.text
+
+
 # --- An unreadable BRAND_DIR must not stop the app booting -----------------
 
 

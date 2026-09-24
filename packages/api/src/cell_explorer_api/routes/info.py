@@ -1,6 +1,7 @@
 """Application info endpoint."""
 
 from importlib.metadata import version
+from urllib.parse import quote
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
@@ -42,7 +43,9 @@ class InfoResponse(BaseModel):
 
 
 def _asset_url(filename: str | None) -> str | None:
-    return f"/brand/{filename}" if filename else None
+    # See shell._asset_url: a validated bare filename is not automatically a
+    # URL-safe one.
+    return f"/brand/{quote(filename, safe='')}" if filename else None
 
 
 def _brand_info(brand: Brand) -> BrandInfo | None:
