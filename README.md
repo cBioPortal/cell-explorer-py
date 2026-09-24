@@ -140,8 +140,8 @@ and remain supported aliases for the generic names above.
 brand bundle: a `brand.json` plus the image assets it references. Setting it re-skins the
 tab title, favicon, web app manifest, and the header identity surfaced through
 `/api/info` (name, tagline, logo, colors) with the operator's own deployment identity.
-It is co-branding, not white-labeling — the "Cell Explorer" name and the cBioPortal
-footer attribution are fixed regardless of what `BRAND_DIR` contains; see
+It is co-branding, not white-labeling — the in-app wordmark beside the logo and the
+cBioPortal footer attribution are fixed regardless of what `BRAND_DIR` contains; see
 [What isn't configurable](#what-isnt-configurable) below.
 
 ### Bundle layout
@@ -180,8 +180,8 @@ cBioPortal defaults below.
 | `logo.onDark` | filename | — | none |
 | `logo.alt` | string | 120 | the resolved `name` |
 | `colors.ink` | `#RRGGBB` | — | `"#0d2c48"` |
-| `colors.inkDeep` | `#RRGGBB` | — | none (the frontend derives a value from `ink` when unset) |
-| `colors.themeColor` | `#RRGGBB` | — | the resolved `ink`, else `"#123a5e"` |
+| `colors.inkDeep` | `#RRGGBB` | — | none |
+| `colors.themeColor` | `#RRGGBB` | — | the operator's own `ink`, if supplied and valid — otherwise `"#123a5e"` |
 | `favicon.ico` | filename | — | none |
 | `favicon.svg` | filename | — | none |
 | `favicon.png192` | filename | — | none |
@@ -193,6 +193,16 @@ header text is rendered light on top of it — so a value whose WCAG relative lu
 exceeds `0.35` is rejected outright (the field falls back to the default rather than
 shipping unreadable text). `colors.inkDeep` and `colors.themeColor` carry no such
 constraint.
+
+`colors.themeColor`'s default is *not* the same as `colors.ink`'s default: when no
+colors are set at all, `ink` defaults to `#0d2c48` but `themeColor` still defaults to
+the separate constant `#123a5e`, because the fallback only reaches for the operator's
+own `ink` value — never the built-in one. Set `colors.ink` alone and `themeColor`
+follows it automatically; leave both unset and the two diverge.
+
+`colors.inkDeep` has no default derivation today — an unset value stays unset and is
+passed through as `null`. A frontend that derives a deeper shade from `ink`
+automatically when `inkDeep` is absent is planned but not part of this backend.
 
 **`logo.onLight` and `logo.onDark` are two separate assets, not one logo recolored by
 CSS.** Brand marks usually arrive as artwork with a fill already baked in (e.g. a white
@@ -208,6 +218,12 @@ the same as an invalid one.
 
 **`logoHref`**, if set, must be an absolute `http://` or `https://` URL with a host —
 anything else (a relative path, a `javascript:` URL, a bare string) is rejected.
+
+**The five favicon fields split across two places.** `favicon.ico`, `favicon.svg`, and
+`favicon.appleTouch` populate `<link>` tags in the HTML `<head>`; `favicon.png192` and
+`favicon.png512` populate the web app manifest's `icons` array instead, for PWA installs.
+Setting only `favicon.png512`, for instance, changes nothing in `<head>` — that's
+expected, not a bug.
 
 ### When something is wrong
 
@@ -271,10 +287,14 @@ Brand assets rarely arrive web-ready. A few conversions come up repeatedly:
 ### What isn't configurable
 
 The cBioPortal footer attribution is fixed and deliberately not a `brand.json` field —
-there is no way to move, restyle, or suppress it. This is co-branding: the operator's
-identity is primary in the header, and cBioPortal remains visibly present as the
-underlying platform. Likewise, "Cell Explorer" itself isn't renamed by any field — the
-operator brands the surrounding identity, not the tool.
+there is no way to move, restyle, or suppress it. The in-app wordmark next to the logo
+is likewise fixed. This is co-branding: the operator's identity is primary in the
+header, and cBioPortal remains visibly present as the underlying platform.
+
+The browser **tab title** is not in that fixed set — it's exactly the `title` field
+above, operator-controlled, defaulting to `"<name> Cell Explorer"` when unset. An
+operator who sets `{"title": "Acme Institute"}` gets a tab that says exactly that, with
+no "Cell Explorer" in it at all; that's the field working as designed, not a gap.
 
 ## License
 
