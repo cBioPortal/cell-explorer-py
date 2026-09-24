@@ -111,3 +111,23 @@ def test_favicon_assets_checked_for_existence(tmp_path: Path):
     brand = load_brand(brand_dir)
     assert brand.favicon.ico == "favicon.ico"
     assert brand.favicon.svg is None
+
+
+def test_non_utf8_brand_json_yields_default(tmp_path: Path, caplog):
+    brand_dir = tmp_path / "brand"
+    brand_dir.mkdir()
+    (brand_dir / "brand.json").write_bytes(b"\xff\xfe\x00invalid")
+    with caplog.at_level(logging.WARNING):
+        brand = load_brand(brand_dir)
+    assert brand == DEFAULT_BRAND
+    assert "brand.json" in caplog.text
+
+
+def test_unstattable_directory_yields_default(tmp_path: Path, monkeypatch, caplog):
+    def _boom(self):
+        raise PermissionError(13, "Permission denied")
+    monkeypatch.setattr(Path, "is_dir", _boom)
+    with caplog.at_level(logging.WARNING):
+        brand = load_brand(tmp_path / "brand")
+    assert brand == DEFAULT_BRAND
+    assert "BRAND_DIR" in caplog.text

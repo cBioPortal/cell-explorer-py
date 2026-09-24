@@ -239,17 +239,22 @@ def load_brand(brand_dir: Path | None) -> Brand:
     if brand_dir is None:
         return DEFAULT_BRAND
 
-    if not brand_dir.is_dir():
+    try:
+        is_dir = brand_dir.is_dir()
+    except OSError as exc:
+        logger.warning("Could not stat BRAND_DIR %s (%s); using default branding", brand_dir, exc)
+        return DEFAULT_BRAND
+    if not is_dir:
         logger.warning("BRAND_DIR %s is not a directory; using default branding", brand_dir)
         return DEFAULT_BRAND
 
     config_path = brand_dir / "brand.json"
     try:
-        raw = json.loads(config_path.read_text())
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         logger.warning("No brand.json in %s; using default branding", brand_dir)
         return DEFAULT_BRAND
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError) as exc:
         logger.warning("Could not read brand.json in %s (%s); using default branding", brand_dir, exc)
         return DEFAULT_BRAND
 
