@@ -309,6 +309,20 @@ def test_matching_anchors_log_nothing(shell_dir: Path, caplog):
     assert caplog.records == []
 
 
+# --- Finding 8: the title anchor must not over-match -----------------------
+
+
+def test_title_anchor_stops_at_the_first_close_tag(shell_dir: Path):
+    """An unclosed <title> must not swallow the rest of <head>, including the
+    inline SPA-redirect script this module promises not to touch."""
+    html = _read(shell_dir, "index.html").replace(
+        "<title>cBioPortal Cell Explorer</title>", "<title>unclosed"
+    )
+    out = render_index_html(html, _branded(title="BTC Explorer"))
+    assert "window.history.replaceState" in out
+    assert "<title>unclosed" in out
+
+
 # --- Fix 7: awkward filenames in generated hrefs ---------------------------
 
 

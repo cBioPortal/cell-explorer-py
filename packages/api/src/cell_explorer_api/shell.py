@@ -22,7 +22,10 @@ from cell_explorer_api.branding import DEFAULT_BRAND, Brand
 
 logger = logging.getLogger(__name__)
 
-_TITLE_RE = re.compile(r"<title>.*?</title>", re.DOTALL)
+# `[^<]*` rather than a lazy `.*?`: a title cannot contain markup, and an
+# unclosed one must not let the match run on into the inline SPA-redirect
+# script this module promises never to touch.
+_TITLE_RE = re.compile(r"<title>[^<]*</title>")
 _THEME_RE = re.compile(r'(<meta\s+name="theme-color"\s+content=")[^"]*(")')
 
 

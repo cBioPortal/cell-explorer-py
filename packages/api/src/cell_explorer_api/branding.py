@@ -16,6 +16,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
 
+logger = logging.getLogger(__name__)
+
 HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 ALLOWED_ASSET_SUFFIXES = frozenset({".svg", ".png", ".ico", ".jpg", ".jpeg", ".webp"})
@@ -215,9 +217,6 @@ def parse_brand(raw: dict, *, warn: Callable[[str], None]) -> Brand:
         colors=colors,
         favicon=favicon,
     )
-
-
-logger = logging.getLogger(__name__)
 
 
 def _existing_asset(brand_dir: Path, filename: str | None) -> str | None:
