@@ -172,7 +172,7 @@ cBioPortal defaults below.
 | Field | Type | Max length | Default |
 |---|---|---|---|
 | `name` | string | 120 | `"cBioPortal"` |
-| `shortName` | string | 40 | the resolved `name` |
+| `shortName` | string | 40 (when set explicitly) | the resolved `name` |
 | `title` (browser tab title) | string | 160 | `"{name} Cell Explorer"` |
 | `tagline` | string | 200 | `"Explore millions of cells in your browser."` |
 | `logoHref` | absolute `http(s)` URL | — | none (logo is not a link) |
@@ -203,6 +203,12 @@ follows it automatically; leave both unset and the two diverge.
 `colors.inkDeep` has no default derivation today — an unset value stays unset and is
 passed through as `null`. A frontend that derives a deeper shade from `ink`
 automatically when `inkDeep` is absent is planned but not part of this backend.
+
+**`shortName`'s 40-character cap applies only when it is set explicitly.** Omit it and
+it falls back to the resolved `name`, which has its own cap of 120 — so a 100-character
+`name` yields a 100-character `shortName`. The fallback is deliberately not truncated:
+cutting an operator's institution name mid-word is a worse outcome than a long one, and
+an operator who wants a short form can supply it.
 
 **`logo.onLight` and `logo.onDark` are two separate assets, not one logo recolored by
 CSS.** Brand marks usually arrive as artwork with a fill already baked in (e.g. a white
