@@ -169,7 +169,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         brand_root = brand_bundle.directory
         brand_assets = brand_bundle.asset_filenames
 
-        @app.get("/brand/{filename:path}", include_in_schema=False)
+        # HEAD as well as GET: the StaticFiles mount this replaced answered both,
+        # and CDNs and health checks issue HEAD even though browsers fetch images
+        # with GET. FastAPI's @app.get does not add it the way a bare Starlette
+        # route does.
+        @app.api_route(
+            "/brand/{filename:path}", methods=["GET", "HEAD"], include_in_schema=False
+        )
         async def brand_asset(filename: str):
             if filename not in brand_assets:
                 return JSONResponse(status_code=404, content={"detail": "Not found"})

@@ -28,6 +28,24 @@ def test_brand_asset_is_served(tmp_path: Path):
     assert "btc" in response.text
 
 
+def test_brand_asset_answers_head(tmp_path: Path):
+    # The StaticFiles mount this route replaced answered HEAD; a bare FastAPI
+    # @app.get does not. CDNs and health checks issue HEAD even though browsers
+    # fetch images with GET, so losing it is a real regression.
+    app = create_app(Settings(brand_dir=_brand_dir(tmp_path)))
+    client = TestClient(app)
+    response = client.head("/brand/logo-white.svg")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "public, max-age=300"
+    assert response.content == b""
+
+
+def test_head_on_an_unreferenced_file_404s(tmp_path: Path):
+    app = create_app(Settings(brand_dir=_brand_dir(tmp_path)))
+    client = TestClient(app)
+    assert client.head("/brand/brand.json").status_code == 404
+
+
 def test_missing_brand_asset_404s(tmp_path: Path):
     app = create_app(Settings(brand_dir=_brand_dir(tmp_path)))
     client = TestClient(app)
