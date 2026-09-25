@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.4.1 (2026-09-25)
+
+### Bug Fixes
+
+- **cell2zarr**: Do not crash on a nullable-string obs/_index
+  ([`ec0bbcb`](https://github.com/cBioPortal/cell-explorer-py/commit/ec0bbcbc516e40e136554533a6278a8efce7f253))
+
+
 ## v0.4.0 (2026-08-21)
 
 ### Features
