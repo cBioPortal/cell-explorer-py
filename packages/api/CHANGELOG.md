@@ -2,6 +2,97 @@
 
 <!-- version list -->
 
+## v0.6.0 (2026-09-25)
+
+### Bug Fixes
+
+- Address final code review findings on dataset metadata harvester
+  ([`2db055a`](https://github.com/cBioPortal/cell-explorer-py/commit/2db055a7bbe3cec7a02142461e7bb21da858b2d0))
+
+- Catch all mint-credential exceptions in metadata harvester, not just CredentialError
+  ([`1bb0fc2`](https://github.com/cBioPortal/cell-explorer-py/commit/1bb0fc22a83fcda2f6a2d3599d4ff4e5da22d1f2))
+
+- Close only_stale coverage gap and 0-hours truthiness bug
+  ([`77e006b`](https://github.com/cBioPortal/cell-explorer-py/commit/77e006bda913bebd38da0d32556ce3b4ad809abf))
+
+- Read v2 column dtype from .zarray, harden over-cap test
+  ([`899271a`](https://github.com/cBioPortal/cell-explorer-py/commit/899271a7036ca47eadd4b179ab2c392c7814a4df))
+
+- Reject partially-populated metadata rows, not just null timestamps
+  ([`02de6a4`](https://github.com/cBioPortal/cell-explorer-py/commit/02de6a4090ed9ff9acac7c77a388fb1dbb26f9bf))
+
+- Resolve facet identity in chat context, document producer split
+  ([`76c480e`](https://github.com/cBioPortal/cell-explorer-py/commit/76c480e3750e5bb0fb6436951b6c7cdc37c655fd))
+
+- Return empty obs_facets when consolidated metadata is absent
+  ([`27386ac`](https://github.com/cBioPortal/cell-explorer-py/commit/27386ac08713ffdfdc8c4ef390e79e1d2d1dd648))
+
+- Serve dataset metadata on the collection detail route
+  ([`9128cc5`](https://github.com/cBioPortal/cell-explorer-py/commit/9128cc5bd94a0367d283f08ee0ec614c9f589033))
+
+### Documentation
+
+- Document every setting, and test that it stays that way
+  ([`08bca1c`](https://github.com/cBioPortal/cell-explorer-py/commit/08bca1ce9667d2715193b1a0cf347cd854e63b4f))
+
+### Features
+
+- Add admin endpoint listing unmapped obs columns
+  ([`c25c5fb`](https://github.com/cBioPortal/cell-explorer-py/commit/c25c5fbf48ed31e14efe74a9a7b91d8e515116b4))
+
+- Add admin metadata refresh endpoints
+  ([`98b50fa`](https://github.com/cBioPortal/cell-explorer-py/commit/98b50fa8b1403ef5582c04afaef13d9f024de310))
+
+- Add canonical facet definitions and column resolution
+  ([`15736ce`](https://github.com/cBioPortal/cell-explorer-py/commit/15736ce335f64d576353ac2cfad4f5def44b24e9))
+
+- Add dataset metadata harvester
+  ([`d15a11f`](https://github.com/cBioPortal/cell-explorer-py/commit/d15a11f25f7fc5fb47331ea5b83364657c4db601))
+
+- Add dataset_metadata table
+  ([`a98dd19`](https://github.com/cBioPortal/cell-explorer-py/commit/a98dd197cd8325f44beb45ca724a24d93b3e2775))
+
+- Add zarr store metadata extractor
+  ([`082a614`](https://github.com/cBioPortal/cell-explorer-py/commit/082a614b4fd215890f888e95d031b0f1dd964f20))
+
+- Harvest obs facet values from consolidated metadata
+  ([`d4918ac`](https://github.com/cBioPortal/cell-explorer-py/commit/d4918ac96915b57888c5f0474b83a3528993d8eb))
+
+- Harvest store metadata on dataset create and update
+  ([`c188c1d`](https://github.com/cBioPortal/cell-explorer-py/commit/c188c1ddb0a6a19b2f5afcac6e4acd87c0ab8e2f))
+
+- Persist harvested obs facet values
+  ([`fe9172c`](https://github.com/cBioPortal/cell-explorer-py/commit/fe9172c9f6b31f2ba9c4257e0e1eefdeb4dae4dd))
+
+- Serve a Google Analytics measurement id from /api/info
+  ([`c6001db`](https://github.com/cBioPortal/cell-explorer-py/commit/c6001dba7c8a008d923dfce637f2975cee49785c))
+
+- Serve harvested store metadata from the dataset API
+  ([`afaa992`](https://github.com/cBioPortal/cell-explorer-py/commit/afaa9925adf2dee1ca58290f7589c8502c88f0c9))
+
+- Serve obs columns with resolved facet identity
+  ([`724a7ed`](https://github.com/cBioPortal/cell-explorer-py/commit/724a7edf960e512eef0488defc66fabf8cb90515))
+
+### Refactoring
+
+- Move credential_to_headers into credentials service
+  ([`1da9828`](https://github.com/cBioPortal/cell-explorer-py/commit/1da9828c67b7b4b75ffb82413d4d597f07e53698))
+
+- Remove unused unmapped_columns helper
+  ([`7f26096`](https://github.com/cBioPortal/cell-explorer-py/commit/7f26096196b839c61a1bf2b797f1b24b3951b0e1))
+
+- Share ObsColumnInfo between chat and catalogue responses
+  ([`9ac958b`](https://github.com/cBioPortal/cell-explorer-py/commit/9ac958bc5a2c25e85235ade3911bff6ef096147d))
+
+### Testing
+
+- Cover CredentialError to CredentialMintError conversion for credential_to_headers
+  ([`1aadc23`](https://github.com/cBioPortal/cell-explorer-py/commit/1aadc23ee12f502bad07a75b55d5ee55b97dcad0))
+
+- Cover the empty-obs_facets fallback response branch
+  ([`be9d70e`](https://github.com/cBioPortal/cell-explorer-py/commit/be9d70ee9e5969ce5a702c0f6bf8eaddbd60939b))
+
+
 ## v0.5.1 (2026-08-21)
 
 ### Bug Fixes
