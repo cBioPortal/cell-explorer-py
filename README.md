@@ -66,6 +66,7 @@ than "broken".
 | Variable | Default | Notes |
 |---|---|---|
 | `STATIC_DIR` | unset | Path to the built frontend. Unset means API-only, no static serving |
+| `BRAND_DIR` | unset | Directory holding an operator-supplied brand bundle (`brand.json` plus assets). Unset means built-in cBioPortal branding. Mount read-only |
 | `ENVIRONMENT` | `development` | Reported on `/api/info` |
 | `GIT_SHA` | auto-detected | Read from git at startup. Set explicitly in containers, where git is unavailable |
 
@@ -132,6 +133,176 @@ and remain supported aliases for the generic names above.
 | `ANTHROPIC_API_KEY` | unset | Unset means chat is disabled and `/api/info` reports `chat_enabled: false` |
 | `CHAT_REQUIRED_ROLE` | unset | Role required for chat. Unset means any authenticated user, still subject to each dataset's own `chat_enabled` |
 | `CLI_STATE_SECRET` | unset | Signs the CLI login callback state |
+
+## Branding
+
+`BRAND_DIR` (see [Configuration](#configuration) above) points at an operator-supplied
+brand bundle: a `brand.json` plus the image assets it references. Setting it re-skins the
+tab title, favicon, web app manifest, and the header identity surfaced through
+`/api/info` (name, tagline, logo, colors) with the operator's own deployment identity.
+It is co-branding, not white-labeling — the in-app wordmark beside the logo and the
+cBioPortal footer attribution are fixed regardless of what `BRAND_DIR` contains; see
+[What isn't configurable](#what-isnt-configurable) below.
+
+### Bundle layout
+
+```
+/opt/cell-explorer/brand/
+├── brand.json
+├── logo-light.svg
+├── logo-dark.svg
+├── favicon.ico
+├── favicon.svg
+├── icon-192.png
+├── icon-512.png
+└── apple-touch-icon.png
+```
+
+`brand.json` is the only filename that matters — it must be named exactly that. Every
+other file in the directory is named whatever the operator likes; `brand.json`'s `logo`
+and `favicon` fields say which filename plays which role. Asset files must live directly
+in `BRAND_DIR` — no subdirectories.
+
+### `brand.json` schema
+
+Every field is optional and falls back to its own default independently. A one-field
+file such as `{"name": "My Institute"}` is valid — everything else keeps the built-in
+cBioPortal defaults below.
+
+| Field | Type | Max length | Default |
+|---|---|---|---|
+| `name` | string | 120 | `"cBioPortal"` |
+| `shortName` | string | 40 (when set explicitly) | the resolved `name` |
+| `title` (browser tab title) | string | 160 | `"{name} Cell Explorer"` |
+| `tagline` | string | 200 | `"Explore millions of cells in your browser."` |
+| `logoHref` | absolute `http(s)` URL | — | none (logo is not a link) |
+| `logo.onLight` | filename | 255 bytes | none |
+| `logo.onDark` | filename | 255 bytes | none |
+| `logo.alt` | string | 120 | the resolved `name` |
+| `colors.ink` | `#RRGGBB` | — | `"#0d2c48"` |
+| `colors.inkDeep` | `#RRGGBB` | — | none |
+| `colors.themeColor` | `#RRGGBB` | — | the operator's own `ink`, if supplied and valid — otherwise `"#123a5e"` |
+| `favicon.ico` | filename | 255 bytes | none |
+| `favicon.svg` | filename | 255 bytes | none |
+| `favicon.png192` | filename | 255 bytes | none |
+| `favicon.png512` | filename | 255 bytes | none |
+| `favicon.appleTouch` | filename | 255 bytes | none |
+
+**`colors.ink` must be dark.** It's the background of a light-on-dark identity band —
+header text is rendered light on top of it — so a value whose WCAG relative luminance
+exceeds `0.35` is rejected outright (the field falls back to the default rather than
+shipping unreadable text). `colors.inkDeep` and `colors.themeColor` carry no such
+constraint.
+
+`colors.themeColor`'s default is *not* the same as `colors.ink`'s default: when no
+colors are set at all, `ink` defaults to `#0d2c48` but `themeColor` still defaults to
+the separate constant `#123a5e`, because the fallback only reaches for the operator's
+own `ink` value — never the built-in one. Set `colors.ink` alone and `themeColor`
+follows it automatically; leave both unset and the two diverge.
+
+`colors.inkDeep` has no default derivation today — an unset value stays unset and is
+passed through as `null`. A frontend that derives a deeper shade from `ink`
+automatically when `inkDeep` is absent is planned but not part of this backend.
+
+**`shortName`'s 40-character cap applies only when it is set explicitly.** Omit it and
+it falls back to the resolved `name`, which has its own cap of 120 — so a 100-character
+`name` yields a 100-character `shortName`. The fallback is deliberately not truncated:
+cutting an operator's institution name mid-word is a worse outcome than a long one, and
+an operator who wants a short form can supply it.
+
+**`logo.onLight` and `logo.onDark` are two separate assets, not one logo recolored by
+CSS.** Brand marks usually arrive as artwork with a fill already baked in (e.g. a white
+knockout mark for a dark header, a full-color mark for a light background), so the
+bundle carries both and the shell picks whichever fits the surface it's rendering on.
+
+**Asset filenames** (`logo.onLight`, `logo.onDark`, and every `favicon.*` field) must be
+a bare filename: no `/`, no `..` anywhere in the string (not just as a `../` path
+segment — `my..logo.svg` is rejected too), not empty or `.`, and at most **255 bytes**
+once UTF-8 encoded — bytes, not characters, matching the filesystem's own limit, so a
+name with accented or non-Latin characters hits the cap sooner than its length suggests.
+The extension must be one of `.svg`, `.png`, `.ico`, `.jpg`, `.jpeg`, `.webp` (case-insensitive). The file must
+also actually exist in `BRAND_DIR` — a validated filename pointing at nothing is dropped
+the same as an invalid one.
+
+**`logoHref`**, if set, must be an absolute `http://` or `https://` URL with a host —
+anything else (a relative path, a `javascript:` URL, a bare string) is rejected.
+
+**The five favicon fields split across two places.** `favicon.ico`, `favicon.svg`, and
+`favicon.appleTouch` populate `<link>` tags in the HTML `<head>`; `favicon.png192` and
+`favicon.png512` populate the web app manifest's `icons` array instead, for PWA installs.
+Setting only `favicon.png512`, for instance, changes nothing in `<head>` — that's
+expected, not a bug.
+
+### When something is wrong
+
+Every field validates independently and fails soft: an invalid value — wrong type,
+malformed hex, oversized text, a filename that fails the traversal/extension checks, an
+asset that doesn't exist on disk, an `ink` that isn't dark enough — is dropped with a
+warning in the container logs, and that one field falls back to its default. A bad
+bundle can make the deployment look wrong; it can never stop the application from
+starting.
+
+### Deploying the bundle
+
+Mount the directory **read-only** and point `BRAND_DIR` at the mount:
+
+```yaml
+services:
+  cell-explorer:
+    volumes:
+      - /opt/cell-explorer/brand:/brand:ro
+    environment:
+      BRAND_DIR: /brand
+```
+
+The bundle is read once, at container startup — changing `brand.json` or an asset
+requires restarting the container, not just replacing the file on disk.
+
+On Kubernetes, the equivalent is a ConfigMap mount:
+
+```yaml
+volumes:
+  - name: brand
+    configMap: { name: brand }
+volumeMounts:
+  - name: brand
+    mountPath: /brand
+    readOnly: true
+env:
+  - name: BRAND_DIR
+    value: /brand
+```
+
+A ConfigMap base64-encodes binary assets and caps out around 1 MB, so a full favicon
+set plus multiple logo variants can approach the limit. Larger bundles need a PVC or a
+derived image (`FROM cell-explorer / COPY brand/ /brand`) instead.
+
+### Preparing assets
+
+Brand assets rarely arrive web-ready. A few conversions come up repeatedly:
+
+- **EPS → SVG**: `inkscape in.eps --export-type=svg`. Text in EPS source is typically
+  outlined already, so the converted SVG has no font dependency.
+- **Favicons need a finished set, not a single SVG.** Safari and Windows still want an
+  `.ico`; PWA installs want 192×192 and 512×512 PNGs. Ship all of `favicon.ico`,
+  `favicon.svg`, `favicon.png192`, and `favicon.png512` rather than relying on the
+  browser to synthesize the rest from one file.
+- **Print-derived colors need remapping.** Brand colors supplied as CMYK or spot values
+  render differently once naively converted to RGB than the brand's own on-screen
+  master. Check hex values against the brand's digital style guide, not the print one,
+  before dropping them into `brand.json`.
+
+### What isn't configurable
+
+The cBioPortal footer attribution is fixed and deliberately not a `brand.json` field —
+there is no way to move, restyle, or suppress it. The in-app wordmark next to the logo
+is likewise fixed. This is co-branding: the operator's identity is primary in the
+header, and cBioPortal remains visibly present as the underlying platform.
+
+The browser **tab title** is not in that fixed set — it's exactly the `title` field
+above, operator-controlled, defaulting to `"<name> Cell Explorer"` when unset. An
+operator who sets `{"title": "Acme Institute"}` gets a tab that says exactly that, with
+no "Cell Explorer" in it at all; that's the field working as designed, not a gap.
 
 ## License
 

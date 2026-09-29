@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     """
 
     static_dir: Path | None = None
+
+    # Directory holding an operator-supplied brand bundle (brand.json plus its
+    # assets). Unset means the built-in cBioPortal branding. Supplied per
+    # deployment as a mounted directory, never baked into the image.
+    brand_dir: Path | None = None
+
     environment: str = "development"
     git_sha: str | None = None
 
