@@ -2,6 +2,73 @@
 
 <!-- version list -->
 
+## v0.7.0 (2026-09-29)
+
+### Bug Fixes
+
+- **branding**: Answer HEAD on brand assets
+  ([`c20f677`](https://github.com/cBioPortal/cell-explorer-py/commit/c20f67701c4b2b69dd06590df1a8a100a2733014))
+
+- **branding**: Cap asset filename length so a stat cannot raise out of load
+  ([`d6bbb02`](https://github.com/cBioPortal/cell-explorer-py/commit/d6bbb02e449096ded1f4fffdc958d2f4c94f0961))
+
+- **branding**: Catch UnicodeDecodeError and PermissionError in load_brand
+  ([`7925e27`](https://github.com/cBioPortal/cell-explorer-py/commit/7925e271f4fbee06de3e311106b9d2060434b2eb))
+
+- **branding**: Never raise out of create_app on a malformed shell
+  ([`f400235`](https://github.com/cBioPortal/cell-explorer-py/commit/f4002355fcbee9b09321c28e6b0eb8828ea4036a))
+
+- **branding**: Never raise out of create_app on an unreadable BRAND_DIR
+  ([`2d22f84`](https://github.com/cBioPortal/cell-explorer-py/commit/2d22f846504e1d4ffb259176e2380e871fdcc460))
+
+- **branding**: Percent-encode brand asset filenames in generated URLs
+  ([`7cab5d2`](https://github.com/cBioPortal/cell-explorer-py/commit/7cab5d2631a6a17a9ddcc4d234ede2faca3fb0df))
+
+- **branding**: Serve only the assets brand.json references
+  ([`f7bb2e5`](https://github.com/cBioPortal/cell-explorer-py/commit/f7bb2e549fe2879d43a02c32855d9bbd46cd6829))
+
+- **branding**: Stricter asset filename validation and favicon test coverage
+  ([`5c0939e`](https://github.com/cBioPortal/cell-explorer-py/commit/5c0939e6b8c9777ba341be30c17e39815ffc2a63))
+
+- **branding**: Type BrandInfo colors and expose logo alt text
+  ([`bf05c26`](https://github.com/cBioPortal/cell-explorer-py/commit/bf05c26aa193faad4fda17de160c956c1dd4d8e5))
+
+### Chores
+
+- **branding**: Tighten the title anchor, hoist the logger, ignore package data
+  ([`b892faa`](https://github.com/cBioPortal/cell-explorer-py/commit/b892faacc1e39a85dbda20fa47b4abc97fcd09d6))
+
+### Features
+
+- **branding**: Add brand config model with per-field validation
+  ([`9ed2feb`](https://github.com/cBioPortal/cell-explorer-py/commit/9ed2feb31f6bbf18c60890caf849f1b9f4d3b062))
+
+- **branding**: Add BRAND_DIR setting and load brand at startup
+  ([`c93c3c3`](https://github.com/cBioPortal/cell-explorer-py/commit/c93c3c3b8eeaff02324f1b1baf5e1fbfbed04460))
+
+- **branding**: Expose brand config on /api/info
+  ([`3ac5353`](https://github.com/cBioPortal/cell-explorer-py/commit/3ac535345c7a76784cfc2a918235ce0e742724b6))
+
+- **branding**: Load and validate a brand bundle from BRAND_DIR
+  ([`92648cf`](https://github.com/cBioPortal/cell-explorer-py/commit/92648cfbc3ee38dddc3cb076f04fc66ae008f5c0))
+
+- **branding**: Serve brand bundle assets at /brand/
+  ([`7ed2823`](https://github.com/cBioPortal/cell-explorer-py/commit/7ed2823e4353bb208908526b5faa4cd9a1bc4a92))
+
+- **branding**: Template brand into index.html and site.webmanifest
+  ([`b12039a`](https://github.com/cBioPortal/cell-explorer-py/commit/b12039a3e35c0c6149a6525f7850601fa2f1905f))
+
+### Performance Improvements
+
+- **branding**: Cache brand assets briefly and give the shell an ETag
+  ([`cc77b8e`](https://github.com/cBioPortal/cell-explorer-py/commit/cc77b8edf3521cb7452b0a4387121512a0840a2b))
+
+### Testing
+
+- **branding**: Pin the anchor-miss log and the manifest decode fallback
+  ([`99cb9cb`](https://github.com/cBioPortal/cell-explorer-py/commit/99cb9cb78c895bf79c05d5f29f90d9ade216923c))
+
+
 ## v0.6.0 (2026-09-25)
 
 ### Bug Fixes
