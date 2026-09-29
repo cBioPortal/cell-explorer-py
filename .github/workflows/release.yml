@@ -24,37 +24,82 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Run semantic-release as an ordinary step rather than its Docker action.
+      # The action builds its image at run time and resolves dependencies then,
+      # and semantic-release declares `gitpython~=3.0` — a range wide enough to
+      # admit any 3.x. GitPython 3.1.60 briefly removed `Actor.name_email_regex`,
+      # which semantic-release calls when validating the commit author, and every
+      # release failed for a month with nothing in this repo having changed (#192).
+      # Pinning both here is the only way to close that: the action exposes no
+      # input to constrain what it installs, so pinning the action does nothing.
+      # Bump these deliberately; do not widen them.
+      - name: Install semantic-release
+        run: pip install 'python-semantic-release==10.7.0' 'GitPython==3.1.62'
+
+      - name: Configure git identity
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
       - name: Release cell-explorer-api
         id: release-api
-        uses: python-semantic-release/python-semantic-release@v10.6.1
-        with:
-          directory: packages/api
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          force: ${{ inputs.force_level }}
+        working-directory: packages/api
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE: ${{ inputs.force_level }}
+        run: |
+          force=""
+          [ -n "$FORCE" ] && force="--$FORCE"
+          # --print-tag prints the CURRENT tag when there is nothing to release,
+          # so the signal is whether it differs from the last released tag.
+          next=$(semantic-release --noop version $force --print-tag 2>/dev/null)
+          last=$(semantic-release --noop version --print-last-released-tag 2>/dev/null)
+          if [ "$next" = "$last" ]; then
+            echo "Nothing to release for cell-explorer-api (at $last)"
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          semantic-release -v version $force
+          echo "released=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$next" >> "$GITHUB_OUTPUT"
 
       - name: Publish cell-explorer-api GitHub Release
-        uses: python-semantic-release/publish-action@v10.6.1
         if: steps.release-api.outputs.released == 'true'
-        with:
-          directory: packages/api
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ steps.release-api.outputs.tag }}
+        working-directory: packages/api
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: semantic-release -v publish --tag '${{ steps.release-api.outputs.tag }}'
 
       - name: Release cell2zarr
         id: release-cell2zarr
-        uses: python-semantic-release/python-semantic-release@v10.6.1
-        with:
-          directory: packages/cell2zarr
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          force: ${{ inputs.force_level }}
+        working-directory: packages/cell2zarr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE: ${{ inputs.force_level }}
+        run: |
+          force=""
+          [ -n "$FORCE" ] && force="--$FORCE"
+          next=$(semantic-release --noop version $force --print-tag 2>/dev/null)
+          last=$(semantic-release --noop version --print-last-released-tag 2>/dev/null)
+          if [ "$next" = "$last" ]; then
+            echo "Nothing to release for cell2zarr (at $last)"
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          semantic-release -v version $force
+          echo "released=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$next" >> "$GITHUB_OUTPUT"
 
       - name: Publish cell2zarr GitHub Release
-        uses: python-semantic-release/publish-action@v10.6.1
         if: steps.release-cell2zarr.outputs.released == 'true'
-        with:
-          directory: packages/cell2zarr
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ steps.release-cell2zarr.outputs.tag }}
+        working-directory: packages/cell2zarr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: semantic-release -v publish --tag '${{ steps.release-cell2zarr.outputs.tag }}'
 
   docker:
     needs: release
