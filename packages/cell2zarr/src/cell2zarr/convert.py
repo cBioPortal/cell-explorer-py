@@ -108,10 +108,12 @@ def convert_h5ad_to_zarr(input_file: Path, output_file: Path, obs_chunk_size: in
         var_chunk = var_chunk_size if var_chunk_size else adata.shape[1]
         chunks = (obs_chunk, var_chunk)
         logger.info(f"Writing to zarr with chunks {chunks}: {output_file}")
-        adata.write_zarr(output_file, chunks=chunks)
+        with _anndata_write_settings():
+            adata.write_zarr(output_file, chunks=chunks)
     else:
         logger.info(f"Writing to zarr: {output_file}")
-        adata.write_zarr(output_file)
+        with _anndata_write_settings():
+            adata.write_zarr(output_file)
     logger.info("Successfully converted to zarr format")
 
 
@@ -130,6 +132,11 @@ def _init_zarrs() -> int:
 def _layer_names(adata) -> list[str]:
     """Named layers only — anndata >= 0.13 also reports X under the None key."""
     return [k for k in adata.layers.keys() if k is not None]
+
+
+def _anndata_write_settings():
+    """cell2zarr owns array layout: nullable strings on, anndata's auto-sharding off."""
+    return ad.settings.override(allow_write_nullable_strings=True, auto_shard_zarr_v3=False)
 
 
 def _filter_hvgs(var_df, n_top_genes: int | None):
@@ -468,9 +475,9 @@ def _write_metadata(final_root, final_store, metadata: dict, config: ConversionC
             for c in str_cols:
                 df[c] = df[c].astype("category")
 
-    ad.settings.allow_write_nullable_strings = True
-    write_elem(final_root, "obs", metadata["obs"])
-    write_elem(final_root, "var", metadata["var"])
+    with _anndata_write_settings():
+        write_elem(final_root, "obs", metadata["obs"])
+        write_elem(final_root, "var", metadata["var"])
 
     obsm_cell_chunk = min(config.obsm_cell_chunk_size, n_obs)
     write_obsm_to_store(final_root, metadata["obsm"], n_obs, config.dtype, encoding, config.obsm_cell_chunk_size)
@@ -518,11 +525,14 @@ def _write_metadata(final_root, final_store, metadata: dict, config: ConversionC
 
     if metadata["uns"]:
         logger.info("Writing uns...")
-        write_elem(final_root, "uns", metadata["uns"])
+        with _anndata_write_settings():
+            write_elem(final_root, "uns", metadata["uns"])
     if metadata["obsp"]:
-        write_elem(final_root, "obsp", metadata["obsp"])
+        with _anndata_write_settings():
+            write_elem(final_root, "obsp", metadata["obsp"])
     if metadata["varp"]:
-        write_elem(final_root, "varp", metadata["varp"])
+        with _anndata_write_settings():
+            write_elem(final_root, "varp", metadata["varp"])
 
     zarr.consolidate_metadata(final_store, zarr_format=3)
 
@@ -754,8 +764,8 @@ def _add_obs_or_var(adata, root, key: str, overwrite: bool) -> None:
         for c in str_cols:
             df[c] = df[c].astype("category")
 
-    ad.settings.allow_write_nullable_strings = True
-    write_elem(root, key, df)
+    with _anndata_write_settings():
+        write_elem(root, key, df)
 
 
 def _add_write_elem_key(adata, root, key: str, overwrite: bool) -> None:
@@ -769,7 +779,8 @@ def _add_write_elem_key(adata, root, key: str, overwrite: bool) -> None:
         logger.warning(f"{key} is empty in h5ad file, skipping.")
         sys.exit(1)
 
-    write_elem(root, key, dict(data))
+    with _anndata_write_settings():
+        write_elem(root, key, dict(data))
 
 
 def add_key_to_store(
