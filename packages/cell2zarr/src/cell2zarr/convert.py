@@ -139,6 +139,66 @@ def _anndata_write_settings():
     return ad.settings.override(allow_write_nullable_strings=True, auto_shard_zarr_v3=False)
 
 
+def _reencode_1d(group: zarr.Group, name: str, chunks: int, shards: int | None, compressors) -> None:
+    """Rewrite a 1-D array in place with new chunking, sharding and compression, keeping its attrs."""
+    old = group[name]
+    data = old[:]
+    attrs = dict(old.attrs)
+    del group[name]
+    new = group.create_array(
+        name,
+        shape=data.shape,
+        chunks=(chunks,),
+        dtype=data.dtype,
+        overwrite=True,
+        **({"shards": (shards,)} if shards else {}),
+        **({"compressors": compressors} if compressors is not None else {}),
+    )
+    new[:] = data
+    new.attrs.update(attrs)
+
+
+def _apply_obs_encoding(obs: zarr.Group, n_obs: int, encoding: EncodingConfig | None, index_chunk_default: int | None) -> None:
+    """Lay out obs from the encoding config.
+
+    The index follows `obs/_index` (default: `index_chunk_default`); a nullable-string
+    index is a group, so its `values` and `mask` are laid out the same way. Columns follow
+    `obs`, applied only to arrays of length n_obs: a categorical's small `categories`
+    array keeps its own chunking, since a chunk longer than the array is padded.
+    """
+    idx_enc = encoding.obs_index if encoding else ArrayEncoding()
+    obs_enc = encoding.obs if encoding else ArrayEncoding()
+
+    def targets(name: str) -> list[tuple[zarr.Group, str]]:
+        node = obs[name]
+        if isinstance(node, zarr.Group):
+            return [(node, child) for child, arr in node.arrays() if arr.shape == (n_obs,)]
+        return [(obs, name)] if node.shape == (n_obs,) else []
+
+    index_key = obs.attrs.get("_index")
+    idx_chunks = idx_enc.chunks[0] if idx_enc.chunks else index_chunk_default
+    if index_key in obs and idx_chunks:
+        idx_compressor = idx_enc.compressor or obs_enc.compressor
+        for parent, name in targets(index_key):
+            logger.info(f"Rechunking obs/{index_key}{'' if parent is obs else '/' + name} to chunks=({idx_chunks},)")
+            _reencode_1d(
+                parent, name, idx_chunks,
+                idx_enc.shards[0] if idx_enc.shards else None,
+                make_compressor(idx_compressor) if idx_compressor else None,
+            )
+
+    if not (obs_enc.chunks or obs_enc.shards or obs_enc.compressor):
+        return
+    for column in obs.attrs.get("column-order", []):
+        for parent, name in targets(column):
+            _reencode_1d(
+                parent, name,
+                obs_enc.chunks[0] if obs_enc.chunks else parent[name].chunks[0],
+                obs_enc.shards[0] if obs_enc.shards else None,
+                make_compressor(obs_enc.compressor) if obs_enc.compressor else None,
+            )
+
+
 def _filter_hvgs(var_df, n_top_genes: int | None):
     """Filter to top highly variable genes.
 
@@ -482,46 +542,8 @@ def _write_metadata(final_root, final_store, metadata: dict, config: ConversionC
     obsm_cell_chunk = min(config.obsm_cell_chunk_size, n_obs)
     write_obsm_to_store(final_root, metadata["obsm"], n_obs, config.dtype, encoding, config.obsm_cell_chunk_size)
 
-    # Rechunk obs/_index to align with obsm chunk boundaries
-    idx_enc = encoding.obs_index if encoding else ArrayEncoding()
-    obs_enc = encoding.obs if encoding else ArrayEncoding()
-    idx_compressor_kwarg = {}
-    if idx_enc.compressor:
-        idx_compressor_kwarg["compressors"] = make_compressor(idx_enc.compressor)
-    elif obs_enc.compressor:
-        idx_compressor_kwarg["compressors"] = make_compressor(obs_enc.compressor)
-    idx_chunk_size = idx_enc.chunks[0] if idx_enc.chunks else obsm_cell_chunk
-    idx_shard_kwarg = {}
-    if idx_enc.shards:
-        idx_shard_kwarg["shards"] = (idx_enc.shards[0],)
     if "obs" in final_root:
-        obs_group = final_root["obs"]
-        if "_index" in obs_group and isinstance(obs_group["_index"], zarr.Group):
-            # A pandas nullable-string index is stored under anndata's
-            # "nullable-string-array" encoding: a group holding `values` and
-            # `mask`, not a flat array. Slicing a group is a path lookup in zarr,
-            # so the rechunk below would raise TypeError. Leave anndata's
-            # chunking in place rather than crash.
-            encoding_type = obs_group["_index"].attrs.get("encoding-type", "nested")
-            logger.info(f"obs/_index is a '{encoding_type}' group; leaving its chunking as written.")
-        elif "_index" in obs_group:
-            old_index = obs_group["_index"]
-            index_data = old_index[:]
-            old_attrs = dict(old_index.attrs)
-            del obs_group["_index"]
-            shard_msg = f", shards=({idx_enc.shards[0]},)" if idx_enc.shards else ""
-            logger.info(f"Rechunking obs/_index to chunks=({idx_chunk_size},){shard_msg} ...")
-            new_index = obs_group.create_array(
-                "_index",
-                shape=index_data.shape,
-                chunks=(idx_chunk_size,),
-                dtype=index_data.dtype,
-                overwrite=True,
-                **idx_shard_kwarg,
-                **idx_compressor_kwarg,
-            )
-            new_index[:] = index_data
-            new_index.attrs.update(old_attrs)
+        _apply_obs_encoding(final_root["obs"], n_obs, encoding, obsm_cell_chunk)
 
     if metadata["uns"]:
         logger.info("Writing uns...")
@@ -752,7 +774,7 @@ def _add_obsm(adata, root, n_obs: int, sub_key: str | None, overwrite: bool, dty
     write_obsm_to_store(root, obsm_data, n_obs=n_obs, dtype=dtype, encoding=encoding)
 
 
-def _add_obs_or_var(adata, root, key: str, overwrite: bool) -> None:
+def _add_obs_or_var(adata, root, key: str, overwrite: bool, encoding: EncodingConfig | None = None) -> None:
     """Write obs or var dataframe to the zarr store."""
     if not overwrite and key in root:
         logger.error(f"{key} already exists in zarr store. Use overwrite=True to overwrite.")
@@ -766,6 +788,8 @@ def _add_obs_or_var(adata, root, key: str, overwrite: bool) -> None:
 
     with _anndata_write_settings():
         write_elem(root, key, df)
+    if key == "obs":
+        _apply_obs_encoding(root["obs"], adata.n_obs, encoding, index_chunk_default=None)
 
 
 def _add_write_elem_key(adata, root, key: str, overwrite: bool) -> None:
@@ -868,7 +892,7 @@ def add_key_to_store(
         elif top_key == "obsm":
             _add_obsm(adata, root, n_obs, sub_key, overwrite, dtype, encoding)
         elif top_key in ("obs", "var"):
-            _add_obs_or_var(adata, root, top_key, overwrite)
+            _add_obs_or_var(adata, root, top_key, overwrite, encoding)
         elif top_key in ("uns", "obsp", "varp"):
             _add_write_elem_key(adata, root, top_key, overwrite)
 
