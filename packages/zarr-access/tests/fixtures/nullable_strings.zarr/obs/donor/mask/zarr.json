@@ -30,7 +30,10 @@
       }
     }
   ],
-  "attributes": {},
+  "attributes": {
+    "encoding-type": "array",
+    "encoding-version": "0.2.0"
+  },
   "zarr_format": 3,
   "node_type": "array",
   "storage_transformers": []

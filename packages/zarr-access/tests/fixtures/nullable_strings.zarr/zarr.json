@@ -231,7 +231,9 @@
       },
       "obs/donor": {
         "attributes": {
-          "encoding-type": "nullable-string-array"
+          "na-value": "NA",
+          "encoding-type": "nullable-string-array",
+          "encoding-version": "0.1.0"
         },
         "zarr_format": 3,
         "consolidated_metadata": {
@@ -492,7 +494,10 @@
             }
           }
         ],
-        "attributes": {},
+        "attributes": {
+          "encoding-type": "array",
+          "encoding-version": "0.2.0"
+        },
         "zarr_format": 3,
         "node_type": "array",
         "storage_transformers": []
@@ -530,7 +535,10 @@
             }
           }
         ],
-        "attributes": {},
+        "attributes": {
+          "encoding-type": "string-array",
+          "encoding-version": "0.2.0"
+        },
         "zarr_format": 3,
         "node_type": "array",
         "storage_transformers": []

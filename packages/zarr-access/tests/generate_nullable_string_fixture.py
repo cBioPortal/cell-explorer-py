@@ -7,7 +7,6 @@ import shutil
 
 import anndata as ad
 import numpy as np
-import numpy.dtypes
 import pandas as pd
 import zarr
 
@@ -30,27 +29,12 @@ with ad.settings.override(allow_write_nullable_strings=True, auto_shard_zarr_v3=
     adata.write_zarr(dst)
 zarr.consolidate_metadata(str(dst))
 
-# Convert donor column from categorical to nullable-string-array
-store = zarr.open_group(str(dst), mode="r+")
-donor_categorical = store["obs/donor"]
-codes = donor_categorical["codes"][:]
-categories = donor_categorical["categories"][:]
-
-# Create values array: map codes to categories, with -1 → None (via mask)
-values = np.array([categories[c] if c >= 0 else "" for c in codes], dtype=object)
-mask = codes < 0
-
-# Delete the categorical group and create nullable-string-array
-shutil.rmtree(str(dst / "obs/donor"))
-
-# Create the new nullable-string-array structure
-donor_group = store.create_group("obs/donor")
-donor_group.attrs["encoding-type"] = "nullable-string-array"
-# Use from_array to properly infer the StringDType
-values_arr = np.array(values, dtype=numpy.dtypes.StringDType())
-donor_group.create_array("values", data=values_arr)
-donor_group.create_array("mask", data=mask)
-
+# write_zarr turns string columns categorical; rewrite obs with write_elem, which keeps
+# `donor` a genuine anndata-written nullable-string-array group.
+root = zarr.open_group(str(dst), mode="r+", use_consolidated=False)
+del root["obs"]
+with ad.settings.override(allow_write_nullable_strings=True, auto_shard_zarr_v3=False):
+    ad.io.write_elem(root, "obs", obs)
 zarr.consolidate_metadata(str(dst))
 
 for path in ["obs/_index", "var/_index", "obs/donor"]:
