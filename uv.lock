@@ -498,7 +498,7 @@ requires-dist = [
     { name = "langfuse", specifier = ">=3.0,<4.0" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pydantic", specifier = ">=2.0" },
-    { name = "pydantic-settings", specifier = ">=2.8" },
+    { name = "pydantic-settings", specifier = ">=2.14" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.25.0" },
     { name = "zarr-access", marker = "extra == 'test'", editable = "packages/zarr-access" },
@@ -546,7 +546,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.134.0" },
     { name = "greenlet", specifier = ">=3.4.0" },
     { name = "httpx", specifier = ">=0.28.0" },
-    { name = "pydantic-settings", specifier = ">=2.8.1" },
+    { name = "pydantic-settings", specifier = ">=2.14" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.9.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.25.0" },
@@ -578,7 +578,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anndata", specifier = ">=0.12.6" },
+    { name = "anndata", specifier = ">=0.13" },
     { name = "click", specifier = ">=8.1" },
     { name = "click-default-group", specifier = ">=1.2" },
     { name = "fastapi", specifier = ">=0.134.0" },
@@ -4616,7 +4616,7 @@ requires-dist = [
     { name = "aiofiles", specifier = ">=24.0.0" },
     { name = "fastapi", specifier = ">=0.134.0" },
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.28.0" },
-    { name = "pydantic-settings", specifier = ">=2.8.1" },
+    { name = "pydantic-settings", specifier = ">=2.14" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.9.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.25.0" },
