@@ -127,6 +127,11 @@ def _init_zarrs() -> int:
     return n_cpus
 
 
+def _layer_names(adata) -> list[str]:
+    """Named layers only — anndata >= 0.13 also reports X under the None key."""
+    return [k for k in adata.layers.keys() if k is not None]
+
+
 def _filter_hvgs(var_df, n_top_genes: int | None):
     """Filter to top highly variable genes.
 
@@ -184,9 +189,9 @@ def _phase1_write_temp_zarr(config: ConversionConfig, adata_backed, var_idx, n_o
     Returns (tmp_root, tmp_dir, phase1_time, has_layers, layer_names).
     """
     has_layers = bool(adata_backed.layers) and config.keep_raw
-    layer_names = list(adata_backed.layers.keys()) if has_layers else []
+    layer_names = _layer_names(adata_backed) if has_layers else []
     if not config.keep_raw and adata_backed.layers:
-        logger.info(f"Skipping layers (use --keep-raw to include): {list(adata_backed.layers.keys())}")
+        logger.info(f"Skipping layers (use --keep-raw to include): {_layer_names(adata_backed)}")
 
     n_cell_chunks = (n_obs + config.cell_chunk_size - 1) // config.cell_chunk_size
 
@@ -693,7 +698,7 @@ def _add_layers(
             sys.exit(1)
         layer_names = [sub_key]
     else:
-        layer_names = list(adata.layers.keys())
+        layer_names = _layer_names(adata)
 
     for ln in layer_names:
         logger.info(f"Processing layer: {ln}")
