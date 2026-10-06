@@ -67,3 +67,12 @@ async def test_decode_dataframe_keeps_other_columns_beside_nullable_ones(fixture
     obs = await decode_dataframe(await store.get_group("obs"))
     assert obs["cell_type"].tolist() == ["T", "B", "T", "B", "T", "B"]
     assert obs["donor"].tolist() == ["d1", None, "d2", "d1", None, "d2"]
+
+
+@pytest.mark.asyncio
+async def test_decode_dataframe_keeps_column_dtypes_for_old_stores(fixture_server):
+    store = await ZarrStore.open(f"{fixture_server}/pbmc3k.zarr")
+    df = await decode_dataframe(await store.get_group("obs"))
+    assert isinstance(df["louvain"].dtype, pd.CategoricalDtype)
+    assert pd.api.types.is_numeric_dtype(df["n_genes"])
+    assert pd.api.types.is_numeric_dtype(df["percent_mito"])
