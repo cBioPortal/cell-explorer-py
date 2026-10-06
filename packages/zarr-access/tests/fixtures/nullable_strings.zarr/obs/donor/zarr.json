@@ -1,0 +1,7 @@
+{
+  "attributes": {
+    "encoding-type": "nullable-string-array"
+  },
+  "zarr_format": 3,
+  "node_type": "group"
+}
