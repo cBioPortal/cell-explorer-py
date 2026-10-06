@@ -173,3 +173,22 @@ def test_add_obs_matches_full_convert_layout(tmp_path):
     add_key_to_store(tmp_path / "in.h5ad", out, key="obs", overwrite=True, encoding=_load(cfg_path, 60))
     for path in ["obs/score", "obs/cell_type/codes", "obs/_index/values", "obs/_index/mask"]:
         assert _layout(out, path) == {"shards": [60], "chunks": [60], "zstd_level": 5}, path
+
+
+def _add_obs_keeps_layout(tmp_path: Path, encoding: dict | None) -> None:
+    from cell2zarr.convert import add_key_to_store
+
+    out, _ = _convert(tmp_path, encoding)
+    paths = ["obs/_index/values", "obs/_index/mask", "obs/score", "obs/cell_type/codes"]
+    before = {p: _layout(out, p) for p in paths}
+    cfg = _load(tmp_path / "encoding.json", 60) if encoding is not None else None
+    add_key_to_store(tmp_path / "in.h5ad", out, key="obs", overwrite=True, encoding=cfg)
+    assert {p: _layout(out, p) for p in paths} == before
+
+
+def test_add_obs_without_config_matches_full_convert_layout(tmp_path):
+    _add_obs_keeps_layout(tmp_path, None)
+
+
+def test_add_obs_with_obs_only_config_matches_full_convert_layout(tmp_path):
+    _add_obs_keeps_layout(tmp_path, {"obs": {"compressor": {"name": "zstd", "level": 7}}})

@@ -789,7 +789,9 @@ def _add_obs_or_var(adata, root, key: str, overwrite: bool, encoding: EncodingCo
     with _anndata_write_settings():
         write_elem(root, key, df)
     if key == "obs":
-        _apply_obs_encoding(root["obs"], adata.n_obs, encoding, index_chunk_default=None)
+        # Same index chunk default a full convert uses, so add matches convert.
+        default_chunk = ConversionConfig.model_fields["obsm_cell_chunk_size"].default
+        _apply_obs_encoding(root["obs"], adata.n_obs, encoding, min(default_chunk, adata.n_obs))
 
 
 def _add_write_elem_key(adata, root, key: str, overwrite: bool) -> None:
