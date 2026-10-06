@@ -159,3 +159,47 @@ class TestProgressiveRunLog:
         assert saved[0].notes == "Error: out of memory"
         assert saved[0].performance.start_time == "t0"
         assert saved[0].performance.end_time == "t1"
+
+
+class TestActualEncodingOfNullableIndex:
+    """obs/_index is a nullable-string-array group (values + mask) under anndata 0.13."""
+
+    def _convert(self, tmp_path, **kwargs):
+        from cell2zarr._testing import _write_test_h5ad
+        from cell2zarr.convert import convert_h5ad_to_zarr_chunked
+        from cell2zarr.models import ConversionConfig
+
+        h5ad = tmp_path / "in.h5ad"
+        _write_test_h5ad(h5ad, n_obs=60, n_vars=20)
+        out = tmp_path / "out.zarr"
+        convert_h5ad_to_zarr_chunked(ConversionConfig(
+            input_file=h5ad, output_file=out, var_chunk_size=10, cell_chunk_size=25,
+            obsm_cell_chunk_size=25, temp_dir=tmp_path, **kwargs,
+        ))
+        return h5ad, out
+
+    def test_collect_actual_encoding_records_index_values(self, tmp_path):
+        from cell2zarr.run_log import collect_actual_encoding
+
+        _, out = self._convert(tmp_path)
+        actual = collect_actual_encoding(out)
+        assert actual["obs/_index"]["shape"] == [60]
+        assert actual["obs/_index"]["chunks"] == [25]
+
+    def test_run_db_conversion_completes(self, tmp_path):
+        from click.testing import CliRunner
+        from cell2zarr._testing import _write_test_h5ad
+        from cell2zarr.cli import cli
+
+        h5ad = tmp_path / "in.h5ad"
+        _write_test_h5ad(h5ad, n_obs=60, n_vars=20)
+        out = tmp_path / "out.zarr"
+        db = tmp_path / "runs.json"
+        result = CliRunner().invoke(cli, [
+            "convert", str(h5ad), str(out), "--two-phase", "--var-chunk-size", "10",
+            "--cell-chunk-size", "25", "--temp-dir", str(tmp_path), "--run-db", str(db),
+        ])
+        assert result.exit_code == 0, result.output
+        runs = read_runs(db)
+        assert runs[-1].status == "completed"
+        assert "obs/_index" in runs[-1].zarr_config.actual_encoding

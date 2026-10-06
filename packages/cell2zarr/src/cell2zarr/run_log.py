@@ -130,6 +130,11 @@ def collect_actual_encoding(output_path: Path) -> dict[str, Any]:
 
     # obs/_index
     if "obs" in store and "_index" in store["obs"]:
-        result["obs/_index"] = _array_info(store["obs/_index"], output_path / "obs" / "_index")
+        index = store["obs/_index"]
+        if hasattr(index, "shape"):
+            result["obs/_index"] = _array_info(index, output_path / "obs" / "_index")
+        else:
+            # nullable-string-array group: record the strings array, not the mask.
+            result["obs/_index"] = _array_info(index["values"], output_path / "obs" / "_index" / "values")
 
     return result
