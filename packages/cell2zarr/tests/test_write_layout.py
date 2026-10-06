@@ -192,3 +192,16 @@ def test_add_obs_without_config_matches_full_convert_layout(tmp_path):
 
 def test_add_obs_with_obs_only_config_matches_full_convert_layout(tmp_path):
     _add_obs_keeps_layout(tmp_path, {"obs": {"compressor": {"name": "zstd", "level": 7}}})
+
+
+def test_add_obs_uses_config_obsm_chunk_for_index(tmp_path):
+    from cell2zarr.convert import add_key_to_store
+
+    encoding = {"obsm": {"chunks": [25, "{n_dim}"]}}
+    # The CLI feeds obsm.chunks[0] to a full convert as obsm_cell_chunk_size.
+    out, _ = _convert(tmp_path, encoding, obsm_cell_chunk_size=25)
+    cfg = _load(tmp_path / "encoding.json", 60)
+    full = {p: _layout(out, p) for p in ["obs/_index/values", "obs/_index/mask"]}
+    assert full["obs/_index/values"]["chunks"] == [25]
+    add_key_to_store(tmp_path / "in.h5ad", out, key="obs", overwrite=True, encoding=cfg)
+    assert {p: _layout(out, p) for p in full} == full

@@ -791,6 +791,8 @@ def _add_obs_or_var(adata, root, key: str, overwrite: bool, encoding: EncodingCo
     if key == "obs":
         # Same index chunk default a full convert uses, so add matches convert.
         default_chunk = ConversionConfig.model_fields["obsm_cell_chunk_size"].default
+        if encoding is not None and encoding.obsm.chunks and isinstance(encoding.obsm.chunks[0], int):
+            default_chunk = encoding.obsm.chunks[0]
         _apply_obs_encoding(root["obs"], adata.n_obs, encoding, min(default_chunk, adata.n_obs))
 
 
