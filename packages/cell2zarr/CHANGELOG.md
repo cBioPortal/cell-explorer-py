@@ -2,6 +2,54 @@
 
 <!-- version list -->
 
+## v0.4.2 (2026-10-08)
+
+### Bug Fixes
+
+- **cell2zarr**: Add obs honours the encoding config's obsm chunk for the index
+  ([`20405cb`](https://github.com/cBioPortal/cell-explorer-py/commit/20405cbab241d2b98b192ff14af63d7cd92e9d7d))
+
+- **cell2zarr**: Apply the encoding config to obs columns and a nullable index
+  ([`cbbedff`](https://github.com/cBioPortal/cell-explorer-py/commit/cbbedffca5268c068f2616f3859d2459bb49a4b4))
+
+- **cell2zarr**: Fill missing obs/var values with unknown under pandas 3
+  ([`6afd517`](https://github.com/cBioPortal/cell-explorer-py/commit/6afd517b063bbad5e39751970e48a154dbde62f4))
+
+- **cell2zarr**: Keep anndata 0.13 from auto-sharding obs, var and uns
+  ([`3e13d45`](https://github.com/cBioPortal/cell-explorer-py/commit/3e13d45bd49d9147b2d252fb2df48f8ed7aec794))
+
+- **cell2zarr**: Lay out the obs index on add the same way as a full convert
+  ([`e89ac8f`](https://github.com/cBioPortal/cell-explorer-py/commit/e89ac8f17a9ae57dd4229199d1d9d9eb6489973a))
+
+- **cell2zarr**: Never delete an obs array before its replacement is valid
+  ([`41139ef`](https://github.com/cBioPortal/cell-explorer-py/commit/41139efe6a55358767801c1bd5ad0bff10e84b49))
+
+- **cell2zarr**: Record a nullable obs index in the run log
+  ([`f1d5f99`](https://github.com/cBioPortal/cell-explorer-py/commit/f1d5f99b3b96ee14e3c619c74b4fc7435c88179a))
+
+- **cell2zarr**: Resolve encoding templates before re-encoding obs
+  ([`e088273`](https://github.com/cBioPortal/cell-explorer-py/commit/e088273fe86eb16dfcc1b021d7072ded65f44301))
+
+- **cell2zarr**: Round obs and index shards to a multiple of the chunk
+  ([`3282689`](https://github.com/cBioPortal/cell-explorer-py/commit/3282689d9ab1503b27f25cb38a45f134129195cb))
+
+- **cell2zarr**: Skip X's None key when iterating layers
+  ([`a6b23ea`](https://github.com/cBioPortal/cell-explorer-py/commit/a6b23eae09f60ba8eaeef22518d8702a828d6c38))
+
+### Build System
+
+- **deps**: Raise anndata and pydantic-settings floors to what the code needs
+  ([`1e39874`](https://github.com/cBioPortal/cell-explorer-py/commit/1e39874a08cf8a7a71eb69d613cf3ebd0fdc26d4))
+
+- **deps**: Require pydantic-settings>=2.14 in cell2zarr
+  ([`15fa780`](https://github.com/cBioPortal/cell-explorer-py/commit/15fa78014e6a78df7bb709227f470480b07acf97))
+
+### Refactoring
+
+- **cell2zarr**: Derive the obsm cell chunk in one place
+  ([`773546c`](https://github.com/cBioPortal/cell-explorer-py/commit/773546c0d93af4b1770d7e754b61fc6d94c42d29))
+
+
 ## v0.4.1 (2026-09-25)
 
 ### Bug Fixes
