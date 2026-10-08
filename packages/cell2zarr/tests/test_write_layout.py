@@ -205,3 +205,24 @@ def test_add_obs_uses_config_obsm_chunk_for_index(tmp_path):
     assert full["obs/_index/values"]["chunks"] == [25]
     add_key_to_store(tmp_path / "in.h5ad", out, key="obs", overwrite=True, encoding=cfg)
     assert {p: _layout(out, p) for p in full} == full
+
+
+SHIPPED_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "encoding-config.json"
+
+
+def test_cli_add_obs_with_shipped_config_keeps_index_and_layout(tmp_path):
+    from click.testing import CliRunner
+    from cell2zarr.cli import cli
+
+    out, adata = _convert(tmp_path, ATLAS_LIKE)
+    result = CliRunner().invoke(cli, [
+        "add", str(tmp_path / "in.h5ad"), str(out), "--key", "obs", "--overwrite",
+        "--encoding-config", str(SHIPPED_CONFIG),
+    ])
+    assert result.exit_code == 0, result.output + repr(result.exception)
+    for path in ["obs/_index/values", "obs/_index/mask", "obs/score", "obs/cell_type/codes"]:
+        assert _layout(out, path) == {"shards": [60], "chunks": [60], "zstd_level": 5}, path
+    obs = ad.read_zarr(out).obs
+    assert obs.index.tolist() == adata.obs.index.tolist()
+    np.testing.assert_array_equal(obs["score"].to_numpy(), adata.obs["score"].to_numpy())
+    assert obs["cell_type"].tolist() == adata.obs["cell_type"].astype(str).tolist()

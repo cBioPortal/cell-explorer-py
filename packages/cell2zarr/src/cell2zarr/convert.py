@@ -16,7 +16,7 @@ import sys
 import zarr
 
 from .models import ArrayEncoding, ConversionConfig, EncodingConfig
-from .encoding import load_encoding_config, make_compressor, resolve_template
+from .encoding import load_encoding_config, make_compressor, resolve_shape
 
 logger = logging.getLogger("cell2zarr")
 
@@ -175,15 +175,20 @@ def _apply_obs_encoding(obs: zarr.Group, n_obs: int, encoding: EncodingConfig | 
             return [(node, child) for child, arr in node.arrays() if arr.shape == (n_obs,)]
         return [(obs, name)] if node.shape == (n_obs,) else []
 
+    # Resolve every template before any array is touched.
+    variables = {"n_obs": n_obs}
+    idx_chunks = resolve_shape(idx_enc.chunks[:1], variables)[0] if idx_enc.chunks else index_chunk_default
+    idx_shards = resolve_shape(idx_enc.shards[:1], variables)[0] if idx_enc.shards else None
+    col_chunks = resolve_shape(obs_enc.chunks[:1], variables)[0] if obs_enc.chunks else None
+    col_shards = resolve_shape(obs_enc.shards[:1], variables)[0] if obs_enc.shards else None
+
     index_key = obs.attrs.get("_index")
-    idx_chunks = idx_enc.chunks[0] if idx_enc.chunks else index_chunk_default
     if index_key in obs and idx_chunks:
         idx_compressor = idx_enc.compressor or obs_enc.compressor
         for parent, name in targets(index_key):
             logger.info(f"Rechunking obs/{index_key}{'' if parent is obs else '/' + name} to chunks=({idx_chunks},)")
             _reencode_1d(
-                parent, name, idx_chunks,
-                idx_enc.shards[0] if idx_enc.shards else None,
+                parent, name, idx_chunks, idx_shards,
                 make_compressor(idx_compressor) if idx_compressor else None,
             )
 
@@ -193,8 +198,8 @@ def _apply_obs_encoding(obs: zarr.Group, n_obs: int, encoding: EncodingConfig | 
         for parent, name in targets(column):
             _reencode_1d(
                 parent, name,
-                obs_enc.chunks[0] if obs_enc.chunks else parent[name].chunks[0],
-                obs_enc.shards[0] if obs_enc.shards else None,
+                col_chunks or parent[name].chunks[0],
+                col_shards,
                 make_compressor(obs_enc.compressor) if obs_enc.compressor else None,
             )
 
@@ -504,8 +509,8 @@ def write_obsm_to_store(
     for key, data in obsm_data.items():
         n_dim = data.shape[1] if data.ndim > 1 else 1
         dim_vars = {"n_dim": n_dim, "n_obs": n_obs}
-        obsm_chunks = tuple(resolve_template(v, dim_vars) for v in obsm_enc.chunks) if obsm_enc.chunks else (min(obsm_cell_chunk_size, n_obs), 1)
-        obsm_shards = tuple(resolve_template(v, dim_vars) for v in obsm_enc.shards) if obsm_enc.shards else (min(1_000_000, n_obs), n_dim)
+        obsm_chunks = resolve_shape(obsm_enc.chunks, dim_vars) if obsm_enc.chunks else (min(obsm_cell_chunk_size, n_obs), 1)
+        obsm_shards = resolve_shape(obsm_enc.shards, dim_vars) if obsm_enc.shards else (min(1_000_000, n_obs), n_dim)
         obsm_shards = tuple(((s + c - 1) // c) * c for s, c in zip(obsm_shards, obsm_chunks))
         logger.info(f"Writing obsm/{key} shape=({n_obs}, {n_dim}), chunks={obsm_chunks}, shards={obsm_shards}, dtype={target_dtype}...")
         zarr_embed = obsm_group.create_array(

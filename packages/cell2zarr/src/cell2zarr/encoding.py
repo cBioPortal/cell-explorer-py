@@ -18,6 +18,15 @@ def resolve_template(value, variables: dict[str, int]):
     return value
 
 
+def resolve_shape(values, variables: dict[str, int]) -> tuple[int, ...]:
+    """Resolve a chunks/shards list to integers, raising if a template has no value."""
+    resolved = tuple(resolve_template(v, variables) for v in values)
+    unresolved = [v for v in resolved if not isinstance(v, int)]
+    if unresolved:
+        raise ValueError(f"Unresolved encoding template(s) {unresolved}; known variables: {sorted(variables)}")
+    return resolved
+
+
 def load_encoding_config(config_path: Path, variables: dict[str, int]) -> EncodingConfig:
     """Load an encoding config JSON file and resolve template variables.
 
