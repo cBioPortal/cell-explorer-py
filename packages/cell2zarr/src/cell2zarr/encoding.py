@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-from .models import CompressorSpec, EncodingConfig
+from .models import CompressorSpec, ConversionConfig, EncodingConfig
 
 
 def resolve_template(value, variables: dict[str, int]):
@@ -16,6 +16,33 @@ def resolve_template(value, variables: dict[str, int]):
             return variables[key]
         return value
     return value
+
+
+def resolve_shape(values, variables: dict[str, int]) -> tuple[int, ...]:
+    """Resolve a chunks/shards list to integers, raising if a template has no value."""
+    resolved = tuple(resolve_template(v, variables) for v in values)
+    unresolved = [v for v in resolved if not isinstance(v, int)]
+    if unresolved:
+        raise ValueError(f"Unresolved encoding template(s) {unresolved}; known variables: {sorted(variables)}")
+    return resolved
+
+
+def round_shards(shards, chunks) -> tuple[int, ...]:
+    """Round each shard length up to a multiple of its chunk length, as zarr requires."""
+    return tuple(((s + c - 1) // c) * c for s, c in zip(shards, chunks))
+
+
+def obsm_cell_chunk(encoding: EncodingConfig | None, explicit: int | None = None) -> int:
+    """Cell chunk for obsm arrays, which the obs index also aligns to by default.
+
+    An explicitly set value wins, then the encoding config's `obsm.chunks[0]` when it
+    is an int, then the `ConversionConfig` default.
+    """
+    if explicit is not None:
+        return explicit
+    if encoding is not None and encoding.obsm.chunks and isinstance(encoding.obsm.chunks[0], int):
+        return encoding.obsm.chunks[0]
+    return ConversionConfig.model_fields["obsm_cell_chunk_size"].default
 
 
 def load_encoding_config(config_path: Path, variables: dict[str, int]) -> EncodingConfig:

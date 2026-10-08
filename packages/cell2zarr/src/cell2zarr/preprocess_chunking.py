@@ -108,6 +108,18 @@ def add_required_cols(adata, verbose=False):
         print(f"  Set {EXPRESSION_UNIT_KEY} to 'UMI'")
 
 
+def _as_string_column(col: pd.Series) -> pd.Series:
+    """Convert a column to strings, filling missing values with "unknown".
+
+    Pandas 3 keeps missing values as NaN through ``astype(str)``, so they are
+    filled explicitly; literal "nan"/"None" strings are filled too.
+    """
+    missing = col.isna()
+    out = col.astype(str).astype(object).replace("nan", "unknown").replace("None", "unknown")
+    out[missing] = "unknown"
+    return out
+
+
 # %%
 @click.command()
 @click.option("--adata_path", type=click.Path(exists=True), required=True)
@@ -262,17 +274,11 @@ def main(adata_path, save_path, dataset_id, chunk_size, verbose=False):
     # Convert all obs columns to strings and handle missing values
     # This is required for HDF5 string storage
     for col in obs_df.columns:
-        # Convert to string first (handles Categorical), then fill missing
-        obs_df[col] = (
-            obs_df[col].astype(str).replace("nan", "unknown").replace("None", "unknown")
-        )
+        obs_df[col] = _as_string_column(obs_df[col])
 
     # Convert all var columns to strings and handle missing values
     for col in var_df.columns:
-        # Convert to string first (handles Categorical), then fill missing
-        var_df[col] = (
-            var_df[col].astype(str).replace("nan", "unknown").replace("None", "unknown")
-        )
+        var_df[col] = _as_string_column(var_df[col])
 
     # Concatenate expression matrices on disk using h5py (similar to ScopeAtlas.export_to_h5ad)
     if verbose:

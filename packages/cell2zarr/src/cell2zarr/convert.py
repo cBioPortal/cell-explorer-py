@@ -16,7 +16,7 @@ import sys
 import zarr
 
 from .models import ArrayEncoding, ConversionConfig, EncodingConfig
-from .encoding import load_encoding_config, make_compressor, resolve_template
+from .encoding import load_encoding_config, make_compressor, obsm_cell_chunk, resolve_shape, round_shards
 
 logger = logging.getLogger("cell2zarr")
 
@@ -108,10 +108,12 @@ def convert_h5ad_to_zarr(input_file: Path, output_file: Path, obs_chunk_size: in
         var_chunk = var_chunk_size if var_chunk_size else adata.shape[1]
         chunks = (obs_chunk, var_chunk)
         logger.info(f"Writing to zarr with chunks {chunks}: {output_file}")
-        adata.write_zarr(output_file, chunks=chunks)
+        with _anndata_write_settings():
+            adata.write_zarr(output_file, chunks=chunks)
     else:
         logger.info(f"Writing to zarr: {output_file}")
-        adata.write_zarr(output_file)
+        with _anndata_write_settings():
+            adata.write_zarr(output_file)
     logger.info("Successfully converted to zarr format")
 
 
@@ -125,6 +127,93 @@ def _init_zarrs() -> int:
     n_cpus = __import__("os").cpu_count() or 8
     logger.info(f"Using zarrs Rust codec pipeline ({n_cpus} threads)")
     return n_cpus
+
+
+def _layer_names(adata) -> list[str]:
+    """Named layers only — anndata >= 0.13 also reports X under the None key."""
+    return [k for k in adata.layers.keys() if k is not None]
+
+
+def _anndata_write_settings():
+    """cell2zarr owns array layout: nullable strings on, anndata's auto-sharding off."""
+    return ad.settings.override(allow_write_nullable_strings=True, auto_shard_zarr_v3=False)
+
+
+def _reencode_1d(group: zarr.Group, name: str, chunks: int, shards: int | None, compressors) -> None:
+    """Rewrite a 1-D array in place with new chunking, sharding and compression, keeping its attrs.
+
+    zarr 3 cannot rename a node (Group.move is not implemented), so the array is
+    replaced by delete-then-create. The target layout is first built against an
+    in-memory store, so an invalid one raises while the original is still on disk.
+    """
+    old = group[name]
+    data = old[:]
+    attrs = dict(old.attrs)
+    layout = {
+        "shape": data.shape,
+        "chunks": (chunks,),
+        "dtype": data.dtype,
+        **({"shards": (shards,)} if shards else {}),
+        **({"compressors": compressors} if compressors is not None else {}),
+    }
+    try:
+        zarr.create_array(zarr.storage.MemoryStore(), **layout)
+    except (TypeError, ValueError) as e:
+        raise ValueError(
+            f"Invalid obs layout for {group.path}/{name}: chunks={chunks}, shards={shards}, "
+            f"compressors={compressors!r}: {e}"
+        ) from e
+    del group[name]
+    new = group.create_array(name, overwrite=True, **layout)
+    new[:] = data
+    new.attrs.update(attrs)
+
+
+def _apply_obs_encoding(obs: zarr.Group, n_obs: int, encoding: EncodingConfig | None, index_chunk_default: int | None) -> None:
+    """Lay out obs from the encoding config.
+
+    The index follows `obs/_index` (default: `index_chunk_default`); a nullable-string
+    index is a group, so its `values` and `mask` are laid out the same way. Columns follow
+    `obs`, applied only to arrays of length n_obs: a categorical's small `categories`
+    array keeps its own chunking, since a chunk longer than the array is padded.
+    """
+    idx_enc = encoding.obs_index if encoding else ArrayEncoding()
+    obs_enc = encoding.obs if encoding else ArrayEncoding()
+
+    def targets(name: str) -> list[tuple[zarr.Group, str]]:
+        node = obs[name]
+        if isinstance(node, zarr.Group):
+            return [(node, child) for child, arr in node.arrays() if arr.shape == (n_obs,)]
+        return [(obs, name)] if node.shape == (n_obs,) else []
+
+    # Resolve every template before any array is touched.
+    variables = {"n_obs": n_obs}
+    idx_chunks = resolve_shape(idx_enc.chunks[:1], variables)[0] if idx_enc.chunks else index_chunk_default
+    idx_shards = resolve_shape(idx_enc.shards[:1], variables)[0] if idx_enc.shards else None
+    col_chunks = resolve_shape(obs_enc.chunks[:1], variables)[0] if obs_enc.chunks else None
+    col_shards = resolve_shape(obs_enc.shards[:1], variables)[0] if obs_enc.shards else None
+
+    index_key = obs.attrs.get("_index")
+    if index_key in obs and idx_chunks:
+        idx_compressor = idx_enc.compressor or obs_enc.compressor
+        for parent, name in targets(index_key):
+            logger.info(f"Rechunking obs/{index_key}{'' if parent is obs else '/' + name} to chunks=({idx_chunks},)")
+            _reencode_1d(
+                parent, name, idx_chunks,
+                round_shards((idx_shards,), (idx_chunks,))[0] if idx_shards else None,
+                make_compressor(idx_compressor) if idx_compressor else None,
+            )
+
+    if not (obs_enc.chunks or obs_enc.shards or obs_enc.compressor):
+        return
+    for column in obs.attrs.get("column-order", []):
+        for parent, name in targets(column):
+            chunks = col_chunks or parent[name].chunks[0]
+            _reencode_1d(
+                parent, name, chunks,
+                round_shards((col_shards,), (chunks,))[0] if col_shards else None,
+                make_compressor(obs_enc.compressor) if obs_enc.compressor else None,
+            )
 
 
 def _filter_hvgs(var_df, n_top_genes: int | None):
@@ -184,9 +273,9 @@ def _phase1_write_temp_zarr(config: ConversionConfig, adata_backed, var_idx, n_o
     Returns (tmp_root, tmp_dir, phase1_time, has_layers, layer_names).
     """
     has_layers = bool(adata_backed.layers) and config.keep_raw
-    layer_names = list(adata_backed.layers.keys()) if has_layers else []
+    layer_names = _layer_names(adata_backed) if has_layers else []
     if not config.keep_raw and adata_backed.layers:
-        logger.info(f"Skipping layers (use --keep-raw to include): {list(adata_backed.layers.keys())}")
+        logger.info(f"Skipping layers (use --keep-raw to include): {_layer_names(adata_backed)}")
 
     n_cell_chunks = (n_obs + config.cell_chunk_size - 1) // config.cell_chunk_size
 
@@ -432,9 +521,9 @@ def write_obsm_to_store(
     for key, data in obsm_data.items():
         n_dim = data.shape[1] if data.ndim > 1 else 1
         dim_vars = {"n_dim": n_dim, "n_obs": n_obs}
-        obsm_chunks = tuple(resolve_template(v, dim_vars) for v in obsm_enc.chunks) if obsm_enc.chunks else (min(obsm_cell_chunk_size, n_obs), 1)
-        obsm_shards = tuple(resolve_template(v, dim_vars) for v in obsm_enc.shards) if obsm_enc.shards else (min(1_000_000, n_obs), n_dim)
-        obsm_shards = tuple(((s + c - 1) // c) * c for s, c in zip(obsm_shards, obsm_chunks))
+        obsm_chunks = resolve_shape(obsm_enc.chunks, dim_vars) if obsm_enc.chunks else (min(obsm_cell_chunk_size, n_obs), 1)
+        obsm_shards = resolve_shape(obsm_enc.shards, dim_vars) if obsm_enc.shards else (min(1_000_000, n_obs), n_dim)
+        obsm_shards = round_shards(obsm_shards, obsm_chunks)
         logger.info(f"Writing obsm/{key} shape=({n_obs}, {n_dim}), chunks={obsm_chunks}, shards={obsm_shards}, dtype={target_dtype}...")
         zarr_embed = obsm_group.create_array(
             key,
@@ -463,61 +552,27 @@ def _write_metadata(final_root, final_store, metadata: dict, config: ConversionC
             for c in str_cols:
                 df[c] = df[c].astype("category")
 
-    ad.settings.allow_write_nullable_strings = True
-    write_elem(final_root, "obs", metadata["obs"])
-    write_elem(final_root, "var", metadata["var"])
+    with _anndata_write_settings():
+        write_elem(final_root, "obs", metadata["obs"])
+        write_elem(final_root, "var", metadata["var"])
 
-    obsm_cell_chunk = min(config.obsm_cell_chunk_size, n_obs)
-    write_obsm_to_store(final_root, metadata["obsm"], n_obs, config.dtype, encoding, config.obsm_cell_chunk_size)
+    explicit = config.obsm_cell_chunk_size if "obsm_cell_chunk_size" in config.model_fields_set else None
+    cell_chunk = obsm_cell_chunk(encoding, explicit)
+    write_obsm_to_store(final_root, metadata["obsm"], n_obs, config.dtype, encoding, cell_chunk)
 
-    # Rechunk obs/_index to align with obsm chunk boundaries
-    idx_enc = encoding.obs_index if encoding else ArrayEncoding()
-    obs_enc = encoding.obs if encoding else ArrayEncoding()
-    idx_compressor_kwarg = {}
-    if idx_enc.compressor:
-        idx_compressor_kwarg["compressors"] = make_compressor(idx_enc.compressor)
-    elif obs_enc.compressor:
-        idx_compressor_kwarg["compressors"] = make_compressor(obs_enc.compressor)
-    idx_chunk_size = idx_enc.chunks[0] if idx_enc.chunks else obsm_cell_chunk
-    idx_shard_kwarg = {}
-    if idx_enc.shards:
-        idx_shard_kwarg["shards"] = (idx_enc.shards[0],)
     if "obs" in final_root:
-        obs_group = final_root["obs"]
-        if "_index" in obs_group and isinstance(obs_group["_index"], zarr.Group):
-            # A pandas nullable-string index is stored under anndata's
-            # "nullable-string-array" encoding: a group holding `values` and
-            # `mask`, not a flat array. Slicing a group is a path lookup in zarr,
-            # so the rechunk below would raise TypeError. Leave anndata's
-            # chunking in place rather than crash.
-            encoding_type = obs_group["_index"].attrs.get("encoding-type", "nested")
-            logger.info(f"obs/_index is a '{encoding_type}' group; leaving its chunking as written.")
-        elif "_index" in obs_group:
-            old_index = obs_group["_index"]
-            index_data = old_index[:]
-            old_attrs = dict(old_index.attrs)
-            del obs_group["_index"]
-            shard_msg = f", shards=({idx_enc.shards[0]},)" if idx_enc.shards else ""
-            logger.info(f"Rechunking obs/_index to chunks=({idx_chunk_size},){shard_msg} ...")
-            new_index = obs_group.create_array(
-                "_index",
-                shape=index_data.shape,
-                chunks=(idx_chunk_size,),
-                dtype=index_data.dtype,
-                overwrite=True,
-                **idx_shard_kwarg,
-                **idx_compressor_kwarg,
-            )
-            new_index[:] = index_data
-            new_index.attrs.update(old_attrs)
+        _apply_obs_encoding(final_root["obs"], n_obs, encoding, min(cell_chunk, n_obs))
 
     if metadata["uns"]:
         logger.info("Writing uns...")
-        write_elem(final_root, "uns", metadata["uns"])
+        with _anndata_write_settings():
+            write_elem(final_root, "uns", metadata["uns"])
     if metadata["obsp"]:
-        write_elem(final_root, "obsp", metadata["obsp"])
+        with _anndata_write_settings():
+            write_elem(final_root, "obsp", metadata["obsp"])
     if metadata["varp"]:
-        write_elem(final_root, "varp", metadata["varp"])
+        with _anndata_write_settings():
+            write_elem(final_root, "varp", metadata["varp"])
 
     zarr.consolidate_metadata(final_store, zarr_format=3)
 
@@ -693,7 +748,7 @@ def _add_layers(
             sys.exit(1)
         layer_names = [sub_key]
     else:
-        layer_names = list(adata.layers.keys())
+        layer_names = _layer_names(adata)
 
     for ln in layer_names:
         logger.info(f"Processing layer: {ln}")
@@ -737,7 +792,7 @@ def _add_obsm(adata, root, n_obs: int, sub_key: str | None, overwrite: bool, dty
     write_obsm_to_store(root, obsm_data, n_obs=n_obs, dtype=dtype, encoding=encoding)
 
 
-def _add_obs_or_var(adata, root, key: str, overwrite: bool) -> None:
+def _add_obs_or_var(adata, root, key: str, overwrite: bool, encoding: EncodingConfig | None = None) -> None:
     """Write obs or var dataframe to the zarr store."""
     if not overwrite and key in root:
         logger.error(f"{key} already exists in zarr store. Use overwrite=True to overwrite.")
@@ -749,8 +804,11 @@ def _add_obs_or_var(adata, root, key: str, overwrite: bool) -> None:
         for c in str_cols:
             df[c] = df[c].astype("category")
 
-    ad.settings.allow_write_nullable_strings = True
-    write_elem(root, key, df)
+    with _anndata_write_settings():
+        write_elem(root, key, df)
+    if key == "obs":
+        # Same index chunk default a full convert uses, so add matches convert.
+        _apply_obs_encoding(root["obs"], adata.n_obs, encoding, min(obsm_cell_chunk(encoding), adata.n_obs))
 
 
 def _add_write_elem_key(adata, root, key: str, overwrite: bool) -> None:
@@ -764,7 +822,8 @@ def _add_write_elem_key(adata, root, key: str, overwrite: bool) -> None:
         logger.warning(f"{key} is empty in h5ad file, skipping.")
         sys.exit(1)
 
-    write_elem(root, key, dict(data))
+    with _anndata_write_settings():
+        write_elem(root, key, dict(data))
 
 
 def add_key_to_store(
@@ -852,7 +911,7 @@ def add_key_to_store(
         elif top_key == "obsm":
             _add_obsm(adata, root, n_obs, sub_key, overwrite, dtype, encoding)
         elif top_key in ("obs", "var"):
-            _add_obs_or_var(adata, root, top_key, overwrite)
+            _add_obs_or_var(adata, root, top_key, overwrite, encoding)
         elif top_key in ("uns", "obsp", "varp"):
             _add_write_elem_key(adata, root, top_key, overwrite)
 

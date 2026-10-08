@@ -33,12 +33,26 @@ async def decode_categorical(group: zarr.AsyncGroup) -> pd.Categorical:
     )
 
 
+async def decode_nullable_string(group: zarr.AsyncGroup) -> np.ndarray:
+    """Decode an AnnData nullable-string-array group.
+
+    Structure: group contains 'values' (string array) and 'mask' (bool, True = missing).
+    """
+    values = await _read_string_array(await group.getitem("values"))
+    mask = await _read_array(await group.getitem("mask"))
+    out = values.astype(object)
+    out[mask.astype(bool)] = None
+    return out
+
+
 async def decode_column(node) -> np.ndarray | pd.Categorical:
     """Decode an obs/var column — could be an array or a categorical group."""
     if isinstance(node, zarr.AsyncGroup):
         attrs = dict(node.attrs)
         if attrs.get("encoding-type") == "categorical":
             return await decode_categorical(node)
+        if attrs.get("encoding-type") == "nullable-string-array":
+            return await decode_nullable_string(node)
         raise ValueError(f"Unknown column encoding: {attrs.get('encoding-type')}")
     arr = await _read_array(node)
     return arr
@@ -54,9 +68,7 @@ async def decode_dataframe(group: zarr.AsyncGroup) -> pd.DataFrame:
     index_name = attrs.get("_index", "index")
     column_order = attrs.get("column-order", [])
 
-    index_node = await group.getitem(index_name)
-    index = await _read_string_array(index_node)
-    index = [str(v) for v in index]
+    index = [str(v) for v in np.asarray(await decode_column(await group.getitem(index_name)))]
 
     columns = {}
     for col_name in column_order:
@@ -64,9 +76,17 @@ async def decode_dataframe(group: zarr.AsyncGroup) -> pd.DataFrame:
             col_node = await group.getitem(col_name)
         except KeyError:
             continue
-        columns[col_name] = await decode_column(col_node)
+        col_data = await decode_column(col_node)
+        # Wrap object arrays in Series with explicit dtype to preserve None values
+        if isinstance(col_data, np.ndarray) and col_data.dtype == object:
+            columns[col_name] = pd.Series(col_data, dtype=object)
+        else:
+            columns[col_name] = col_data
 
-    return pd.DataFrame(columns, index=index)
+    # Create DataFrame without custom index first to avoid Series realignment
+    df = pd.DataFrame(columns)
+    df.index = index
+    return df
 
 
 async def decode_sparse_matrix(group: zarr.AsyncGroup) -> scipy.sparse.spmatrix:

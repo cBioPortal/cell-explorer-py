@@ -4,11 +4,12 @@ version = "0.4.1"
 description = "h5ad to Zarr conversion pipeline for single-cell RNA-seq data"
 requires-python = ">=3.12"
 dependencies = [
-    "anndata>=0.12.6",
+    "anndata>=0.13",
     "fastapi>=0.134.0",
     "jinja2>=3.1.6",
     "jupyter>=1.1.1",
     "pydantic>=2.12.5",
+    "pydantic-settings>=2.14",
     "scanpy>=1.11.5",
     "uvicorn>=0.41.0",
     "zarrs>=0.2.2",
