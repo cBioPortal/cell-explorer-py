@@ -5,6 +5,8 @@ from pathlib import Path
 import anndata as ad
 import numpy as np
 import pandas as pd
+import pytest
+import zarr
 
 from cell2zarr._testing import _write_test_h5ad
 from cell2zarr.convert import convert_h5ad_to_zarr, convert_h5ad_to_zarr_chunked
@@ -226,3 +228,26 @@ def test_cli_add_obs_with_shipped_config_keeps_index_and_layout(tmp_path):
     assert obs.index.tolist() == adata.obs.index.tolist()
     np.testing.assert_array_equal(obs["score"].to_numpy(), adata.obs["score"].to_numpy())
     assert obs["cell_type"].tolist() == adata.obs["cell_type"].astype(str).tolist()
+
+
+@pytest.mark.parametrize("chunks, shards, compressors", [
+    (25, 60, None),             # shard not a multiple of the chunk
+    ("{n_obs}", None, None),    # unresolved template
+    (0, None, None),            # non-positive chunk
+    (25, None, "not-a-codec"),  # bogus compressor
+])
+def test_reencode_rejects_invalid_layout_and_keeps_original(tmp_path, chunks, shards, compressors):
+    from cell2zarr.convert import _reencode_1d
+
+    group = zarr.open_group(zarr.storage.LocalStore(str(tmp_path / "s.zarr")), mode="w", zarr_format=3)
+    data = np.arange(60, dtype=np.int32)
+    group.create_array("a", shape=(60,), chunks=(60,), dtype=data.dtype)[:] = data
+    group["a"].attrs["kind"] = "kept"
+
+    with pytest.raises(ValueError, match="obs layout"):
+        _reencode_1d(group, "a", chunks, shards, compressors)
+
+    reopened = zarr.open_group(zarr.storage.LocalStore(str(tmp_path / "s.zarr")), mode="r")
+    np.testing.assert_array_equal(reopened["a"][:], data)
+    assert dict(reopened["a"].attrs) == {"kind": "kept"}
+    assert reopened["a"].chunks == (60,)

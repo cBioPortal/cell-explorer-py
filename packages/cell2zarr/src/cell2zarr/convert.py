@@ -140,20 +140,31 @@ def _anndata_write_settings():
 
 
 def _reencode_1d(group: zarr.Group, name: str, chunks: int, shards: int | None, compressors) -> None:
-    """Rewrite a 1-D array in place with new chunking, sharding and compression, keeping its attrs."""
+    """Rewrite a 1-D array in place with new chunking, sharding and compression, keeping its attrs.
+
+    zarr 3 cannot rename a node (Group.move is not implemented), so the array is
+    replaced by delete-then-create. The target layout is first built against an
+    in-memory store, so an invalid one raises while the original is still on disk.
+    """
     old = group[name]
     data = old[:]
     attrs = dict(old.attrs)
-    del group[name]
-    new = group.create_array(
-        name,
-        shape=data.shape,
-        chunks=(chunks,),
-        dtype=data.dtype,
-        overwrite=True,
+    layout = {
+        "shape": data.shape,
+        "chunks": (chunks,),
+        "dtype": data.dtype,
         **({"shards": (shards,)} if shards else {}),
         **({"compressors": compressors} if compressors is not None else {}),
-    )
+    }
+    try:
+        zarr.create_array(zarr.storage.MemoryStore(), **layout)
+    except (TypeError, ValueError) as e:
+        raise ValueError(
+            f"Invalid obs layout for {group.path}/{name}: chunks={chunks}, shards={shards}, "
+            f"compressors={compressors!r}: {e}"
+        ) from e
+    del group[name]
+    new = group.create_array(name, overwrite=True, **layout)
     new[:] = data
     new.attrs.update(attrs)
 
