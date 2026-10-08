@@ -16,6 +16,7 @@ from .run_log import (
     compute_output_stats, collect_target_encoding, collect_actual_encoding,
 )
 from .convert import convert_h5ad_to_zarr, convert_h5ad_to_zarr_chunked
+from .encoding import obsm_cell_chunk
 
 
 def _setup_logging(log_file: Path | None = None, level: int = logging.INFO):
@@ -172,6 +173,7 @@ def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes
         if sparse_format != "csr" or force_int32:
             click.echo("Note: --sparse-format and --force-int32 are ignored in two-phase mode", err=True)
 
+        enc = None
         enc_defaults = {}
         if encoding_config and encoding_config.exists():
             enc = EncodingConfig.model_validate_json(encoding_config.read_text())
@@ -181,8 +183,6 @@ def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes
                 enc_defaults["shard_size"] = enc.X.shards[1]
             if enc.X.dtype:
                 enc_defaults["dtype"] = enc.X.dtype
-            if enc.obsm.chunks and len(enc.obsm.chunks) > 0 and isinstance(enc.obsm.chunks[0], int):
-                enc_defaults["obsm_cell_chunk_size"] = enc.obsm.chunks[0]
 
         config = ConversionConfig(
             input_file=input_file,
@@ -194,7 +194,7 @@ def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes
             cell_chunk_size=cell_chunk_size,
             shard_size=shard_size if shard_size is not None else enc_defaults.get("shard_size"),
             dtype=dtype if dtype is not None else enc_defaults.get("dtype", "float32"),
-            obsm_cell_chunk_size=obsm_cell_chunk_size if obsm_cell_chunk_size is not None else enc_defaults.get("obsm_cell_chunk_size", 50000),
+            obsm_cell_chunk_size=obsm_cell_chunk(enc, obsm_cell_chunk_size),
             run_db=run_db,
             encoding_config=encoding_config,
             temp_dir=temp_dir,

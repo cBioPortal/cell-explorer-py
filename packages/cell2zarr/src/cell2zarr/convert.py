@@ -16,7 +16,7 @@ import sys
 import zarr
 
 from .models import ArrayEncoding, ConversionConfig, EncodingConfig
-from .encoding import load_encoding_config, make_compressor, resolve_shape, round_shards
+from .encoding import load_encoding_config, make_compressor, obsm_cell_chunk, resolve_shape, round_shards
 
 logger = logging.getLogger("cell2zarr")
 
@@ -556,11 +556,12 @@ def _write_metadata(final_root, final_store, metadata: dict, config: ConversionC
         write_elem(final_root, "obs", metadata["obs"])
         write_elem(final_root, "var", metadata["var"])
 
-    obsm_cell_chunk = min(config.obsm_cell_chunk_size, n_obs)
-    write_obsm_to_store(final_root, metadata["obsm"], n_obs, config.dtype, encoding, config.obsm_cell_chunk_size)
+    explicit = config.obsm_cell_chunk_size if "obsm_cell_chunk_size" in config.model_fields_set else None
+    cell_chunk = obsm_cell_chunk(encoding, explicit)
+    write_obsm_to_store(final_root, metadata["obsm"], n_obs, config.dtype, encoding, cell_chunk)
 
     if "obs" in final_root:
-        _apply_obs_encoding(final_root["obs"], n_obs, encoding, obsm_cell_chunk)
+        _apply_obs_encoding(final_root["obs"], n_obs, encoding, min(cell_chunk, n_obs))
 
     if metadata["uns"]:
         logger.info("Writing uns...")
@@ -807,10 +808,7 @@ def _add_obs_or_var(adata, root, key: str, overwrite: bool, encoding: EncodingCo
         write_elem(root, key, df)
     if key == "obs":
         # Same index chunk default a full convert uses, so add matches convert.
-        default_chunk = ConversionConfig.model_fields["obsm_cell_chunk_size"].default
-        if encoding is not None and encoding.obsm.chunks and isinstance(encoding.obsm.chunks[0], int):
-            default_chunk = encoding.obsm.chunks[0]
-        _apply_obs_encoding(root["obs"], adata.n_obs, encoding, min(default_chunk, adata.n_obs))
+        _apply_obs_encoding(root["obs"], adata.n_obs, encoding, min(obsm_cell_chunk(encoding), adata.n_obs))
 
 
 def _add_write_elem_key(adata, root, key: str, overwrite: bool) -> None:

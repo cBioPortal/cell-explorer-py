@@ -102,7 +102,7 @@ def _h5ad_with_columns(path: Path, n_obs: int = 60) -> ad.AnnData:
     return adata
 
 
-def _convert(tmp_path: Path, encoding: dict | None, n_obs: int = 60, obsm_cell_chunk_size: int = 50000) -> tuple[Path, ad.AnnData]:
+def _convert(tmp_path: Path, encoding: dict | None, n_obs: int = 60, obsm_cell_chunk_size: int | None = None) -> tuple[Path, ad.AnnData]:
     h5ad = tmp_path / "in.h5ad"
     adata = _h5ad_with_columns(h5ad, n_obs)
     cfg_path = None
@@ -110,9 +110,10 @@ def _convert(tmp_path: Path, encoding: dict | None, n_obs: int = 60, obsm_cell_c
         cfg_path = tmp_path / "encoding.json"
         cfg_path.write_text(json.dumps(encoding))
     out = tmp_path / "out.zarr"
+    explicit = {} if obsm_cell_chunk_size is None else {"obsm_cell_chunk_size": obsm_cell_chunk_size}
     convert_h5ad_to_zarr_chunked(ConversionConfig(
         input_file=h5ad, output_file=out, var_chunk_size=10, cell_chunk_size=25,
-        temp_dir=tmp_path, encoding_config=cfg_path, obsm_cell_chunk_size=obsm_cell_chunk_size,
+        temp_dir=tmp_path, encoding_config=cfg_path, **explicit,
     ))
     return out, adata
 
@@ -199,9 +200,8 @@ def test_add_obs_with_obs_only_config_matches_full_convert_layout(tmp_path):
 def test_add_obs_uses_config_obsm_chunk_for_index(tmp_path):
     from cell2zarr.convert import add_key_to_store
 
-    encoding = {"obsm": {"chunks": [25, "{n_dim}"]}}
-    # The CLI feeds obsm.chunks[0] to a full convert as obsm_cell_chunk_size.
-    out, _ = _convert(tmp_path, encoding, obsm_cell_chunk_size=25)
+    # Programmatic convert, no explicit obsm_cell_chunk_size: obsm.chunks[0] decides.
+    out, _ = _convert(tmp_path, {"obsm": {"chunks": [25, "{n_dim}"]}})
     cfg = _load(tmp_path / "encoding.json", 60)
     full = {p: _layout(out, p) for p in ["obs/_index/values", "obs/_index/mask"]}
     assert full["obs/_index/values"]["chunks"] == [25]
@@ -267,3 +267,28 @@ def test_index_shards_round_up_to_the_default_chunk(tmp_path):
         layout = _layout(out, f"obs/_index/{part}")
         assert (layout["chunks"], layout["shards"]) == ([25], [75]), part
     assert ad.read_zarr(out).obs.index.tolist() == adata.obs.index.tolist()
+
+
+def test_explicit_obsm_cell_chunk_size_beats_config_obsm_chunk(tmp_path):
+    out, _ = _convert(tmp_path, {"obsm": {"chunks": [25, "{n_dim}"]}}, obsm_cell_chunk_size=30)
+    for part in ["values", "mask"]:
+        assert _layout(out, f"obs/_index/{part}")["chunks"] == [30], part
+
+
+@pytest.mark.parametrize("flag, expected", [([], 25), (["--obsm-cell-chunk-size", "30"], 30)])
+def test_cli_convert_index_chunk_from_config_or_flag(tmp_path, flag, expected):
+    from click.testing import CliRunner
+    from cell2zarr.cli import cli
+
+    h5ad = tmp_path / "in.h5ad"
+    _h5ad_with_columns(h5ad)
+    cfg = tmp_path / "encoding.json"
+    cfg.write_text(json.dumps({"obsm": {"chunks": [25, "{n_dim}"]}}))
+    out = tmp_path / "out.zarr"
+    result = CliRunner().invoke(cli, [
+        "convert", str(h5ad), str(out), "--two-phase", "--cell-chunk-size", "25",
+        "--temp-dir", str(tmp_path), "--encoding-config", str(cfg), *flag,
+    ])
+    assert result.exit_code == 0, result.output + repr(result.exception)
+    for part in ["values", "mask"]:
+        assert _layout(out, f"obs/_index/{part}")["chunks"] == [expected], part
