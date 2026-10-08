@@ -27,6 +27,11 @@ def resolve_shape(values, variables: dict[str, int]) -> tuple[int, ...]:
     return resolved
 
 
+def round_shards(shards, chunks) -> tuple[int, ...]:
+    """Round each shard length up to a multiple of its chunk length, as zarr requires."""
+    return tuple(((s + c - 1) // c) * c for s, c in zip(shards, chunks))
+
+
 def load_encoding_config(config_path: Path, variables: dict[str, int]) -> EncodingConfig:
     """Load an encoding config JSON file and resolve template variables.
 

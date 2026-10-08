@@ -16,7 +16,7 @@ import sys
 import zarr
 
 from .models import ArrayEncoding, ConversionConfig, EncodingConfig
-from .encoding import load_encoding_config, make_compressor, resolve_shape
+from .encoding import load_encoding_config, make_compressor, resolve_shape, round_shards
 
 logger = logging.getLogger("cell2zarr")
 
@@ -199,7 +199,8 @@ def _apply_obs_encoding(obs: zarr.Group, n_obs: int, encoding: EncodingConfig | 
         for parent, name in targets(index_key):
             logger.info(f"Rechunking obs/{index_key}{'' if parent is obs else '/' + name} to chunks=({idx_chunks},)")
             _reencode_1d(
-                parent, name, idx_chunks, idx_shards,
+                parent, name, idx_chunks,
+                round_shards((idx_shards,), (idx_chunks,))[0] if idx_shards else None,
                 make_compressor(idx_compressor) if idx_compressor else None,
             )
 
@@ -207,10 +208,10 @@ def _apply_obs_encoding(obs: zarr.Group, n_obs: int, encoding: EncodingConfig | 
         return
     for column in obs.attrs.get("column-order", []):
         for parent, name in targets(column):
+            chunks = col_chunks or parent[name].chunks[0]
             _reencode_1d(
-                parent, name,
-                col_chunks or parent[name].chunks[0],
-                col_shards,
+                parent, name, chunks,
+                round_shards((col_shards,), (chunks,))[0] if col_shards else None,
                 make_compressor(obs_enc.compressor) if obs_enc.compressor else None,
             )
 
@@ -522,7 +523,7 @@ def write_obsm_to_store(
         dim_vars = {"n_dim": n_dim, "n_obs": n_obs}
         obsm_chunks = resolve_shape(obsm_enc.chunks, dim_vars) if obsm_enc.chunks else (min(obsm_cell_chunk_size, n_obs), 1)
         obsm_shards = resolve_shape(obsm_enc.shards, dim_vars) if obsm_enc.shards else (min(1_000_000, n_obs), n_dim)
-        obsm_shards = tuple(((s + c - 1) // c) * c for s, c in zip(obsm_shards, obsm_chunks))
+        obsm_shards = round_shards(obsm_shards, obsm_chunks)
         logger.info(f"Writing obsm/{key} shape=({n_obs}, {n_dim}), chunks={obsm_chunks}, shards={obsm_shards}, dtype={target_dtype}...")
         zarr_embed = obsm_group.create_array(
             key,

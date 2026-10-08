@@ -251,3 +251,19 @@ def test_reencode_rejects_invalid_layout_and_keeps_original(tmp_path, chunks, sh
     np.testing.assert_array_equal(reopened["a"][:], data)
     assert dict(reopened["a"].attrs) == {"kind": "kept"}
     assert reopened["a"].chunks == (60,)
+
+
+def test_obs_shards_round_up_to_a_multiple_of_the_chunk(tmp_path):
+    out, adata = _convert(tmp_path, {"obs": {"chunks": [25], "shards": ["{n_obs}"]}})
+    for path in ["obs/score", "obs/flag", "obs/cell_type/codes"]:
+        layout = _layout(out, path)
+        assert (layout["chunks"], layout["shards"]) == ([25], [75]), path
+    np.testing.assert_array_equal(ad.read_zarr(out).obs["score"].to_numpy(), adata.obs["score"].to_numpy())
+
+
+def test_index_shards_round_up_to_the_default_chunk(tmp_path):
+    out, adata = _convert(tmp_path, {"obs/_index": {"shards": ["{n_obs}"]}}, obsm_cell_chunk_size=25)
+    for part in ["values", "mask"]:
+        layout = _layout(out, f"obs/_index/{part}")
+        assert (layout["chunks"], layout["shards"]) == ([25], [75]), part
+    assert ad.read_zarr(out).obs.index.tolist() == adata.obs.index.tolist()
