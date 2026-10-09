@@ -53,6 +53,10 @@ class Collection(SQLModel, table=True):
     description: str | None = None
     publication_url: str | None = None
     publication_citation: str | None = None
+    license_name: str | None = None
+    license_url: str | None = None
+    source_url: str | None = None
+    attribution_note: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
