@@ -208,3 +208,13 @@ def test_collection_detail_includes_attribution(attributed_app):
         assert detail[key] == value
     # datasets inside the detail carry the same collection attribution
     assert detail["datasets"][0]["collection"]["license_name"] == "CC BY 4.0"
+
+
+def test_dataset_ref_for_unattributed_collection_has_null_attribution(attributed_app):
+    client = TestClient(attributed_app)
+    ref = client.get("/api/datasets/plain-ds").json()["collection"]
+    assert ref == {
+        "slug": "plain-study",
+        "name": "Plain Study",
+        **dict.fromkeys(["publication_citation", "publication_url", *LICENSED], None),
+    }
