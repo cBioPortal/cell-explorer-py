@@ -28,6 +28,10 @@ class CollectionSummary(BaseModel):
     description: str | None
     publication_url: str | None
     publication_citation: str | None
+    license_name: str | None
+    license_url: str | None
+    source_url: str | None
+    attribution_note: str | None
     dataset_count: int
 
 
@@ -84,6 +88,10 @@ def _summary(collection: Collection, count: int) -> CollectionSummary:
         description=collection.description,
         publication_url=collection.publication_url,
         publication_citation=collection.publication_citation,
+        license_name=collection.license_name,
+        license_url=collection.license_url,
+        source_url=collection.source_url,
+        attribution_note=collection.attribution_note,
         dataset_count=count,
     )
 
