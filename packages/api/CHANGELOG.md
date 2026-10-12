@@ -2,6 +2,30 @@
 
 <!-- version list -->
 
+## v0.8.0 (2026-10-12)
+
+### Build System
+
+- **deps**: Raise anndata and pydantic-settings floors to what the code needs
+  ([`1e39874`](https://github.com/cBioPortal/cell-explorer-py/commit/1e39874a08cf8a7a71eb69d613cf3ebd0fdc26d4))
+
+### Features
+
+- **api**: Accept and return collection attribution in the admin API
+  ([`398c996`](https://github.com/cBioPortal/cell-explorer-py/commit/398c996fc43e802563c548db46aa2a5fca6ef323))
+
+- **api**: Add license and source attribution columns to collections
+  ([`8f7c721`](https://github.com/cBioPortal/cell-explorer-py/commit/8f7c72168ee8ac135f0e934daff3b67e2b5b5ded))
+
+- **api**: Serve collection attribution on collections and dataset refs
+  ([`d18e224`](https://github.com/cBioPortal/cell-explorer-py/commit/d18e2243e845ce7c423c28212fa29c37e254a802))
+
+### Testing
+
+- **api**: Pin null attribution on an unattributed collection's dataset ref
+  ([`aab71b0`](https://github.com/cBioPortal/cell-explorer-py/commit/aab71b0719acbea03c34c23be6dec7120cac45bc))
+
+
 ## v0.7.0 (2026-09-29)
 
 ### Bug Fixes
