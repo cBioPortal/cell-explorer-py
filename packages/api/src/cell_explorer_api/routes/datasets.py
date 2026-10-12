@@ -22,6 +22,25 @@ router = APIRouter(tags=["datasets"])
 class DatasetCollectionRef(BaseModel):
     slug: str
     name: str
+    publication_citation: str | None = None
+    publication_url: str | None = None
+    license_name: str | None = None
+    license_url: str | None = None
+    source_url: str | None = None
+    attribution_note: str | None = None
+
+
+def _collection_ref(collection: Collection) -> DatasetCollectionRef:
+    return DatasetCollectionRef(
+        slug=collection.slug,
+        name=collection.name,
+        publication_citation=collection.publication_citation,
+        publication_url=collection.publication_url,
+        license_name=collection.license_name,
+        license_url=collection.license_url,
+        source_url=collection.source_url,
+        attribution_note=collection.attribution_note,
+    )
 
 
 class DatasetMetadataResponse(BaseModel):
@@ -146,7 +165,7 @@ def _dataset_to_response(
         chat_enabled=dataset.chat_enabled,
         default_view=dataset.default_view,
         collection=(
-            DatasetCollectionRef(slug=dataset.collection.slug, name=dataset.collection.name)
+            _collection_ref(dataset.collection)
             if dataset.collection is not None
             else None
         ),

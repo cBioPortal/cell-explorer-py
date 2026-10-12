@@ -107,3 +107,28 @@ async def test_deleting_collection_nulls_dataset_collection_id(session):
     survivor = result.first()
     assert survivor is not None, "deleting a collection must not delete its datasets"
     assert survivor.collection_id is None
+
+
+@pytest.mark.asyncio
+async def test_collection_stores_attribution_fields(session):
+    session.add(Collection(
+        name="CRC Atlas", slug="crc-atlas",
+        license_name="CC BY 4.0",
+        license_url="https://creativecommons.org/licenses/by/4.0/",
+        source_url="https://doi.org/10.5281/zenodo.17878122",
+        attribution_note="Converted from h5ad to zarr; no other changes.",
+    ))
+    await session.commit()
+    stored = (await session.exec(select(Collection))).one()
+    assert stored.license_name == "CC BY 4.0"
+    assert stored.license_url == "https://creativecommons.org/licenses/by/4.0/"
+    assert stored.source_url == "https://doi.org/10.5281/zenodo.17878122"
+    assert stored.attribution_note == "Converted from h5ad to zarr; no other changes."
+
+
+@pytest.mark.asyncio
+async def test_collection_attribution_fields_default_to_none(session):
+    session.add(Collection(name="Plain", slug="plain"))
+    await session.commit()
+    stored = (await session.exec(select(Collection))).one()
+    assert (stored.license_name, stored.license_url, stored.source_url, stored.attribution_note) == (None, None, None, None)

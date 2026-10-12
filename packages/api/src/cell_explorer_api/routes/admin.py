@@ -68,6 +68,10 @@ class CollectionCreate(BaseModel):
     description: str | None = None
     publication_url: str | None = None
     publication_citation: str | None = None
+    license_name: str | None = None
+    license_url: str | None = None
+    source_url: str | None = None
+    attribution_note: str | None = None
 
 
 class CollectionUpdate(BaseModel):
@@ -76,6 +80,10 @@ class CollectionUpdate(BaseModel):
     description: str | None = None
     publication_url: str | None = None
     publication_citation: str | None = None
+    license_name: str | None = None
+    license_url: str | None = None
+    source_url: str | None = None
+    attribution_note: str | None = None
 
 
 class CollectionAdminResponse(BaseModel):
@@ -85,6 +93,10 @@ class CollectionAdminResponse(BaseModel):
     description: str | None
     publication_url: str | None
     publication_citation: str | None
+    license_name: str | None
+    license_url: str | None
+    source_url: str | None
+    attribution_note: str | None
 
 
 class CollectionAdminListResponse(BaseModel):
@@ -549,6 +561,10 @@ def _collection_to_response(collection: Collection) -> CollectionAdminResponse:
         description=collection.description,
         publication_url=collection.publication_url,
         publication_citation=collection.publication_citation,
+        license_name=collection.license_name,
+        license_url=collection.license_url,
+        source_url=collection.source_url,
+        attribution_note=collection.attribution_note,
     )
 
 

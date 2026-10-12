@@ -158,3 +158,63 @@ def test_authenticated_with_role_expands_dataset_count_and_datasets(seeded_app):
         assert sorted(d["slug"] for d in detail["datasets"]) == ["private-b", "public-a"]
     finally:
         seeded_app.dependency_overrides.pop(optional_auth, None)
+
+
+LICENSED = {
+    "license_name": "CC BY 4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "source_url": "https://doi.org/10.5281/zenodo.17878122",
+    "attribution_note": "Converted from h5ad to zarr; no other changes.",
+}
+
+
+@pytest_asyncio.fixture()
+async def attributed_app(app):
+    """One public collection with attribution, one public collection without."""
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+    async with AsyncSession(engine) as session:
+        ds = Datasource(name="CDN", type=DatasourceType.S3_CLOUDFRONT, base_url="https://cdn.example.com")
+        licensed = Collection(name="CRC Atlas", slug="crc-atlas", **LICENSED)
+        plain = Collection(name="Plain Study", slug="plain-study")
+        session.add_all([ds, licensed, plain])
+        await session.commit()
+        for obj in (ds, licensed, plain):
+            await session.refresh(obj)
+        session.add_all([
+            Dataset(datasource_id=ds.id, collection_id=licensed.id, name="Core",
+                    slug="crc-core", path="crc.zarr", is_public=True),
+            Dataset(datasource_id=ds.id, collection_id=plain.id, name="Plain",
+                    slug="plain-ds", path="p.zarr", is_public=True),
+        ])
+        await session.commit()
+    app.state.db_engine = engine
+    return app
+
+
+def test_collection_list_includes_attribution(attributed_app):
+    client = TestClient(attributed_app)
+    listed = {c["slug"]: c for c in client.get("/api/collections").json()["collections"]}
+    for key, value in LICENSED.items():
+        assert listed["crc-atlas"][key] == value
+        assert listed["plain-study"][key] is None
+
+
+def test_collection_detail_includes_attribution(attributed_app):
+    client = TestClient(attributed_app)
+    detail = client.get("/api/collections/crc-atlas").json()
+    for key, value in LICENSED.items():
+        assert detail[key] == value
+    # datasets inside the detail carry the same collection attribution
+    assert detail["datasets"][0]["collection"]["license_name"] == "CC BY 4.0"
+
+
+def test_dataset_ref_for_unattributed_collection_has_null_attribution(attributed_app):
+    client = TestClient(attributed_app)
+    ref = client.get("/api/datasets/plain-ds").json()["collection"]
+    assert ref == {
+        "slug": "plain-study",
+        "name": "Plain Study",
+        **dict.fromkeys(["publication_citation", "publication_url", *LICENSED], None),
+    }

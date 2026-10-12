@@ -12,6 +12,18 @@ from cell_explorer_api.db.models import Collection, Dataset, Datasource, Datasou
 from cell_explorer_api.main import create_app
 
 
+EXPECTED_REF = {
+    "slug": "a-study",
+    "name": "A Study",
+    "publication_citation": "Author et al. 2025",
+    "publication_url": "https://example.org/paper",
+    "license_name": "CC BY 4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "source_url": "https://example.org/data",
+    "attribution_note": "Converted to zarr.",
+}
+
+
 @pytest.fixture()
 def app():
     return create_app(Settings(database_url="sqlite+aiosqlite://"))
@@ -26,7 +38,15 @@ async def seeded_app(app):
         ds = Datasource(
             name="CDN", type=DatasourceType.S3_CLOUDFRONT, base_url="https://cdn.example.com"
         )
-        collection = Collection(name="A Study", slug="a-study")
+        collection = Collection(
+            name="A Study", slug="a-study",
+            publication_citation="Author et al. 2025",
+            publication_url="https://example.org/paper",
+            license_name="CC BY 4.0",
+            license_url="https://creativecommons.org/licenses/by/4.0/",
+            source_url="https://example.org/data",
+            attribution_note="Converted to zarr.",
+        )
         session.add(ds)
         session.add(collection)
         await session.commit()
@@ -59,7 +79,7 @@ async def seeded_app(app):
 def test_dataset_in_a_collection_reports_it(seeded_app):
     client = TestClient(seeded_app)
     datasets = {d["slug"]: d for d in client.get("/api/datasets").json()["datasets"]}
-    assert datasets["in-study"]["collection"] == {"slug": "a-study", "name": "A Study"}
+    assert datasets["in-study"]["collection"] == EXPECTED_REF
 
 
 def test_dataset_without_a_collection_reports_none(seeded_app):
@@ -71,7 +91,7 @@ def test_dataset_without_a_collection_reports_none(seeded_app):
 def test_get_dataset_in_a_collection_reports_it(seeded_app):
     client = TestClient(seeded_app)
     dataset = client.get("/api/datasets/in-study").json()
-    assert dataset["collection"] == {"slug": "a-study", "name": "A Study"}
+    assert dataset["collection"] == EXPECTED_REF
 
 
 def test_get_dataset_without_a_collection_reports_none(seeded_app):

@@ -123,3 +123,74 @@ async def test_delete_collection_orphans_but_keeps_datasets(ready_app):
         survivor = result.first()
     assert survivor is not None, "deleting a collection must not delete its datasets"
     assert survivor.collection_id is None
+
+
+ATTRIBUTION = {
+    "license_name": "CC BY 4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "source_url": "https://doi.org/10.5281/zenodo.17878122",
+    "attribution_note": "Converted from h5ad to zarr; no other changes.",
+}
+
+
+def test_create_collection_with_attribution(ready_app):
+    client = TestClient(ready_app)
+    response = client.post(
+        "/api/admin/collections",
+        json={"name": "CRC Atlas", "slug": "crc-atlas", **ATTRIBUTION},
+        headers=AUTH_HEADER,
+    )
+    assert response.status_code == 201
+    body = response.json()
+    for key, value in ATTRIBUTION.items():
+        assert body[key] == value
+
+
+def test_collection_without_attribution_returns_nulls(ready_app):
+    client = TestClient(ready_app)
+    body = client.post(
+        "/api/admin/collections", json={"name": "Plain", "slug": "plain"}, headers=AUTH_HEADER
+    ).json()
+    for key in ATTRIBUTION:
+        assert body[key] is None
+
+
+def test_partial_update_keeps_other_attribution_fields(ready_app):
+    client = TestClient(ready_app)
+    client.post(
+        "/api/admin/collections",
+        json={"name": "CRC Atlas", "slug": "crc-atlas", **ATTRIBUTION},
+        headers=AUTH_HEADER,
+    )
+    body = client.put(
+        "/api/admin/collections/crc-atlas", json={"license_name": "CC0 1.0"}, headers=AUTH_HEADER
+    ).json()
+    assert body["license_name"] == "CC0 1.0"
+    assert body["license_url"] == ATTRIBUTION["license_url"]
+    assert body["source_url"] == ATTRIBUTION["source_url"]
+    assert body["attribution_note"] == ATTRIBUTION["attribution_note"]
+
+
+def test_update_with_null_clears_an_attribution_field(ready_app):
+    client = TestClient(ready_app)
+    client.post(
+        "/api/admin/collections",
+        json={"name": "CRC Atlas", "slug": "crc-atlas", **ATTRIBUTION},
+        headers=AUTH_HEADER,
+    )
+    body = client.put(
+        "/api/admin/collections/crc-atlas", json={"attribution_note": None}, headers=AUTH_HEADER
+    ).json()
+    assert body["attribution_note"] is None
+    assert body["license_name"] == ATTRIBUTION["license_name"]
+
+
+def test_admin_list_includes_attribution(ready_app):
+    client = TestClient(ready_app)
+    client.post(
+        "/api/admin/collections",
+        json={"name": "CRC Atlas", "slug": "crc-atlas", **ATTRIBUTION},
+        headers=AUTH_HEADER,
+    )
+    listed = client.get("/api/admin/collections", headers=AUTH_HEADER).json()["collections"]
+    assert listed[0]["license_name"] == "CC BY 4.0"

@@ -559,7 +559,7 @@ provides-extras = ["test"]
 
 [[package]]
 name = "cell2zarr"
-version = "0.4.1"
+version = "0.4.2"
 source = { editable = "packages/cell2zarr" }
 dependencies = [
     { name = "anndata" },
