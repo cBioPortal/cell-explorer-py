@@ -117,6 +117,26 @@ def _tiny_adata() -> "ad.AnnData":
     return adata
 
 
+def _chat_obs_adata() -> "ad.AnnData":
+    """Every obs column shape chat's column listing has to describe."""
+    n_obs = 120
+    return ad.AnnData(
+        X=np.zeros((n_obs, 3), dtype="float32"),
+        obs=pd.DataFrame(
+            {
+                "cell_type": pd.Categorical(["T", "B", "NK"] * 40),
+                # over the 50-category cap: counted, names not listed
+                "donor": pd.Categorical([f"d{i % 60}" for i in range(n_obs)]),
+                "n_counts": np.arange(n_obs, dtype="float32"),
+                "n_genes": np.arange(n_obs, dtype="int32"),
+                "is_primary": np.array([True, False] * 60),
+                "barcode": [f"bc{i}" for i in range(n_obs)],
+            },
+            index=[f"cell{i}" for i in range(n_obs)],
+        ),
+    )
+
+
 @pytest.fixture(scope="session")
 def zarr_fixtures(tmp_path_factory) -> Path:
     """Generate v2 + v3 AnnData stores and two malformed stores."""
@@ -130,6 +150,15 @@ def zarr_fixtures(tmp_path_factory) -> Path:
     ad.settings.zarr_write_format = 2
     _tiny_adata().write_zarr(str(root / "tiny_v2.zarr"))
     zarr.consolidate_metadata(str(root / "tiny_v2.zarr"))
+
+    ad.settings.zarr_write_format = 3
+    _chat_obs_adata().write_zarr(str(root / "chat_obs_v3.zarr"))
+    ad.settings.zarr_write_format = 2
+    _chat_obs_adata().write_zarr(str(root / "chat_obs_v2.zarr"))
+    zarr.consolidate_metadata(str(root / "chat_obs_v2.zarr"))
+    # v2 without .zmetadata: no consolidated metadata to describe columns from.
+    _chat_obs_adata().write_zarr(str(root / "chat_obs_v2_unconsolidated.zarr"))
+    (root / "chat_obs_v2_unconsolidated.zarr" / ".zmetadata").unlink()
 
     # Restore the default so later tests in the session are unaffected.
     ad.settings.zarr_write_format = 3

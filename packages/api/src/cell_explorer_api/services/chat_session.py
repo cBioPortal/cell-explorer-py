@@ -178,7 +178,7 @@ async def make_chat_agent(
     except Exception as exc:
         raise ZarrUnreachableError(str(exc)) from exc
 
-    adapter = AnnDataZarrAccess(anndata)
+    adapter = AnnDataZarrAccess(anndata, zarr_store=zarr_store)
     strata_adapter = StrataZarrAccess(strata_store)
 
     # 5. Build DatasetContext + tool catalog (ctx is cached per (slug, updated_at))
