@@ -9,7 +9,7 @@ from cell_explorer_agent.tools.registry import Tool
 def clear_render_controls_tool() -> Tool:
     async def run() -> dict[str, Any]:
         # `null` is the frontend's reset sentinel: applyConfig restores the
-        # store defaults (0.5 / 0.5).
+        # built-in defaults.
         payload: dict[str, Any] = {"pointSize": None, "opacity": None}
         validate_partial(payload)
         return {"payload": payload}
@@ -18,7 +18,7 @@ def clear_render_controls_tool() -> Tool:
         name="clear_render_controls",
         kind="ui_action",
         description=(
-            "Reset point_size and opacity to the frontend defaults (0.5 each). "
+            "Reset point_size and opacity to the frontend defaults. "
             "Use when the user says 'reset rendering' / 'undo my point size and "
             "opacity changes' / 'go back to default'."
         ),
@@ -53,8 +53,8 @@ def set_render_controls_tool() -> Tool:
         name="set_render_controls",
         kind="ui_action",
         description=(
-            "Adjust scatterplot rendering. point_size in pixels (must be > 0; "
-            "frontend default 0.5). opacity from 0 (transparent) to 1 (opaque). "
+            "Adjust scatterplot rendering. point_size in pixels (must be > 0). "
+            "opacity from 0 (transparent) to 1 (opaque). "
             "At least one parameter must be specified."
         ),
         args_schema={
