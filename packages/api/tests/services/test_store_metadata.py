@@ -78,13 +78,13 @@ async def test_reports_cardinality_but_no_values_over_the_cap(zarr_server, monke
     from cell_explorer_api.services import store_metadata as sm
 
     calls: list[str] = []
-    real = sm._read_categories
+    real = sm.read_categories
 
     async def spy(store, column):
         calls.append(column)
         return await real(store, column)
 
-    monkeypatch.setattr(sm, "_read_categories", spy)
+    monkeypatch.setattr(sm, "read_categories", spy)
     monkeypatch.setattr(sm, "FACET_VALUE_CAP", 2)
     md = await _extract(zarr_server, "tiny_v3.zarr")
 
@@ -137,14 +137,14 @@ async def test_a_failing_values_read_does_not_fail_the_harvest(zarr_server, monk
     # One unreadable column must cost that column, not the dataset.
     from cell_explorer_api.services import store_metadata as sm
 
-    real = sm._read_categories
+    real = sm.read_categories
 
     async def flaky(store, column):
         if column == "tissue":
             raise OSError("chunk unreadable")
         return await real(store, column)
 
-    monkeypatch.setattr(sm, "_read_categories", flaky)
+    monkeypatch.setattr(sm, "read_categories", flaky)
     md = await _extract(zarr_server, "tiny_v3.zarr")
     assert md.obs_facets["tissue"].values is None
     assert md.obs_facets["cell_type"].values is not None, "other columns still read"

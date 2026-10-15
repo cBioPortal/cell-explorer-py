@@ -1,5 +1,6 @@
 """Adapter from zarr_access.AnnDataStore to cell_explorer_agent's ZarrAccess Protocol."""
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -12,6 +13,19 @@ from cell_explorer_agent.tools.strata_protocol import (
     StrataAccess,
 )
 from cell_explorer_agent.tools.zarr_protocol import ObsColumn, ObsColumnSpec
+
+from cell_explorer_api.services.store_metadata import (
+    discover_obs_facets,
+    obs_column_raw_dtype,
+    read_categories,
+)
+
+# Category names are listed only up to this many; above it a column is
+# described by its count alone (the dataset context drops the names anyway).
+OBS_CATEGORY_NAMES_CAP = 50
+
+# Concurrent categories reads when describing obs columns.
+OBS_CATEGORIES_READ_CONCURRENCY = 16
 
 
 # Candidate var columns (in priority order) that hold human-readable gene symbols.
@@ -54,6 +68,9 @@ class AnnDataZarrAccess:
     """
 
     store: Any  # zarr_access.AnnDataStore; Any to avoid importing here
+    # The open zarr_access.ZarrStore behind `store`. With its consolidated
+    # metadata, obs_columns() describes columns without reading cell data.
+    zarr_store: Any = None
     _obs_columns_cache: list[ObsColumnSpec] | None = field(default=None, init=False)
     _var_names_cache: list[str] | None = field(default=None, init=False)
     _gene_col_name_cache: str | None = field(default=None, init=False)
@@ -150,18 +167,67 @@ class AnnDataZarrAccess:
 
     async def obs_columns(self) -> list[ObsColumnSpec]:
         if self._obs_columns_cache is None:
-            specs: list[ObsColumnSpec] = []
-            for name in self.store.obs_columns:
-                raw = await self.store.obs_column(name)
-                col = _decode_col_to_obs_column(name, raw)
-                specs.append(ObsColumnSpec(
-                    name=col.name,
-                    dtype=col.dtype,
-                    cardinality=len(col.categories) if col.categories else None,
-                    categories=list(col.categories) if col.categories else None,
-                ))
+            specs = await self._obs_columns_from_metadata()
+            if specs is None:
+                specs = await self._obs_columns_from_full_read()
             self._obs_columns_cache = specs
         return list(self._obs_columns_cache)
+
+    async def _obs_columns_from_metadata(self) -> list[ObsColumnSpec] | None:
+        """Describe obs columns from consolidated metadata plus small categories reads.
+
+        Type and category count come from the metadata document; only the
+        categories arrays of columns under OBS_CATEGORY_NAMES_CAP are read, in
+        parallel. Returns None when the store has no consolidated metadata.
+        """
+        if self.zarr_store is None or not self.zarr_store.consolidated_metadata:
+            return None
+        names = list(self.store.obs_columns)
+        facets = discover_obs_facets(self.zarr_store, names)
+
+        semaphore = asyncio.Semaphore(OBS_CATEGORIES_READ_CONCURRENCY)
+
+        async def categories(name: str) -> list[str]:
+            async with semaphore:
+                return await read_categories(self.zarr_store, name)
+
+        listed = [
+            name for name in names
+            if facets[name].dtype == "categorical"
+            and facets[name].cardinality is not None
+            and facets[name].cardinality <= OBS_CATEGORY_NAMES_CAP
+        ]
+        values = dict(zip(listed, await asyncio.gather(*(categories(n) for n in listed))))
+
+        specs: list[ObsColumnSpec] = []
+        for name in names:
+            facet = facets[name]
+            dtype = facet.dtype
+            # The full read has always reported booleans as "string" (numpy does
+            # not count bool as a number); keep chat's view of the data unchanged.
+            if dtype == "numeric" and obs_column_raw_dtype(self.zarr_store, name).lstrip("|<>").startswith("b"):
+                dtype = "string"
+            specs.append(ObsColumnSpec(
+                name=name,
+                dtype=dtype,
+                cardinality=facet.cardinality,
+                categories=values.get(name),
+            ))
+        return specs
+
+    async def _obs_columns_from_full_read(self) -> list[ObsColumnSpec]:
+        """Decode every column in full; for stores without consolidated metadata."""
+        specs: list[ObsColumnSpec] = []
+        for name in self.store.obs_columns:
+            raw = await self.store.obs_column(name)
+            col = _decode_col_to_obs_column(name, raw)
+            specs.append(ObsColumnSpec(
+                name=col.name,
+                dtype=col.dtype,
+                cardinality=len(col.categories) if col.categories else None,
+                categories=list(col.categories) if col.categories else None,
+            ))
+        return specs
 
 
 @dataclass

@@ -115,7 +115,14 @@ def _node_shape(node: dict | None) -> list | None:
     return shape if isinstance(shape, list) else None
 
 
-def _discover_obs_facets(zarr_store: ZarrStore, obs_columns: list[str]) -> dict[str, ObsFacet]:
+def obs_column_raw_dtype(zarr_store: ZarrStore, column: str) -> str:
+    """A non-categorical column's stored dtype, e.g. "float32" or "|b1"; "" if unknown."""
+    cm = zarr_store.consolidated_metadata or {}
+    node = cm.get(_column_dtype_key(zarr_store.zarr_version, column)) or {}
+    return str(node.get("data_type") or node.get("dtype") or "")
+
+
+def discover_obs_facets(zarr_store: ZarrStore, obs_columns: list[str]) -> dict[str, ObsFacet]:
     """Facet facts for every obs column, from metadata alone — no requests.
 
     Cardinality comes from the categories node's shape, so the cap can be
@@ -142,9 +149,8 @@ def _discover_obs_facets(zarr_store: ZarrStore, obs_columns: list[str]) -> dict[
             facets[column] = ObsFacet("categorical", cardinality, None)
             continue
 
-        node = cm.get(_column_dtype_key(version, column)) or {}
-        raw = node.get("data_type") or node.get("dtype") or ""
-        numeric = str(raw).lstrip("|<>").startswith(("i", "u", "f", "b"))
+        raw = obs_column_raw_dtype(zarr_store, column)
+        numeric = raw.lstrip("|<>").startswith(("i", "u", "f", "b"))
         facets[column] = ObsFacet("numeric" if numeric else "string", None, None)
 
     return facets
@@ -160,7 +166,7 @@ def _eligible_for_values(column: str, facet: ObsFacet) -> bool:
     )
 
 
-async def _read_categories(zarr_store: ZarrStore, column: str) -> list[str]:
+async def read_categories(zarr_store: ZarrStore, column: str) -> list[str]:
     """Read one column's category labels. Small: cardinality is already capped."""
     arr = await zarr_store.get_array(f"obs/{column}/categories")
     return [str(v) for v in await arr.getitem(slice(None))]
@@ -169,12 +175,12 @@ async def _read_categories(zarr_store: ZarrStore, column: str) -> list[str]:
 async def _harvest_obs_facets(
     zarr_store: ZarrStore, obs_columns: list[str]
 ) -> dict[str, ObsFacet]:
-    facets = _discover_obs_facets(zarr_store, obs_columns)
+    facets = discover_obs_facets(zarr_store, obs_columns)
     for column, facet in list(facets.items()):
         if not _eligible_for_values(column, facet):
             continue
         try:
-            values = await _read_categories(zarr_store, column)
+            values = await read_categories(zarr_store, column)
         except Exception:
             # One unreadable column costs that column, not the dataset.
             continue
