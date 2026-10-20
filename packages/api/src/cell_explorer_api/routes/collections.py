@@ -65,6 +65,7 @@ async def _accessible_by_collection(
         .join(Datasource)
         .outerjoin(Collection)
         .outerjoin(DatasetMetadata, DatasetMetadata.dataset_id == Dataset.id)
+        .order_by(Dataset.created_at, Dataset.id)
     )
     if collection_id is not None:
         statement = statement.where(Dataset.collection_id == collection_id)
