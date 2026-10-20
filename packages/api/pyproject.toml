@@ -17,6 +17,7 @@ dependencies = [
     "typer>=0.15",
     "cell-explorer-agent",
     "zarr-access",
+    "asyncpg>=0.30.0",
 ]
 
 [tool.uv.sources]

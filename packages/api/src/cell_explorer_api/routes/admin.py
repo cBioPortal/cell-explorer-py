@@ -18,6 +18,7 @@ from cell_explorer_api.db.models import (
     DatasetMetadata,
     Datasource,
     DatasourceType,
+    utcnow,
 )
 from cell_explorer_api.routes.datasets import _obs_columns_response
 from cell_explorer_api.schemas.obs import ObsColumnInfo
@@ -299,7 +300,7 @@ async def update_datasource(
     updates = payload.model_dump(exclude_unset=True)
     for key, value in updates.items():
         setattr(ds, key, value)
-    ds.updated_at = datetime.now(timezone.utc)
+    ds.updated_at = utcnow()
     db.add(ds)
     await db.commit()
     await db.refresh(ds)
@@ -497,7 +498,7 @@ async def update_dataset(
     previous_datasource_id = dataset.datasource_id
     for key, value in updates.items():
         setattr(dataset, key, value)
-    dataset.updated_at = datetime.now(timezone.utc)
+    dataset.updated_at = utcnow()
     db.add(dataset)
     await db.commit()
     await db.refresh(dataset)
@@ -611,7 +612,7 @@ async def update_collection(
     collection = await _get_collection_or_404(slug, db)
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(collection, key, value)
-    collection.updated_at = datetime.now(timezone.utc)
+    collection.updated_at = utcnow()
     db.add(collection)
     await db.commit()
     await db.refresh(collection)

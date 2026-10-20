@@ -81,7 +81,7 @@ than "broken".
 | Variable | Default | Notes |
 |---|---|---|
 | `APP_DATA_DIR` | `./data` | Holds the SQLite database and `logs/` |
-| `DATABASE_URL` | unset | Defaults to SQLite at `$APP_DATA_DIR/cell_explorer.db` |
+| `DATABASE_URL` | unset | Defaults to SQLite at `$APP_DATA_DIR/cell_explorer.db`; Postgres: `postgresql+asyncpg://user:pass@host:5432/db` |
 | `LOG_LEVEL` | `INFO` | |
 | `LOG_ROTATION_INTERVAL` | `daily` | `daily`, `hourly` or `weekly` |
 | `LOG_BACKUP_COUNT` | `30` | Rotated files retained |

@@ -8,6 +8,15 @@ from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, JSON, Relationship, SQLModel, Column
 
 
+def utcnow() -> datetime:
+    """Return current UTC time as a timezone-naive datetime.
+
+    SQLite stores datetimes without timezone info; using naive UTC
+    keeps in-memory values consistent with what the DB returns.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 class DatasourceType(str, enum.Enum):
     """Supported datasource types."""
 
@@ -31,8 +40,8 @@ class Datasource(SQLModel, table=True):
     # Falls back to base_url when None.
     internal_base_url: str | None = None
     credential_ref: str | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
     datasets: list["Dataset"] = Relationship(back_populates="datasource")
 
@@ -57,8 +66,8 @@ class Collection(SQLModel, table=True):
     license_url: str | None = None
     source_url: str | None = None
     attribution_note: str | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
     datasets: list["Dataset"] = Relationship(back_populates="collection")
 
@@ -84,8 +93,8 @@ class Dataset(SQLModel, table=True):
     prompt_addendum: str | None = Field(default=None)
     default_view: dict | None = Field(default=None, sa_column=Column(JSON, nullable=True))
     chat_enabled: bool = Field(default=False)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
     datasource: Datasource | None = Relationship(back_populates="datasets")
     collection: Collection | None = Relationship(back_populates="datasets")
@@ -96,15 +105,6 @@ class Dataset(SQLModel, table=True):
         if self.datasource is None:
             return None
         return f"{self.datasource.base_url}/{self.path}"
-
-
-def utcnow() -> datetime:
-    """Return current UTC time as a timezone-naive datetime.
-
-    SQLite stores datetimes without timezone info; using naive UTC
-    keeps in-memory values consistent with what the DB returns.
-    """
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class DatasetMetadata(SQLModel, table=True):
