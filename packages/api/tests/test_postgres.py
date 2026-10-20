@@ -10,21 +10,25 @@ import asyncio
 import os
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from cell_explorer_api.config import Settings
 from cell_explorer_api.db import create_engine
+from cell_explorer_api.db.copy_to_postgres import CopyError, copy
 from cell_explorer_api.db.models import (
     ChatFeedback,
     ChatMessageRow,
     ChatThread,
+    Collection,
     Dataset,
     DatasetMetadata,
     Datasource,
@@ -48,17 +52,29 @@ async def _reset_schema(url: str) -> None:
     await engine.dispose()
 
 
+def _upgrade(url: str) -> None:
+    subprocess.run(
+        [sys.executable, "-m", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+        cwd=API_ROOT,
+        env={**os.environ, "DATABASE_URL": url},
+        check=True,
+    )
+
+
 @pytest.fixture()
 def migrated_url() -> str:
     """An empty database migrated to head the way the image does on boot."""
     asyncio.run(_reset_schema(POSTGRES_URL))
-    subprocess.run(
-        [sys.executable, "-m", "alembic", "-c", "alembic.ini", "upgrade", "head"],
-        cwd=API_ROOT,
-        env={**os.environ, "DATABASE_URL": POSTGRES_URL},
-        check=True,
-    )
+    _upgrade(POSTGRES_URL)
     return POSTGRES_URL
+
+
+@pytest.fixture()
+def sqlite_url(tmp_path) -> str:
+    """An empty SQLite catalog migrated to head, like a deployment's data volume."""
+    url = f"sqlite+aiosqlite:///{tmp_path / 'cell_explorer.db'}"
+    _upgrade(url)
+    return url
 
 
 def test_admin_catalog_round_trip(migrated_url):
@@ -176,3 +192,69 @@ async def test_chat_and_metadata_rows(migrated_url):
                 assert (await session.exec(select(model))).all() == [], model.__name__
     finally:
         await engine.dispose()
+
+
+async def test_copy_from_sqlite(sqlite_url, migrated_url):
+    source = create_engine(sqlite_url)
+    try:
+        async with AsyncSession(source, expire_on_commit=False) as session:
+            ds = Datasource(name="CDN", type=DatasourceType.HTTP_TOKEN, base_url="https://cdn")
+            collection = Collection(name="Atlas", slug="atlas")
+            session.add_all([ds, collection])
+            await session.flush()
+            dataset = Dataset(
+                datasource_id=ds.id, collection_id=collection.id, name="A", slug="a",
+                path="a.zarr", required_roles=["lab-a"], default_view={"pointSize": 3},
+                prompt_addendum="x" * 5000,
+            )
+            session.add(dataset)
+            await session.flush()
+            session.add(DatasetMetadata(
+                dataset_id=dataset.id, status="ok", n_obs=10, obs_columns=["cell_type"],
+                obs_facets={"cell_type": {"dtype": "categorical", "cardinality": 3}},
+            ))
+            thread = ChatThread(user_sub="user-1", dataset_id=dataset.id, title="t")
+            session.add(thread)
+            await session.flush()
+            message = ChatMessageRow(thread_id=thread.id, role="assistant", content="hi ✓")
+            session.add(message)
+            await session.flush()
+            session.add(ChatFeedback(message_id=message.id, user_sub="user-1", rating="up"))
+            await session.commit()
+    finally:
+        await source.dispose()
+
+    counts = await copy(sqlite_url, migrated_url)
+    assert counts == {
+        "datasources": 1, "collections": 1, "datasets": 1, "dataset_metadata": 1,
+        "chat_threads": 1, "chat_messages": 1, "chat_feedback": 1,
+    }
+
+    target = create_engine(migrated_url)
+    try:
+        async with AsyncSession(target) as session:
+            copied = await session.get(Dataset, dataset.id)
+            assert copied.collection_id == collection.id
+            assert copied.default_view == {"pointSize": 3}
+            assert copied.created_at == dataset.created_at
+            assert (await session.get(Datasource, ds.id)).type is DatasourceType.HTTP_TOKEN
+            assert (await session.get(ChatMessageRow, message.id)).content == "hi ✓"
+    finally:
+        await target.dispose()
+
+    with pytest.raises(CopyError, match="not empty"):
+        await copy(sqlite_url, migrated_url)
+
+
+async def test_copy_refuses_orphaned_rows(sqlite_url, migrated_url):
+    # A connection without the foreign-key pragma, as old SQLite writes were.
+    source = create_async_engine(sqlite_url)
+    try:
+        async with AsyncSession(source) as session:
+            session.add(ChatThread(user_sub="user-1", dataset_id=uuid.uuid4(), title="t"))
+            await session.commit()
+    finally:
+        await source.dispose()
+
+    with pytest.raises(CopyError, match="chat_threads.dataset_id: 1 row"):
+        await copy(sqlite_url, migrated_url)
