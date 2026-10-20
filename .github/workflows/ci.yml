@@ -69,6 +69,15 @@ jobs:
 
       - run: uv sync
 
+      # The models must describe exactly the schema the migrations build: the
+      # rest of the suite creates its tables from the models.
+      - name: Migrations match models
+        env:
+          DATABASE_URL: ${{ env.TEST_POSTGRES_URL }}
+        run: |
+          uv run --project packages/api alembic -c packages/api/alembic.ini upgrade head
+          uv run --project packages/api alembic -c packages/api/alembic.ini check
+
       - run: uv run pytest packages/api/tests/test_postgres.py -v
 
   docker:

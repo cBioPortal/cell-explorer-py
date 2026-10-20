@@ -169,10 +169,10 @@ async def test_chat_and_metadata_rows(migrated_url):
                 await session.commit()
             await session.rollback()
 
-            # Deleting a thread cascades to its messages and their feedback.
-            await session.delete(await session.get(ChatThread, thread.id))
+            # Deleting a dataset cascades to its metadata and its whole chat history.
+            await session.delete(await session.get(Dataset, dataset.id))
             await session.commit()
-            assert (await session.exec(select(ChatMessageRow))).all() == []
-            assert (await session.exec(select(ChatFeedback))).all() == []
+            for model in (DatasetMetadata, ChatThread, ChatMessageRow, ChatFeedback):
+                assert (await session.exec(select(model))).all() == [], model.__name__
     finally:
         await engine.dispose()
