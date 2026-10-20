@@ -42,8 +42,46 @@ jobs:
 
       - run: uv run pytest packages/cell-explorer-agent/tests/ -v
 
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: cell_explorer
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: cell_explorer
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cell_explorer"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_POSTGRES_URL: postgresql+asyncpg://cell_explorer:test@localhost:5432/cell_explorer
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v8.0.0
+
+      - run: uv python install 3.12
+
+      - run: uv sync
+
+      # The models must describe exactly the schema the migrations build: the
+      # rest of the suite creates its tables from the models.
+      - name: Migrations match models
+        env:
+          DATABASE_URL: ${{ env.TEST_POSTGRES_URL }}
+        run: |
+          uv run --project packages/api alembic -c packages/api/alembic.ini upgrade head
+          uv run --project packages/api alembic -c packages/api/alembic.ini check
+
+      - run: uv run pytest packages/api/tests/test_postgres.py -v
+
   docker:
-    needs: test
+    needs: [test, postgres]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
