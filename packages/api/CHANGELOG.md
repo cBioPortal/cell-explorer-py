@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.10.0 (2026-10-20)
+
+### Bug Fixes
+
+- **api**: List datasets, collections and datasources oldest first
+  ([`fca4c1e`](https://github.com/cBioPortal/cell-explorer-py/commit/fca4c1eac32f7c58b986ef501bf36ccbd122583b))
+
+### Features
+
+- **api**: Add a SQLite-to-Postgres catalog copy command
+  ([`7e73a7d`](https://github.com/cBioPortal/cell-explorer-py/commit/7e73a7d5dcfa72bae1e66a825a4f84b45bb061a2))
+
+
 ## v0.9.0 (2026-10-20)
 
 ### Bug Fixes
