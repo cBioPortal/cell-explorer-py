@@ -2,6 +2,22 @@
 
 <!-- version list -->
 
+## v0.9.0 (2026-10-20)
+
+### Bug Fixes
+
+- **api**: Describe obs columns from metadata, not cell data
+  ([`a750163`](https://github.com/cBioPortal/cell-explorer-py/commit/a750163af328f4268be66bf10d205cfd06ad1a9d))
+
+- **api**: Make the models match the migrated schema
+  ([`45b1134`](https://github.com/cBioPortal/cell-explorer-py/commit/45b11349921296cf0231765c8f379fe26a742887))
+
+### Features
+
+- **api**: Support Postgres as the catalog database
+  ([`fe5181f`](https://github.com/cBioPortal/cell-explorer-py/commit/fe5181f2c81ceecbecbdf3d4c3c9444680be2529))
+
+
 ## v0.8.0 (2026-10-12)
 
 ### Build System
