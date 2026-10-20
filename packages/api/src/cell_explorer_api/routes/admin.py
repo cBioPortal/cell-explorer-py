@@ -269,7 +269,7 @@ async def create_datasource(
 async def list_datasources(
     db: AsyncSession = Depends(get_db),
 ) -> DatasourceListResponse:
-    result = await db.exec(select(Datasource))
+    result = await db.exec(select(Datasource).order_by(Datasource.created_at, Datasource.id))
     datasources = [
         DatasourceResponse(
             id=str(ds.id),
@@ -345,8 +345,10 @@ async def list_unmapped_columns(
 async def list_datasets_admin(
     db: AsyncSession = Depends(get_db),
 ) -> DatasetAdminListResponse:
-    statement = select(Dataset, DatasetMetadata).outerjoin(
-        DatasetMetadata, DatasetMetadata.dataset_id == Dataset.id
+    statement = (
+        select(Dataset, DatasetMetadata)
+        .outerjoin(DatasetMetadata, DatasetMetadata.dataset_id == Dataset.id)
+        .order_by(Dataset.created_at, Dataset.id)
     )
     result = await db.exec(statement)
     return DatasetAdminListResponse(
@@ -597,7 +599,7 @@ async def create_collection(
 async def list_collections_admin(
     db: AsyncSession = Depends(get_db),
 ) -> CollectionAdminListResponse:
-    result = await db.exec(select(Collection))
+    result = await db.exec(select(Collection).order_by(Collection.created_at, Collection.id))
     return CollectionAdminListResponse(
         collections=[_collection_to_response(c) for c in result.all()]
     )

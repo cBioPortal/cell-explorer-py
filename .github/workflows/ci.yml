@@ -78,7 +78,7 @@ jobs:
           uv run --project packages/api alembic -c packages/api/alembic.ini upgrade head
           uv run --project packages/api alembic -c packages/api/alembic.ini check
 
-      - run: uv run pytest packages/api/tests/test_postgres.py -v
+      - run: uv run pytest packages/api/tests/test_postgres.py packages/api/tests/test_list_order.py -v
 
   docker:
     needs: [test, postgres]

@@ -184,6 +184,7 @@ async def list_datasets(
         .join(Datasource)
         .outerjoin(Collection)
         .outerjoin(DatasetMetadata, DatasetMetadata.dataset_id == Dataset.id)
+        .order_by(Dataset.created_at, Dataset.id)
     )
     result = await db.exec(statement)
     datasets = []
