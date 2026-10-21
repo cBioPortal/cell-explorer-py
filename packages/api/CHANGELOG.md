@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.11.0 (2026-10-21)
+
+### Features
+
+- **api**: Log to stderr as well as the rotating file
+  ([`9c9e059`](https://github.com/cBioPortal/cell-explorer-py/commit/9c9e059260c33b678899cea0e984df9029eb3200))
+
+
 ## v0.10.0 (2026-10-20)
 
 ### Bug Fixes
