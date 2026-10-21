@@ -61,20 +61,36 @@ def _not_modified(request: Request, etag: str) -> bool:
     )
 
 
-def _configure_file_logging(settings: Settings) -> None:
-    """Create data directories and configure rotating file log handler."""
+CONSOLE_HANDLER_NAME = "cell-explorer-console"
+
+
+def _configure_logging(settings: Settings) -> None:
+    """Log to a rotating file under the data directory and to stderr.
+
+    The file suits a single host with a persistent data directory; stderr is
+    what `kubectl logs` and `docker logs` show, and the only copy that survives
+    a container without a persistent volume.
+    """
     settings.log_dir.mkdir(parents=True, exist_ok=True)
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
 
     handler = TimedRotatingFileHandler(
         filename=settings.log_dir / settings.log_filename,
         when=settings.log_rotation_when,
         backupCount=settings.log_backup_count,
     )
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    handler.setFormatter(formatter)
 
     root_logger = logging.getLogger()
     root_logger.setLevel(settings.log_level.upper())
     root_logger.addHandler(handler)
+
+    # One console handler per process, however many apps are created (tests create many).
+    if not any(h.name == CONSOLE_HANDLER_NAME for h in root_logger.handlers):
+        console = logging.StreamHandler()
+        console.set_name(CONSOLE_HANDLER_NAME)
+        console.setFormatter(formatter)
+        root_logger.addHandler(console)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -87,7 +103,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings = Settings()
 
     settings.app_data_dir.mkdir(parents=True, exist_ok=True)
-    _configure_file_logging(settings)
+    _configure_logging(settings)
 
     app = FastAPI(
         title="Cell Explorer API",

@@ -85,7 +85,7 @@ than "broken".
 | `LOG_LEVEL` | `INFO` | |
 | `LOG_ROTATION_INTERVAL` | `daily` | `daily`, `hourly` or `weekly` |
 | `LOG_BACKUP_COUNT` | `30` | Rotated files retained |
-| `LOG_FILENAME` | `cell-explorer.log` | Written under `$APP_DATA_DIR/logs/` |
+| `LOG_FILENAME` | `cell-explorer.log` | Written under `$APP_DATA_DIR/logs/`; the same lines also go to stderr |
 
 ### Authentication
 
