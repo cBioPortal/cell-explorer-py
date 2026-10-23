@@ -3,9 +3,10 @@
 import re
 import secrets
 import time
+from urllib.parse import quote, unquote
 
 import jwt as _jwt
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 
 from cell_explorer_api.auth.dependencies import require_auth
@@ -16,6 +17,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 _LOCALHOST_REDIRECT_RE = re.compile(r"^http://(localhost|127\.0\.0\.1):\d{1,5}(/.*)?$")
 _CLI_STATE_EXP_SECONDS = 600  # 10 minutes
+_LOGIN_FLOW_COOKIE_MAX_AGE = 600
 
 _CLI_SUCCESS_HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Logged in</title>
@@ -52,6 +54,26 @@ def _callback_uri(request: Request) -> str:
             scheme=forwarded_proto if forwarded_proto else url.scheme,
         )
     return str(url)
+
+
+def _safe_next_path(next_path: str | None) -> str:
+    """Return ``next_path`` if it is a page on this site, else ``/``.
+
+    Only a path is accepted, never a URL: anything that a browser could resolve to another
+    origin (``//host``, ``/\\host``, a scheme) falls back to the index page, so the parameter
+    cannot be used as an open redirect. API paths fall back too, since they are not pages.
+    """
+    if (
+        not next_path
+        or not next_path.startswith("/")
+        or next_path.startswith("//")
+        or "\\" in next_path
+        or any(ord(c) < 0x20 or ord(c) == 0x7F for c in next_path)
+        or next_path == "/api"
+        or next_path.startswith(("/api/", "/api?"))
+    ):
+        return "/"
+    return next_path
 
 
 def _cookie_defaults(request: Request) -> dict:
@@ -127,8 +149,12 @@ def _clear_token_cookies(response: Response) -> None:
 
 
 @router.get("/login")
-async def login(request: Request):
-    """Redirect to Keycloak login page."""
+async def login(request: Request, next_path: str | None = Query(None, alias="next")):
+    """Redirect to Keycloak login page.
+
+    ``next`` is the page to return to after login (a path on this site, e.g.
+    ``/view?dataset=spectrum``). It is kept in a cookie for the round trip.
+    """
     _require_auth_enabled(request)
     oidc: OidcClient = request.app.state.oidc
     state = secrets.token_urlsafe(32)
@@ -136,7 +162,15 @@ async def login(request: Request):
     auth_url = oidc.authorization_url(redirect_uri=redirect_uri, state=state)
     response = RedirectResponse(url=auth_url, status_code=307)
     defaults = _cookie_defaults(request)
-    response.set_cookie("cce_state", state, max_age=600, httponly=True, secure=defaults["secure"], samesite="lax", path="/api/auth")
+    flow_cookie = {
+        "max_age": _LOGIN_FLOW_COOKIE_MAX_AGE,
+        "httponly": True,
+        "secure": defaults["secure"],
+        "samesite": "lax",
+        "path": "/api/auth",
+    }
+    response.set_cookie("cce_state", state, **flow_cookie)
+    response.set_cookie("cce_next", quote(_safe_next_path(next_path), safe=""), **flow_cookie)
     return response
 
 
@@ -196,9 +230,11 @@ async def callback(request: Request, code: str, state: str):
         return Response(status_code=400, content="Invalid state parameter")
     redirect_uri = _callback_uri(request)
     tokens = await oidc.exchange_code(code, redirect_uri)
-    response = RedirectResponse(url="/", status_code=302)
+    next_path = _safe_next_path(unquote(request.cookies.get("cce_next", "")))
+    response = RedirectResponse(url=next_path, status_code=302)
     _set_token_cookies(request, response, tokens["access_token"], tokens["refresh_token"])
     response.delete_cookie("cce_state", path="/api/auth")
+    response.delete_cookie("cce_next", path="/api/auth")
     return response
 
 
