@@ -73,3 +73,10 @@ def test_build_system_prompt_omits_curator_notes_when_empty(addendum):
     ctx = _minimal_ctx(prompt_addendum=addendum)
     prompt = build_system_prompt(ctx)
     assert "Curator notes" not in prompt
+
+
+def test_build_system_prompt_states_tool_call_limit():
+    from cell_explorer_agent.prompt.system import build_system_prompt
+    ctx = _minimal_ctx()
+    assert "at most 12 tool calls per turn" in build_system_prompt(ctx, max_tool_calls=12)
+    assert "tool calls per turn" not in build_system_prompt(ctx)

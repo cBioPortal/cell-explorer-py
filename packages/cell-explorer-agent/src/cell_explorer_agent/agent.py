@@ -87,7 +87,9 @@ class ChatAgent:
         view_state: dict[str, Any] | None = None,
         telemetry_context: dict[str, Any] | None = None,
     ) -> AsyncIterator[ChatEvent]:
-        system = build_system_prompt(self.dataset_ctx)
+        system = build_system_prompt(
+            self.dataset_ctx, max_tool_calls=self.config.max_tool_calls_per_turn
+        )
         view_state_block = (
             format_view_state_block(view_state) if view_state else None
         )
@@ -96,6 +98,9 @@ class ChatAgent:
         total_usage = TokenUsage()
         tool_calls_this_turn = 0
         max_calls = self.config.max_tool_calls_per_turn
+        # Set once a call is refused for the limit; the model then gets one
+        # more round to answer from the results it already has.
+        limit_reached = False
 
         # Telemetry: open a TurnTrace if the caller supplied context.
         # Caller-supplied context (vs. agent self-deriving) keeps the agent
@@ -179,7 +184,9 @@ class ChatAgent:
                     yield Done(usage=total_usage, trace_id=trace.trace_id)
                     return
 
-                if tool_calls_this_turn + len(pending_calls) > max_calls:
+                if limit_reached:
+                    # Told the limit was reached, the model asked for more
+                    # tools instead of answering.
                     yield Error(
                         message=(
                             f"Tool-call limit ({max_calls}) reached this turn — stopping."
@@ -192,6 +199,25 @@ class ChatAgent:
 
                 results: list[ToolResult] = []
                 for call in pending_calls:
+                    if tool_calls_this_turn >= max_calls:
+                        if not limit_reached:
+                            logger.info("chat.tool.limit_reached max_calls=%d", max_calls)
+                        limit_reached = True
+                        results.append(
+                            ToolResult(
+                                tool_call_id=call.id,
+                                content={
+                                    "error": (
+                                        f"Tool-call limit ({max_calls}) reached for this "
+                                        "turn; this call was not run. Answer now from the "
+                                        "results you already have, and say what you could "
+                                        "not check."
+                                    )
+                                },
+                                is_error=True,
+                            )
+                        )
+                        continue
                     tool_calls_this_turn += 1
                     tool = self.catalog.get(call.name)
                     if tool is None:

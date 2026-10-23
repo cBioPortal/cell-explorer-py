@@ -14,6 +14,7 @@ class Script:
     # Recorded after a call completes (for assertions in tests):
     called_with_system: str = ""
     called_with_message_count: int = 0
+    called_with_messages: list[Message] = field(default_factory=list)
     called_with_tool_names: list[str] = field(default_factory=list)
     called_with_view_state_block: str | None = None
 
@@ -37,6 +38,7 @@ class FakeLLMClient(LLMClient):
         s = self.scripts.pop(0)
         s.called_with_system = system
         s.called_with_message_count = len(messages)
+        s.called_with_messages = list(messages)
         s.called_with_tool_names = [t.name for t in tools]
         s.called_with_view_state_block = view_state_block
 

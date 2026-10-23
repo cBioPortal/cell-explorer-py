@@ -12,7 +12,7 @@ from typing import Any
 from cell_explorer_agent.prompt.dataset_context import DatasetContext
 
 
-def build_system_prompt(ctx: DatasetContext) -> str:
+def build_system_prompt(ctx: DatasetContext, max_tool_calls: int | None = None) -> str:
     lines: list[str] = []
     lines.append(
         "You are a data-exploration assistant for a single single-cell RNA-seq dataset."
@@ -42,6 +42,12 @@ def build_system_prompt(ctx: DatasetContext) -> str:
     lines.append(f"Available embeddings: {', '.join(ctx.embedding_keys)}")
     lines.append("")
     lines.append("Tool-use policy:")
+    if max_tool_calls is not None:
+        lines.append(
+            f"  - You can make at most {max_tool_calls} tool calls per turn. Plan "
+            "multi-step questions to fit: prefer one call that answers several "
+            "parts over many narrow calls. Calls past the limit are not run."
+        )
     lines.append(
         "  - Prefer bounded reads (get_dataset_schema, describe_obs_column) before heavy queries."
     )
