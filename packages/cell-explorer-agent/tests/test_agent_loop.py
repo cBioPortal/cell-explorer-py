@@ -3,7 +3,7 @@ from cell_explorer_agent.config import AgentConfig
 from cell_explorer_agent.events import Done, TextDelta, ToolProgress
 from cell_explorer_agent.llm.base import LLMStop, LLMTextDelta, LLMToolCall, LLMUsage
 from cell_explorer_agent.llm.fake import FakeLLMClient, Script
-from cell_explorer_agent.messages import UserMessage
+from cell_explorer_agent.messages import ToolResultMessage, UserMessage
 from cell_explorer_agent.prompt.dataset_context import build_dataset_context
 from cell_explorer_agent.tools.data.schema import get_dataset_schema_tool
 from cell_explorer_agent.tools.registry import ToolCatalog
@@ -284,34 +284,63 @@ async def test_tool_call_error_log_includes_duration(fake_zarr, caplog):
     assert "correlation=" in errs[0]
 
 
-async def test_max_tool_calls_cap(fake_zarr):
-    # LLM keeps calling a tool forever; cap should kick in.
-    def make_repeater(id_prefix):
-        return Script(
-            events=[
-                LLMToolCall(id=f"{id_prefix}-1", name="get_dataset_schema", args={}),
-                LLMStop(reason="tool_use", usage=LLMUsage()),
-            ]
-        )
+def _schema_calls(id_prefix, n):
+    return Script(
+        events=[
+            *[
+                LLMToolCall(id=f"{id_prefix}-{i}", name="get_dataset_schema", args={})
+                for i in range(n)
+            ],
+            LLMStop(reason="tool_use", usage=LLMUsage()),
+        ]
+    )
 
-    scripts = [make_repeater(f"s{i}") for i in range(20)]
-    llm = FakeLLMClient(scripts=scripts)
+
+async def _capped_agent(fake_zarr, scripts, max_calls):
     ctx = await build_dataset_context(fake_zarr, slug="d", name="D", description="")
     cat = ToolCatalog()
     cat.register(get_dataset_schema_tool(fake_zarr, limit_bytes=32_768))
+    cfg = AgentConfig(**{**AgentConfig().model_dump(), "max_tool_calls_per_turn": max_calls})
+    return ChatAgent(llm=FakeLLMClient(scripts=scripts), catalog=cat, dataset_ctx=ctx, config=cfg)
 
-    cfg = AgentConfig()
-    # Force the cap
-    cfg = AgentConfig(**{**cfg.model_dump(), "max_tool_calls_per_turn": 3})
 
-    agent = ChatAgent(llm=llm, catalog=cat, dataset_ctx=ctx, config=cfg)
+async def test_tool_call_limit_refuses_extra_calls_then_answers(fake_zarr):
+    answer = Script(
+        events=[
+            LLMTextDelta(text="Here is what I found."),
+            LLMStop(reason="end_turn", usage=LLMUsage()),
+        ]
+    )
+    # Two calls per round against a limit of 3: the second round's second call is refused.
+    scripts = [_schema_calls("a", 2), _schema_calls("b", 2), answer]
+    agent = await _capped_agent(fake_zarr, list(scripts), max_calls=3)
+    events = [e async for e in agent.run(messages=[UserMessage(content="q")])]
+
+    assert not [e for e in events if isinstance(e, Error)]
+    started = [e for e in events if isinstance(e, ToolProgress) and e.status == "started"]
+    assert len(started) == 3
+    assert "".join(e.text for e in events if isinstance(e, TextDelta)) == "Here is what I found."
+    assert isinstance(events[-1], Done)
+
+    last_results = answer.called_with_messages[-1]
+    assert isinstance(last_results, ToolResultMessage)
+    ran, refused = last_results.results
+    assert not ran.is_error
+    assert refused.is_error
+    assert "limit (3) reached" in refused.content["error"]
+
+
+async def test_tool_call_limit_errors_if_model_keeps_calling(fake_zarr):
+    scripts = [_schema_calls(f"s{i}", 1) for i in range(5)]
+    agent = await _capped_agent(fake_zarr, scripts, max_calls=1)
     events = [e async for e in agent.run(messages=[UserMessage(content="loop")])]
 
-    # Final Error + Done
     errors = [e for e in events if isinstance(e, Error)]
     assert len(errors) == 1
-    assert "cap" in errors[0].message.lower() or "limit" in errors[0].message.lower()
-    assert events[-1].__class__.__name__ == "Done"
+    assert "limit" in errors[0].message.lower()
+    assert isinstance(events[-1], Done)
+    # One call ran, one was refused, and the third round's call ended the turn.
+    assert len(scripts) == 2
 
 
 async def test_cancellation_propagates(fake_zarr):
