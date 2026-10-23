@@ -219,3 +219,65 @@ def test_auth_routes_return_401_without_credentials():
     response = client.get("/api/auth/me")
     assert response.status_code == 401
     assert response.json()["detail"] == "Not authenticated"
+
+
+@pytest.mark.parametrize(
+    "next_path, expected",
+    [
+        ("/view?dataset=spectrum", "/view?dataset=spectrum"),
+        ("/collections/htan-vumc-crc", "/collections/htan-vumc-crc"),
+        ("/", "/"),
+        (None, "/"),
+        ("", "/"),
+        ("https://evil.example.com/", "/"),
+        ("//evil.example.com/", "/"),
+        ("/\\evil.example.com/", "/"),
+        ("javascript:alert(1)", "/"),
+        ("/view\r\nSet-Cookie: x=1", "/"),
+        ("/api/auth/login", "/"),
+        ("/api", "/"),
+    ],
+)
+def test_safe_next_path(next_path, expected):
+    from cell_explorer_api.routes.auth import _safe_next_path
+
+    assert _safe_next_path(next_path) == expected
+
+
+def _login_then_callback(client, monkeypatch, **login_params):
+    login = client.get("/api/auth/login", params=login_params, follow_redirects=False)
+    state = login.cookies["cce_state"]
+
+    async def fake_exchange_code(code, redirect_uri):
+        return {"access_token": "access", "refresh_token": "refresh"}
+
+    monkeypatch.setattr(client.app.state.oidc, "exchange_code", fake_exchange_code)
+    return client.get(
+        "/api/auth/callback",
+        params={"code": "the-code", "state": state},
+        follow_redirects=False,
+    )
+
+
+def test_callback_returns_to_the_page_login_started_from(auth_client, monkeypatch):
+    response = _login_then_callback(
+        auth_client, monkeypatch, next="/view?dataset=spectrum&gene=CD8A"
+    )
+    assert response.status_code == 302
+    assert response.headers["location"] == "/view?dataset=spectrum&gene=CD8A"
+
+
+def test_callback_returns_to_index_without_next(auth_client, monkeypatch):
+    response = _login_then_callback(auth_client, monkeypatch)
+    assert response.headers["location"] == "/"
+
+
+def test_callback_ignores_an_offsite_next(auth_client, monkeypatch):
+    response = _login_then_callback(auth_client, monkeypatch, next="//evil.example.com/")
+    assert response.headers["location"] == "/"
+
+
+def test_callback_clears_the_next_cookie(auth_client, monkeypatch):
+    response = _login_then_callback(auth_client, monkeypatch, next="/collections/crc-metastasis")
+    set_cookie = response.headers.get_list("set-cookie")
+    assert any(c.startswith("cce_next=") and "Max-Age=0" in c for c in set_cookie)

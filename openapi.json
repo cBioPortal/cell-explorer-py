@@ -11,14 +11,42 @@
           "auth"
         ],
         "summary": "Login",
-        "description": "Redirect to Keycloak login page.",
+        "description": "Redirect to Keycloak login page.\n\n``next`` is the page to return to after login (a path on this site, e.g.\n``/view?dataset=spectrum``). It is kept in a cookie for the round trip.",
         "operationId": "login_api_auth_login_get",
+        "parameters": [
+          {
+            "name": "next",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Next"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
