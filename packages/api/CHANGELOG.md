@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.12.0 (2026-10-23)
+
+### Features
+
+- **api**: Return to the page login started from
+  ([#211](https://github.com/cBioPortal/cell-explorer-py/pull/211),
+  [`c24d88b`](https://github.com/cBioPortal/cell-explorer-py/commit/c24d88b84c708914db8b4274c9853009b3116458))
+
+
 ## v0.11.0 (2026-10-21)
 
 ### Features
