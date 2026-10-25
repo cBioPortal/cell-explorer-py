@@ -42,6 +42,8 @@ jobs:
 
       - run: uv run pytest packages/cell-explorer-agent/tests/ -v
 
+      - run: uv run pytest packages/mcp/tests/ -v
+
   postgres:
     runs-on: ubuntu-latest
     services:
