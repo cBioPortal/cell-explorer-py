@@ -233,6 +233,20 @@ async def test_compare_groups_returns_top_by_cohens_d(fake_zarr):
         assert key in cd8a, key
 
 
+async def test_compare_groups_attaches_diverging_bar_chart(fake_zarr):
+    tool = compare_groups_tool(fake_zarr, limit_bytes=32_768, concurrency=4)
+    result = await tool.func(
+        obs_column="cell_type", group_a="T cell", group_b="B cell", n=5
+    )
+    chart = result["chart"]
+    assert chart["type"] == "diverging_bar"
+    assert chart["data"]["group_a"] == "T cell"
+    assert chart["data"]["group_b"] == "B cell"
+    assert chart["data"]["genes"] == [
+        {"symbol": g["symbol"], "cohens_d": g["cohens_d"]} for g in result["genes"]
+    ]
+
+
 async def test_compare_groups_unknown_group(fake_zarr):
     tool = compare_groups_tool(fake_zarr, limit_bytes=32_768, concurrency=4)
     result = await tool.func(
@@ -357,7 +371,7 @@ async def test_compare_groups_output_schema(fake_zarr):
         obs_column="cell_type", group_a="T cell", group_b="B cell", n=3
     )
     assert set(result) == {
-        "obs_column", "group_a", "group_b", "ranked_by", "method", "genes",
+        "obs_column", "group_a", "group_b", "ranked_by", "method", "genes", "chart",
     }
     assert result["ranked_by"] == "cohens_d"
     assert result["method"] == "via_xscan"
