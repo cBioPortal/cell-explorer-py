@@ -213,6 +213,20 @@ def _assemble_result(
             "ranked_by": "cohens_d",
             "method": method,
             "genes": genes,
+            # Diverging bar of Cohen's d; chart.data is stripped for the LLM.
+            "chart": {
+                "type": "diverging_bar",
+                "data": {
+                    "obs_column": obs_column,
+                    "group_a": group_a,
+                    "group_b": group_b,
+                    "genes": [
+                        {"symbol": g["symbol"], "cohens_d": g["cohens_d"]}
+                        for g in genes
+                        if np.isfinite(g["cohens_d"])
+                    ],
+                },
+            },
         },
         limit_bytes=limit_bytes,
     )
