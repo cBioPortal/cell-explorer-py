@@ -186,6 +186,15 @@ def build_system_prompt(ctx: DatasetContext, max_tool_calls: int | None = None) 
         "by cluster' / 'marker panel by category', use gene_panel_by_obs with the "
         "gene list and the obs column. Returns a dotplot rendered inline."
     )
+    lines.append(
+        "  - To compare a few specific groups as a bar chart ('% T cells in "
+        "Adnexa vs Omentum', 'CD8A in tumor vs normal', 'cells per patient'), "
+        "use plot_bar. Pick the measure (composition, cell_counts, gene_mean) "
+        "and pass only the groups being compared. If the dataset notes say "
+        "fractions are only meaningful within a subset (e.g. one sort "
+        "fraction), pass that subset as `where`. compare_groups also draws a "
+        "chart of the genes it ranks."
+    )
     return "\n".join(lines)
 
 

@@ -17,6 +17,7 @@ async def test_v1_catalog_includes_all_tools(fake_zarr):
         "gene_panel_by_obs",
         "compare_groups",
         "find_markers",
+        "plot_bar",
         # ui_action (existing)
         "set_embedding",
         "set_color_by_gene",
