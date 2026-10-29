@@ -124,6 +124,7 @@ and remain supported aliases for the generic names above.
 | `ACCESS_COOKIE_MAX_AGE` | `300` | Seconds. 5 minutes |
 | `REFRESH_COOKIE_MAX_AGE` | `86400` | Seconds. 24 hours. **Keep this at or below the realm's `ssoSessionMaxLifespan`**, or refresh fails early and users see "Session expired" mid-session |
 | `CORS_ORIGINS` | unset | Comma-separated origins. Unset means no CORS middleware is installed |
+| `PUBLIC_CORS_ORIGIN_REGEX` | unset | Origins, as a regular expression matched against the whole origin, that may read the public catalog (`GET /api/datasets` and `/api/collections`) from the browser, e.g. `https://([a-z0-9-]+\.)*cbioportal\.org`. Unlike `CORS_ORIGINS`, these origins never get the user's cookies, so they see only what an anonymous visitor sees |
 
 ### Admin, chat and CLI
 

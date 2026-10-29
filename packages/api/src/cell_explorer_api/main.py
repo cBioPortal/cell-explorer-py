@@ -125,6 +125,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_headers=["Content-Type", "Authorization"],
         )
 
+    if settings.public_cors_origin_regex:
+        from cell_explorer_api.public_cors import PublicCatalogCorsMiddleware
+
+        app.add_middleware(
+            PublicCatalogCorsMiddleware,
+            origin_regex=settings.public_cors_origin_regex,
+        )
+
     # Token refresh middleware — when require_auth refreshes an expired access
     # token, it stores new tokens on request.state. This middleware injects
     # Set-Cookie headers on the response so the browser receives the rotated

@@ -72,6 +72,7 @@ class Settings(BaseSettings):
     oidc_audience: str | None = None
 
     cors_origins: str = ""
+    public_cors_origin_regex: str = ""
 
     # Session cookie lifetimes (seconds). Defaults match a typical Keycloak
     # cell-explorer realm: 5m access, 24h refresh. Set ACCESS_COOKIE_MAX_AGE
