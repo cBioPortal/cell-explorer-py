@@ -47,6 +47,19 @@ def mint_credentials(
     return minter(datasource, path, url, expires_at, ttl_seconds)
 
 
+def cookie_domain(datasource: Datasource) -> str | None:
+    """Parent domain to set a datasource's signed cookies on, or None if unset.
+
+    The cookies are minted by the API but read by CloudFront on a different
+    host, so they must be scoped to a domain both share (e.g.
+    `.dash.breakthroughcancer.org` for the API on `cell-explorer.dash...` and the
+    CDN on `assets.dash...`). Read from `DATASOURCE_{ref}_COOKIE_DOMAIN`.
+    """
+    if datasource.credential_ref is None:
+        return None
+    return os.environ.get(f"DATASOURCE_{datasource.credential_ref}_COOKIE_DOMAIN") or None
+
+
 def _mint_http_token(
     datasource: Datasource,
     path: str,

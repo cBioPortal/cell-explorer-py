@@ -1,8 +1,8 @@
 """Dataset discovery endpoints."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -13,7 +13,11 @@ from cell_explorer_api.db import get_db
 from cell_explorer_api.db.models import Collection, Dataset, DatasetMetadata, Datasource
 from cell_explorer_api.schemas.obs import ObsColumnInfo
 from cell_explorer_api.services.access import user_can_access
-from cell_explorer_api.services.credentials import CredentialError, mint_credentials
+from cell_explorer_api.services.credentials import (
+    CredentialError,
+    cookie_domain,
+    mint_credentials,
+)
 from cell_explorer_api.services.facets import resolve_facet
 
 router = APIRouter(tags=["datasets"])
@@ -222,10 +226,47 @@ async def get_dataset(
     return _dataset_to_response(dataset, metadata)
 
 
+def _set_signed_cookies(
+    response: Response, credential: dict, datasource: Datasource, path: str
+) -> dict:
+    """Put CloudFront signed cookies in the browser's jar for the CDN host.
+
+    zarrstore fires hundreds of chunk requests straight at CloudFront and cannot
+    attach credentials to each one, so the cookies must already be there. Path
+    is the dataset's own prefix with a trailing slash: each private dataset gets
+    its own cookie triple, and a sibling store whose name merely starts with this
+    one's does not receive it. The values are then dropped from the body, since
+    HttpOnly means nothing if script can read them there.
+
+    Without a configured cookie domain the credential is returned unchanged: a
+    host-only cookie on the API's host would never reach the CDN.
+    """
+    domain = cookie_domain(datasource)
+    if domain is None:
+        return credential
+
+    expires_at = datetime.fromisoformat(credential["expires_at"])
+    max_age = max(0, int((expires_at - datetime.now(timezone.utc)).total_seconds()))
+    cookie_path = "/" + path.strip("/") + "/"
+    for name, value in credential["cookies"].items():
+        response.set_cookie(
+            name,
+            value,
+            max_age=max_age,
+            path=cookie_path,
+            domain=domain,
+            secure=True,
+            httponly=True,
+            samesite="lax",
+        )
+    return {k: v for k, v in credential.items() if k != "cookies"}
+
+
 @router.post("/datasets/{slug}/access")
 async def access_dataset(
     slug: str,
     request: Request,
+    response: Response,
     user: User | None = Depends(optional_auth),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
@@ -253,6 +294,10 @@ async def access_dataset(
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     try:
-        return mint_credentials(datasource, dataset.path)
+        credential = mint_credentials(datasource, dataset.path)
     except CredentialError as e:
         raise HTTPException(status_code=503, detail=str(e))
+
+    if credential["credential_type"] == "signed_cookies":
+        credential = _set_signed_cookies(response, credential, datasource, dataset.path)
+    return credential

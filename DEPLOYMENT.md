@@ -35,6 +35,14 @@ We don't control the `cbioportal-public-imaging.assets.cbioportal.org` distribut
 
 The buckets we use should have `AllowedOrigins: ['*']` for public datasets so any browser origin works. S3 echoes `Access-Control-Allow-Origin: *` regardless of the request Origin value when this is set. If a bucket restricts to specific origins, callers must set `ZARR_ACCESS_ORIGIN` to a value in that allowlist.
 
+### Private datasets: ambient signed cookies
+
+A private dataset on an `s3_cloudfront` datasource loads in the browser only if CloudFront's signed cookies are already in the cookie jar for the CDN's host, because zarrstore fetches chunks straight from CloudFront. Set `DATASOURCE_{ref}_COOKIE_DOMAIN` (alongside `_KEY_PAIR_ID` and `_PRIVATE_KEY`) to a parent domain the API and the CDN share, e.g. `.dash.breakthroughcancer.org` for an API on `cell-explorer.dash.breakthroughcancer.org` and a CDN on `assets.dash.breakthroughcancer.org`.
+
+`POST /api/datasets/{slug}/access` then sets the three `CloudFront-*` cookies on that domain with `Path` set to the dataset's own path plus a trailing slash, so each private dataset has its own cookies, and `Secure; HttpOnly; SameSite=Lax` with a `Max-Age` matching the credential. The values are left out of the JSON body. Without the setting the endpoint returns them in the body only, as before, and the browser cannot load the dataset. Server-side readers (metadata harvest, chat) are unaffected either way.
+
+The bucket CORS policy for such a CDN must allow the app's **exact** origin, not `*`: the browser sends credentials, and a credentialed response needs `Access-Control-Allow-Origin` set to that origin plus `Access-Control-Allow-Credentials: true`, which S3 returns for a matching non-wildcard origin.
+
 ## Session lifetimes (Keycloak)
 
 The realm's session timeouts gate when users are forced to re-authenticate. The relevant settings on the `cell-explorer` realm are:
