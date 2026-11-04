@@ -31,6 +31,112 @@ def test_settings_validates_static_dir_exists(tmp_path: Path):
     assert result is None
 
 
+# ---------------------------------------------------------------------------
+# Regression tests for PermissionError in validate_static_dir — issue #197
+#
+# Path.is_dir() and Path.is_file() both call os.stat() internally.  On
+# directories with restrictive permissions (chmod 000) or Kubernetes volume
+# mounts where the container runs as non-root but the volume is owned by
+# root, os.stat() raises PermissionError (EACCES).
+#
+# The tests below use monkeypatch.setattr on Path.is_dir / Path.is_file
+# rather than chmod, because CI environments that run as root bypass
+# permission bits entirely — a chmod-based test would vacuously pass there
+# while failing only on developer machines.  This is the same approach the
+# maintainers use for the analogous BRAND_DIR guard in test_branding_assets.py
+# (see lines that patch Path.is_dir to raise PermissionError).
+# ---------------------------------------------------------------------------
+
+
+def test_validate_static_dir_returns_none_when_is_dir_raises_permission_error(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch", caplog
+):
+    """validate_static_dir degrades to None when os.stat raises EACCES on the dir."""
+    import pytest
+
+    from cell_explorer_api.config import validate_static_dir
+
+    real_is_dir = Path.is_dir
+
+    def patched_is_dir(self: Path, *args, **kwargs) -> bool:
+        if self == tmp_path:
+            raise PermissionError(13, "Permission denied")
+        return real_is_dir(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "is_dir", patched_is_dir)
+
+    with caplog.at_level("WARNING", logger="cell_explorer_api.config"):
+        result = validate_static_dir(tmp_path)
+
+    assert result is None
+    assert any("is not accessible" in r.getMessage() for r in caplog.records)
+
+
+def test_validate_static_dir_returns_none_when_is_file_raises_permission_error(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch", caplog
+):
+    """validate_static_dir degrades to None when os.stat raises EACCES on index.html.
+
+    This covers the case where the directory itself is listable but the
+    index.html entry has restricted permissions — a separate EACCES path.
+    """
+    import pytest
+
+    from cell_explorer_api.config import validate_static_dir
+
+    # Make the directory genuinely present so is_dir passes; patch is_file
+    # only for the index.html path so other filesystem calls are unaffected.
+    index = tmp_path / "index.html"
+    index.touch()
+
+    real_is_file = Path.is_file
+
+    def patched_is_file(self: Path, *args, **kwargs) -> bool:
+        if self == index:
+            raise PermissionError(13, "Permission denied")
+        return real_is_file(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "is_file", patched_is_file)
+
+    with caplog.at_level("WARNING", logger="cell_explorer_api.config"):
+        result = validate_static_dir(tmp_path)
+
+    assert result is None
+    assert any("is not accessible" in r.getMessage() for r in caplog.records)
+
+
+def test_create_app_does_not_crash_when_static_dir_raises_permission_error(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+):
+    """Integration regression: create_app() must not raise when STATIC_DIR is inaccessible.
+
+    This is the exact crash scenario from issue #197 — a PermissionError
+    escaping validate_static_dir and propagating through create_app().
+    The server should boot and serve API endpoints even when STATIC_DIR
+    cannot be stat'd.
+    """
+    from fastapi.testclient import TestClient
+
+    from cell_explorer_api.config import Settings
+    from cell_explorer_api.main import create_app
+
+    real_is_dir = Path.is_dir
+
+    def patched_is_dir(self: Path, *args, **kwargs) -> bool:
+        if self == tmp_path:
+            raise PermissionError(13, "Permission denied")
+        return real_is_dir(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "is_dir", patched_is_dir)
+
+    # Must not raise — this was the crash site before the fix.
+    app = create_app(Settings(static_dir=tmp_path))
+
+    client = TestClient(app)
+    # API health check still works; server is not dead.
+    assert client.get("/api/health").json() == {"status": "ok"}
+
+
 def test_settings_validates_static_dir_with_index(static_dir: Path):
     from cell_explorer_api.config import validate_static_dir
 

@@ -194,11 +194,24 @@ def validate_static_dir(path: Path) -> Path | None:
     """Validate that a static directory exists and contains index.html.
 
     Returns the path if valid, None otherwise.
+
+    Both ``Path.is_dir`` and ``Path.is_file`` call ``os.stat`` internally.
+    On directories with restrictive permissions (chmod 000) or Kubernetes
+    volume mounts where the container runs as a non-root user but the volume
+    is owned by root, ``os.stat`` raises ``PermissionError`` (EACCES).
+    The ``OSError`` guard here ensures that an inaccessible ``STATIC_DIR``
+    degrades gracefully — logging a warning and returning ``None`` — rather
+    than propagating the exception through ``create_app`` and crashing the
+    server at startup.
     """
-    if not path.is_dir():
-        logger.warning("STATIC_DIR %s does not exist", path)
-        return None
-    if not (path / "index.html").is_file():
-        logger.warning("STATIC_DIR %s has no index.html", path)
+    try:
+        if not path.is_dir():
+            logger.warning("STATIC_DIR %s does not exist", path)
+            return None
+        if not (path / "index.html").is_file():
+            logger.warning("STATIC_DIR %s has no index.html", path)
+            return None
+    except OSError as exc:
+        logger.warning("STATIC_DIR %s is not accessible (%s); skipping", path, exc)
         return None
     return path
