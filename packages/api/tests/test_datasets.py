@@ -196,10 +196,10 @@ def test_get_dataset_not_found(seeded_app):
     assert response.status_code == 404
 
 
-def test_private_dataset_url_is_null_for_anonymous(seeded_app):
-    """Anonymous users who somehow request a private dataset get url=null."""
+def _enable_auth(app):
+    """Turn auth on for an app built without it; returns the token signing key."""
     private_key, public_key = _generate_rsa_keypair()
-    settings = seeded_app.state.settings
+    settings = app.state.settings
     settings.keycloak_url = "https://auth.example.com"
     settings.keycloak_realm = "test-realm"
     settings.keycloak_client_id = "test-client"
@@ -216,13 +216,15 @@ def test_private_dataset_url_is_null_for_anonymous(seeded_app):
     oidc._jwks = {
         "test-kid": public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
     }
-    seeded_app.state.oidc = oidc
+    app.state.oidc = oidc
+    return private_key
 
-    # Authenticated user with matching role
-    token = jwt.encode(
+
+def _token(private_key, roles):
+    return jwt.encode(
         {
             "sub": "user-123",
-            "realm_access": {"roles": ["lab-smith"]},
+            "realm_access": {"roles": roles},
             "iss": "https://auth.example.com/realms/test-realm",
             "aud": "test-client",
             "exp": int(time.time()) + 300,
@@ -232,12 +234,55 @@ def test_private_dataset_url_is_null_for_anonymous(seeded_app):
         algorithm="RS256",
         headers={"kid": "test-kid"},
     )
+
+
+def test_private_dataset_url_is_null_for_anonymous(seeded_app):
+    """Anonymous users who somehow request a private dataset get url=null."""
+    private_key = _enable_auth(seeded_app)
+
+    # Authenticated user with matching role
     client = TestClient(seeded_app)
-    client.cookies.set("cce_access", token)
+    client.cookies.set("cce_access", _token(private_key, ["lab-smith"]))
     response = client.get("/api/datasets/private-study")
     assert response.status_code == 200
     data = response.json()
     assert data["url"] is None  # Must call /access to get credentials
+
+
+def test_get_private_dataset_anonymous_returns_401(seeded_app):
+    _enable_auth(seeded_app)
+    response = TestClient(seeded_app).get("/api/datasets/private-study")
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "Authentication required",
+        "slug": "private-study",
+        "name": "Private Study",
+    }
+
+
+def test_get_private_dataset_wrong_role_returns_403(seeded_app):
+    private_key = _enable_auth(seeded_app)
+    client = TestClient(seeded_app)
+    client.cookies.set("cce_access", _token(private_key, ["other-role"]))
+    response = client.get("/api/datasets/private-study")
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Insufficient permissions",
+        "slug": "private-study",
+        "name": "Private Study",
+    }
+
+
+def test_get_private_dataset_auth_disabled_returns_404(seeded_app):
+    # seeded_app has no OIDC settings, so auth is disabled: a private dataset
+    # can never be opened here, and offering sign-in would lead nowhere.
+    response = TestClient(seeded_app).get("/api/datasets/private-study")
+    assert response.status_code == 404
+
+
+def test_access_private_dataset_auth_disabled_returns_404(seeded_app):
+    response = TestClient(seeded_app).post("/api/datasets/private-study/access")
+    assert response.status_code == 404
 
 
 def test_list_datasets_includes_chat_enabled(seeded_app):
