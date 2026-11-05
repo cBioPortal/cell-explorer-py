@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -81,6 +82,18 @@ class DatasetResponse(BaseModel):
 
 class DatasetListResponse(BaseModel):
     datasets: list[DatasetResponse]
+
+
+class DatasetAccessDenied(BaseModel):
+    """401/403 body for a private dataset the caller cannot open.
+
+    Names the dataset so the frontend can say what is private rather than just
+    that something is. Private dataset names are not secret; only their data is.
+    """
+
+    detail: str
+    slug: str
+    name: str
 
 
 def _obs_columns_response(metadata: DatasetMetadata) -> list[ObsColumnInfo]:
@@ -200,13 +213,24 @@ async def list_datasets(
     return DatasetListResponse(datasets=datasets)
 
 
-@router.get("/datasets/{slug}")
+@router.get(
+    "/datasets/{slug}",
+    response_model=DatasetResponse,
+    responses={401: {"model": DatasetAccessDenied}, 403: {"model": DatasetAccessDenied}},
+)
 async def get_dataset(
     slug: str,
+    request: Request,
     user: User | None = Depends(optional_auth),
     db: AsyncSession = Depends(get_db),
-) -> DatasetResponse:
-    """Get a single dataset by slug."""
+) -> DatasetResponse | JSONResponse:
+    """Get a single dataset by slug.
+
+    An inaccessible private dataset is 401 for an anonymous caller and 403 for
+    a signed-in one without the role, so the frontend can offer sign-in or a
+    request-access contact. With auth disabled nobody can ever open it, so it
+    stays 404.
+    """
     statement = (
         select(Dataset, Datasource, Collection, DatasetMetadata)
         .join(Datasource)
@@ -222,7 +246,13 @@ async def get_dataset(
     dataset.datasource = datasource
     dataset.collection = collection
     if not user_can_access(dataset, user=user):
-        raise HTTPException(status_code=404, detail="Dataset not found")
+        if not request.app.state.settings.auth_enabled:
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        status, detail = (
+            (401, "Authentication required") if user is None else (403, "Insufficient permissions")
+        )
+        body = DatasetAccessDenied(detail=detail, slug=dataset.slug, name=dataset.name)
+        return JSONResponse(status_code=status, content=body.model_dump())
     return _dataset_to_response(dataset, metadata)
 
 
@@ -288,6 +318,9 @@ async def access_dataset(
 
     # Private dataset — require auth
     if user is None:
+        # Same rule as get_dataset: with auth disabled there is no sign-in to offer.
+        if not request.app.state.settings.auth_enabled:
+            raise HTTPException(status_code=404, detail="Dataset not found")
         raise HTTPException(status_code=401, detail="Authentication required")
 
     if not set(user.roles) & set(dataset.required_roles):

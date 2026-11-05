@@ -76,6 +76,12 @@ than "broken".
 |---|---|---|
 | `GOOGLE_ANALYTICS_ID` | unset | GA4 measurement id, served to the frontend by `/api/info`. Unset means no analytics script is loaded |
 
+### Access
+
+| Variable | Default | Notes |
+|---|---|---|
+| `ACCESS_CONTACT` | unset | Email shown to signed-in users who lack access to a private dataset ("Email … to request access"), served by `/api/info`. Unset means "Contact your administrator" with no address |
+
 ### Data and logging
 
 | Variable | Default | Notes |

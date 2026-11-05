@@ -37,6 +37,8 @@ class InfoResponse(BaseModel):
     chat_enabled: bool
     # Null when unset, which the frontend reads as "load no analytics".
     google_analytics_id: str | None
+    # Null when unset, which the frontend reads as "contact your administrator".
+    access_contact: str | None
     # Null when no BRAND_DIR is configured, which the frontend reads as
     # "use the built-in cBioPortal branding".
     brand: BrandInfo | None
@@ -78,5 +80,6 @@ async def info(request: Request) -> InfoResponse:
         auth_enabled=settings.auth_enabled,
         chat_enabled=settings.chat_enabled,
         google_analytics_id=settings.google_analytics_id,
+        access_contact=settings.access_contact,
         brand=_brand_info(request.app.state.brand),
     )

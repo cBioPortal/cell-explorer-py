@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     # is public in the page source of every site that uses one.
     google_analytics_id: str | None = None
 
+    # Email that signed-in users without access to a private dataset are told
+    # to contact, served to the frontend by /api/info. Unset means the page says
+    # "contact your administrator" with no address. Set per deployment.
+    access_contact: str | None = None
+
     # App data directory
     app_data_dir: Path = Path("./data")
 
