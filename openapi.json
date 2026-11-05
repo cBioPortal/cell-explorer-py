@@ -875,7 +875,7 @@
           "datasets"
         ],
         "summary": "Get Dataset",
-        "description": "Get a single dataset by slug.",
+        "description": "Get a single dataset by slug.\n\nAn inaccessible private dataset is 401 for an anonymous caller and 403 for\na signed-in one without the role, so the frontend can offer sign-in or a\nrequest-access contact. With auth disabled nobody can ever open it, so it\nstays 404.",
         "operationId": "get_dataset_api_datasets__slug__get",
         "parameters": [
           {
@@ -898,6 +898,26 @@
                 }
               }
             }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetAccessDenied"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetAccessDenied"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "422": {
             "description": "Validation Error",
@@ -2169,6 +2189,30 @@
         ],
         "title": "ContextResponse"
       },
+      "DatasetAccessDenied": {
+        "properties": {
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail",
+          "slug",
+          "name"
+        ],
+        "title": "DatasetAccessDenied",
+        "description": "401/403 body for a private dataset the caller cannot open.\n\nNames the dataset so the frontend can say what is private rather than just\nthat something is. Private dataset names are not secret; only their data is."
+      },
       "DatasetAdminListResponse": {
         "properties": {
           "datasets": {
@@ -3188,6 +3232,17 @@
             ],
             "title": "Google Analytics Id"
           },
+          "access_contact": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Contact"
+          },
           "brand": {
             "anyOf": [
               {
@@ -3207,6 +3262,7 @@
           "auth_enabled",
           "chat_enabled",
           "google_analytics_id",
+          "access_contact",
           "brand"
         ],
         "title": "InfoResponse"

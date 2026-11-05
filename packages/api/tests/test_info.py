@@ -164,3 +164,13 @@ def test_info_logo_alt_falls_back_to_name(tmp_path: Path):
     brand = client.get("/api/info").json()["brand"]
 
     assert brand["logo_alt"] == "Break Through Cancer"
+
+
+def test_info_access_contact_unset_by_default(client: TestClient):
+    assert client.get("/api/info").json()["access_contact"] is None
+
+
+def test_info_access_contact_from_settings():
+    app = create_app(Settings(access_contact="cellexplorer-admin@example.org"))
+    response = TestClient(app).get("/api/info")
+    assert response.json()["access_contact"] == "cellexplorer-admin@example.org"
