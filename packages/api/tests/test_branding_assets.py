@@ -171,6 +171,119 @@ def test_brand_asset_carries_a_short_cache_control(tmp_path: Path):
     assert response.headers["cache-control"] == "public, max-age=300"
 
 
+def test_brand_asset_carries_validators(tmp_path: Path):
+    """Cold GET returns 200 with ETag and Last-Modified validators."""
+    client = TestClient(create_app(Settings(brand_dir=_brand_dir(tmp_path))))
+
+    response = client.get("/brand/logo-white.svg")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "public, max-age=300"
+    assert response.headers["etag"].startswith('"')
+    assert response.headers["etag"].endswith('"')
+    assert "last-modified" in response.headers
+    assert "<svg" in response.text
+
+
+def test_conditional_get_matching_etag_returns_304(tmp_path: Path):
+    """Revalidating an unmodified brand asset answers 304 with an empty body."""
+    client = TestClient(create_app(Settings(brand_dir=_brand_dir(tmp_path))))
+
+    etag = client.get("/brand/logo-white.svg").headers["etag"]
+    response = client.get("/brand/logo-white.svg", headers={"if-none-match": etag})
+
+    assert response.status_code == 304
+    assert response.content == b""
+    assert response.headers["etag"] == etag
+    assert response.headers["cache-control"] == "public, max-age=300"
+    assert "last-modified" in response.headers
+
+
+def test_conditional_get_mismatched_etag_returns_200(tmp_path: Path):
+    """An outdated validator triggers a fresh 200 response."""
+    client = TestClient(create_app(Settings(brand_dir=_brand_dir(tmp_path))))
+
+    response = client.get("/brand/logo-white.svg", headers={"if-none-match": '"outdated"'})
+    assert response.status_code == 200
+    assert "<svg" in response.text
+
+
+def test_conditional_get_weak_etag_and_wildcard(tmp_path: Path):
+    """Weak validators and wildcard If-None-Match are treated as valid matches."""
+    client = TestClient(create_app(Settings(brand_dir=_brand_dir(tmp_path))))
+
+    etag = client.get("/brand/logo-white.svg").headers["etag"]
+
+    weak_response = client.get(
+        "/brand/logo-white.svg", headers={"if-none-match": f"W/{etag}"}
+    )
+    assert weak_response.status_code == 304
+    assert weak_response.content == b""
+
+    wildcard_response = client.get(
+        "/brand/logo-white.svg", headers={"if-none-match": "*"}
+    )
+    assert wildcard_response.status_code == 304
+    assert wildcard_response.content == b""
+
+    multi_response = client.get(
+        "/brand/logo-white.svg", headers={"if-none-match": f'"other", {etag}'}
+    )
+    assert multi_response.status_code == 304
+    assert multi_response.content == b""
+
+
+def test_conditional_head_returns_304(tmp_path: Path):
+    """HEAD requests with matching If-None-Match return 304."""
+    client = TestClient(create_app(Settings(brand_dir=_brand_dir(tmp_path))))
+
+    etag = client.head("/brand/logo-white.svg").headers["etag"]
+    response = client.head("/brand/logo-white.svg", headers={"if-none-match": etag})
+    assert response.status_code == 304
+    assert response.content == b""
+
+
+def test_conditional_get_if_modified_since(tmp_path: Path):
+    """If-Modified-Since returns 304 when asset has not been modified."""
+    client = TestClient(create_app(Settings(brand_dir=_brand_dir(tmp_path))))
+
+    last_modified = client.get("/brand/logo-white.svg").headers["last-modified"]
+    response = client.get(
+        "/brand/logo-white.svg", headers={"if-modified-since": last_modified}
+    )
+    assert response.status_code == 304
+    assert response.content == b""
+
+
+def test_if_none_match_takes_precedence_over_if_modified_since(tmp_path: Path):
+    """RFC 9110 §13.1.3: If-None-Match takes precedence over If-Modified-Since."""
+    client = TestClient(create_app(Settings(brand_dir=_brand_dir(tmp_path))))
+
+    last_modified = client.get("/brand/logo-white.svg").headers["last-modified"]
+    # Matching If-Modified-Since but mismatched If-None-Match: MUST return 200
+    response = client.get(
+        "/brand/logo-white.svg",
+        headers={"if-none-match": '"stale"', "if-modified-since": last_modified},
+    )
+    assert response.status_code == 200
+    assert "<svg" in response.text
+
+
+def test_etag_changes_when_file_changes(tmp_path: Path):
+    """When the underlying asset file changes on disk, a new ETag is generated."""
+    brand_dir = _brand_dir(tmp_path)
+    client = TestClient(create_app(Settings(brand_dir=brand_dir)))
+
+    old_etag = client.get("/brand/logo-white.svg").headers["etag"]
+
+    # Modify file content and length
+    (brand_dir / "logo-white.svg").write_text("<svg id='btc' data-version='2'/>")
+
+    response = client.get("/brand/logo-white.svg", headers={"if-none-match": old_etag})
+    assert response.status_code == 200
+    assert "data-version='2'" in response.text
+    assert response.headers["etag"] != old_etag
+
+
 # --- Percent-encoded filenames --------------------------------------------
 
 
