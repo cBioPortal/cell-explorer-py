@@ -2,6 +2,20 @@
 
 <!-- version list -->
 
+## v0.13.0 (2026-11-06)
+
+### Features
+
+- **api**: Expose ACCESS_CONTACT on /api/info
+  ([`216631f`](https://github.com/cBioPortal/cell-explorer-py/commit/216631f7d78ac005c73789bc67ba4cb38c77e6e6))
+
+- **api**: Return 401/403 for inaccessible private datasets
+  ([`4d0fc45`](https://github.com/cBioPortal/cell-explorer-py/commit/4d0fc452491b3ed24f606b685e663855b9653c7a))
+
+- **api**: Set CloudFront signed cookies on the browser from /access
+  ([`f1b16f7`](https://github.com/cBioPortal/cell-explorer-py/commit/f1b16f72f018433705bafa2b25c487d06c3f99a0))
+
+
 ## v0.12.0 (2026-10-23)
 
 ### Features
