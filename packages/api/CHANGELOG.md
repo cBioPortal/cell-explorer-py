@@ -2,6 +2,28 @@
 
 <!-- version list -->
 
+## v0.15.0 (2026-11-10)
+
+### Bug Fixes
+
+- **api**: Make signed-out chat limits atomic and cap the size of signed-out turns
+  ([`5e6fb1a`](https://github.com/cBioPortal/cell-explorer-py/commit/5e6fb1a5d78141d75799d7e2baa3952b2f11997a))
+
+### Features
+
+- **api**: Chat without signing in on datasets that allow it
+  ([`234c0d7`](https://github.com/cBioPortal/cell-explorer-py/commit/234c0d724c87f2182c4ff5e76eae0e9072a8ee42))
+
+- **api**: Keep anonymous conversations when signing in
+  ([`60ac95b`](https://github.com/cBioPortal/cell-explorer-py/commit/60ac95b49c3ed67b32e746dd59c0133e7604958f))
+
+- **api**: Per-dataset anonymous_chat switch
+  ([`59c2f57`](https://github.com/cBioPortal/cell-explorer-py/commit/59c2f57fb6c467f3129ef3f98a1e4aa234f0768e))
+
+- **api**: Rate-limit chat without signing in
+  ([`930ffa6`](https://github.com/cBioPortal/cell-explorer-py/commit/930ffa67d86caa301e497615edf8aca9b649d412))
+
+
 ## v0.14.0 (2026-11-10)
 
 ### Features
