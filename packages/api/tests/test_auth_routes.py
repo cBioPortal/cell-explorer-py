@@ -115,13 +115,69 @@ def test_me_returns_401_when_not_authenticated(auth_client):
     assert response.status_code == 401
 
 
+def _mock_end_session(client, **kwargs):
+    import unittest.mock as mock
+
+    end_session = mock.AsyncMock(**kwargs)
+    client.app.state.oidc.end_session = end_session
+    return end_session
+
+
+def _set_cookie_headers(response, name):
+    return [c for c in response.headers.get_list("set-cookie") if c.startswith(f"{name}=")]
+
+
 def test_logout_clears_cookies(auth_client, rsa_keys):
+    _mock_end_session(auth_client)
     private_key, _ = rsa_keys
     token = _make_token(private_key)
     auth_client.cookies.set("cce_access", token)
     auth_client.cookies.set("cce_refresh", "some-refresh-token")
     response = auth_client.post("/api/auth/logout")
     assert response.status_code == 200
+    for name in ("cce_access", "cce_refresh"):
+        assert any("Max-Age=0" in c for c in _set_cookie_headers(response, name))
+
+
+def test_logout_ends_the_provider_session(auth_client):
+    end_session = _mock_end_session(auth_client)
+    auth_client.cookies.set("cce_refresh", "some-refresh-token")
+    auth_client.post("/api/auth/logout")
+    end_session.assert_awaited_once_with("some-refresh-token")
+
+
+def test_logout_without_a_refresh_cookie_skips_the_provider(auth_client):
+    end_session = _mock_end_session(auth_client)
+    response = auth_client.post("/api/auth/logout")
+    assert response.status_code == 200
+    end_session.assert_not_awaited()
+
+
+def test_logout_still_signs_out_when_the_provider_fails(auth_client):
+    _mock_end_session(auth_client, side_effect=Exception("unreachable"))
+    auth_client.cookies.set("cce_refresh", "some-refresh-token")
+    response = auth_client.post("/api/auth/logout")
+    assert response.status_code == 200
+    assert any("Max-Age=0" in c for c in _set_cookie_headers(response, "cce_refresh"))
+
+
+def test_logout_marks_the_browser_as_signed_out(auth_client):
+    _mock_end_session(auth_client)
+    response = auth_client.post("/api/auth/logout")
+    [marker] = _set_cookie_headers(response, "cce_signed_out")
+    assert "Path=/api/auth" in marker
+    assert "HttpOnly" in marker
+
+
+def test_login_after_a_sign_out_asks_which_account(auth_client):
+    auth_client.cookies.set("cce_signed_out", "1", path="/api/auth")
+    response = auth_client.get("/api/auth/login", follow_redirects=False)
+    assert "prompt=select_account" in response.headers["location"]
+
+
+def test_login_without_a_sign_out_is_silent(auth_client):
+    response = auth_client.get("/api/auth/login", follow_redirects=False)
+    assert "prompt=" not in response.headers["location"]
 
 
 def test_me_sets_refreshed_cookies(auth_client, rsa_keys):
@@ -281,3 +337,11 @@ def test_callback_clears_the_next_cookie(auth_client, monkeypatch):
     response = _login_then_callback(auth_client, monkeypatch, next="/collections/crc-metastasis")
     set_cookie = response.headers.get_list("set-cookie")
     assert any(c.startswith("cce_next=") and "Max-Age=0" in c for c in set_cookie)
+
+
+def test_callback_clears_the_signed_out_marker(auth_client, monkeypatch):
+    auth_client.cookies.set("cce_signed_out", "1", path="/api/auth")
+    response = _login_then_callback(auth_client, monkeypatch)
+    [marker] = _set_cookie_headers(response, "cce_signed_out")
+    assert "Max-Age=0" in marker
+    assert "Path=/api/auth" in marker
