@@ -4,7 +4,7 @@ import asyncio
 import logging
 import uuid as _uuid
 from collections.abc import AsyncIterator
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -18,7 +18,7 @@ from cell_explorer_agent.config import AgentConfig
 from cell_explorer_agent.events import Error, ThreadOpen
 from cell_explorer_agent.messages import AssistantMessage, UserMessage
 from cell_explorer_agent.telemetry import langfuse_client
-from cell_explorer_api.auth.anonymous import anonymous_chat_allowed, chat_user
+from cell_explorer_api.auth.anonymous import ANON_PREFIX, anonymous_chat_allowed, chat_user, is_anonymous
 from cell_explorer_api.auth.models import User
 from cell_explorer_api.auth.optional import optional_auth
 from cell_explorer_api.config import Settings
@@ -351,6 +351,20 @@ async def post_chat_turn(
             status_code=403,
             detail=f"missing chat role: {settings.chat_required_role}",
         )
+
+    # Signed-out questions are rate-limited (cost guard); signed-in ones aren't.
+    if is_anonymous(user):
+        from cell_explorer_api.services.chat_limits import check_and_count
+
+        limit_message = await check_and_count(
+            db,
+            anon_id=user.sub.removeprefix(ANON_PREFIX),
+            ip=request.client.host if request.client else None,
+            now=datetime.now(timezone.utc),
+            settings=settings,
+        )
+        if limit_message:
+            raise HTTPException(status_code=429, detail=limit_message)
 
     # The dataset row was already looked up inside make_chat_agent; re-fetch
     # here for the FK on chat_threads (cheap, single-row).

@@ -178,3 +178,27 @@ def test_signed_in_user_unchanged(seeded_app):
     assert "cce_anon=" not in r.headers.get("set-cookie", "")
     [thread] = _threads(seeded_app)
     assert thread.user_sub == "real-user"
+
+
+# ---------- limits ----------
+
+def test_anonymous_turn_over_the_limit_is_refused_with_the_limit_message(seeded_app):
+    _set_dataset(seeded_app, anonymous_chat=True)
+    seeded_app.state.settings.anon_chat_per_visitor_per_hour = 1
+    client = TestClient(seeded_app)
+    client.cookies.set("cce_anon", str(uuid.uuid4()), path="/api")
+    r, _ = _turn(client)
+    assert r.status_code == 200
+    r2, _ = _turn(client, "again")
+    assert r2.status_code == 429
+
+
+def test_signed_in_users_are_not_limited(seeded_app):
+    _set_dataset(seeded_app, anonymous_chat=True)
+    seeded_app.state.settings.anon_chat_per_visitor_per_hour = 1
+    seeded_app.state.settings.anon_chat_per_day = 1
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="real-user")
+    for text in ("one", "two", "three"):
+        r, _ = _turn(client, text)
+        assert r.status_code == 200

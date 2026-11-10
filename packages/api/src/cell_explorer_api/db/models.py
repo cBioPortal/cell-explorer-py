@@ -186,6 +186,26 @@ class ChatMessageRow(SQLModel, table=True):
     langfuse_trace_id: str | None = Field(default=None, index=True)
 
 
+class ChatUsage(SQLModel, table=True):
+    """Signed-out chat questions counted per visitor, per IP hash, per day.
+
+    One row per (kind, key, window): kind "visitor" (key = anonymous ID) and
+    "ip" (key = SHA-256 of the IP) use clock-hour windows; "day" (key "*")
+    uses UTC days. Kept in the DB so every replica sees the same counts.
+    """
+
+    __tablename__ = "chat_usage"
+    __table_args__ = (
+        UniqueConstraint("kind", "key", "window_start", name="uq_chat_usage_kind_key_window"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    kind: str
+    key: str
+    window_start: datetime
+    count: int = 0
+
+
 class ChatFeedback(SQLModel, table=True):
     """Per-user thumbs feedback on one assistant chat message."""
 
