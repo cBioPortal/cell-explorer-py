@@ -93,6 +93,9 @@ class Dataset(SQLModel, table=True):
     prompt_addendum: str | None = Field(default=None, sa_type=Text)
     default_view: dict | None = Field(default=None, sa_column=Column(JSON, nullable=True))
     chat_enabled: bool = Field(default=False)
+    # Signed-out visitors may chat on this dataset (only with chat_enabled
+    # and is_public too). Switched on per event, e.g. a conference.
+    anonymous_chat: bool = Field(default=False)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

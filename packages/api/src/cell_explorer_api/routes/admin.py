@@ -119,6 +119,8 @@ class DatasetCreate(BaseModel):
     prompt_addendum: str | None = None
     default_view: dict | None = None
     chat_enabled: bool = False
+    # Signed-out visitors may chat (also needs chat_enabled and is_public).
+    anonymous_chat: bool = False
 
 
 class DatasetUpdate(BaseModel):
@@ -130,6 +132,7 @@ class DatasetUpdate(BaseModel):
     prompt_addendum: str | None = None
     default_view: dict | None = None
     chat_enabled: bool | None = None
+    anonymous_chat: bool | None = None
     collection_id: str | None = None
 
 
@@ -167,6 +170,7 @@ class DatasetAdminResponse(BaseModel):
     prompt_addendum: str | None
     default_view: dict | None
     chat_enabled: bool
+    anonymous_chat: bool
     metadata: DatasetMetadataAdminResponse | None = None
 
 
@@ -221,6 +225,7 @@ def _dataset_to_admin_response(
         prompt_addendum=dataset.prompt_addendum,
         default_view=dataset.default_view,
         chat_enabled=dataset.chat_enabled,
+        anonymous_chat=dataset.anonymous_chat,
         metadata=(
             DatasetMetadataAdminResponse(
                 n_obs=metadata.n_obs,
