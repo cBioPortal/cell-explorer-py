@@ -1,5 +1,6 @@
 """Authentication endpoints."""
 
+import logging
 import re
 import secrets
 import time
@@ -13,11 +14,17 @@ from cell_explorer_api.auth.dependencies import require_auth
 from cell_explorer_api.auth.oidc import OidcClient
 from cell_explorer_api.auth.models import User
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 _LOCALHOST_REDIRECT_RE = re.compile(r"^http://(localhost|127\.0\.0\.1):\d{1,5}(/.*)?$")
 _CLI_STATE_EXP_SECONDS = 600  # 10 minutes
 _LOGIN_FLOW_COOKIE_MAX_AGE = 600
+# Set by logout so the next login asks which account to use. Long enough to
+# outlive a sign-out that is followed by a sign-in days later.
+_SIGNED_OUT_COOKIE = "cce_signed_out"
+_SIGNED_OUT_COOKIE_MAX_AGE = 30 * 86400
 
 _CLI_SUCCESS_HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Logged in</title>
@@ -154,12 +161,15 @@ async def login(request: Request, next_path: str | None = Query(None, alias="nex
 
     ``next`` is the page to return to after login (a path on this site, e.g.
     ``/view?dataset=spectrum``). It is kept in a cookie for the round trip.
+    After a sign-out the provider is asked to show its account chooser, so the
+    user can pick a different account instead of being signed straight back in.
     """
     _require_auth_enabled(request)
     oidc: OidcClient = request.app.state.oidc
     state = secrets.token_urlsafe(32)
     redirect_uri = _callback_uri(request)
-    auth_url = oidc.authorization_url(redirect_uri=redirect_uri, state=state)
+    prompt = "select_account" if request.cookies.get(_SIGNED_OUT_COOKIE) else None
+    auth_url = oidc.authorization_url(redirect_uri=redirect_uri, state=state, prompt=prompt)
     response = RedirectResponse(url=auth_url, status_code=307)
     defaults = _cookie_defaults(request)
     flow_cookie = {
@@ -235,6 +245,7 @@ async def callback(request: Request, code: str, state: str):
     _set_token_cookies(request, response, tokens["access_token"], tokens["refresh_token"])
     response.delete_cookie("cce_state", path="/api/auth")
     response.delete_cookie("cce_next", path="/api/auth")
+    response.delete_cookie(_SIGNED_OUT_COOKIE, path="/api/auth")
     return response
 
 
@@ -246,10 +257,30 @@ async def me(user: User = Depends(require_auth)):
 
 @router.post("/logout")
 async def logout(request: Request):
-    """Clear auth cookies."""
+    """Sign out: end the provider session, clear auth cookies, mark the browser.
+
+    Ending the provider's SSO session is best effort — if it fails the user is
+    still signed out here. The marker makes the next login ask for an account.
+    """
     _require_auth_enabled(request)
+    refresh_token = request.cookies.get("cce_refresh")
+    if refresh_token:
+        oidc: OidcClient = request.app.state.oidc
+        try:
+            await oidc.end_session(refresh_token)
+        except Exception:
+            logger.warning("Could not end the provider session on logout", exc_info=True)
     response = Response(status_code=200)
     _clear_token_cookies(response)
+    response.set_cookie(
+        _SIGNED_OUT_COOKIE,
+        "1",
+        max_age=_SIGNED_OUT_COOKIE_MAX_AGE,
+        httponly=True,
+        secure=_cookie_defaults(request)["secure"],
+        samesite="lax",
+        path="/api/auth",
+    )
     return response
 
 

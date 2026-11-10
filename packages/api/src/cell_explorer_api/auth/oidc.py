@@ -64,7 +64,7 @@ class OidcClient:
             response.raise_for_status()
             self._apply_discovery(response.json())
 
-    def authorization_url(self, redirect_uri: str, state: str) -> str:
+    def authorization_url(self, redirect_uri: str, state: str, prompt: str | None = None) -> str:
         params = {
             "client_id": self._settings.resolved_client_id,
             "response_type": "code",
@@ -74,7 +74,32 @@ class OidcClient:
         }
         if self._settings.resolved_idp_hint:
             params["kc_idp_hint"] = self._settings.resolved_idp_hint
+        if prompt:
+            # Keycloak forwards prompt to a brokered IdP (e.g. Google under
+            # kc_idp_hint), so select_account reaches the upstream chooser.
+            params["prompt"] = prompt
         return f"{self._authorization_endpoint}?{urlencode(params)}"
+
+    async def end_session(self, refresh_token: str) -> None:
+        """End the provider's SSO session server-side (Keycloak only).
+
+        Keycloak accepts a back-channel POST to its end-session endpoint with
+        the refresh token and client credentials, so no browser redirect or
+        logout confirmation page is involved. Entra has no equivalent; there
+        this is a no-op. Raises on an HTTP error.
+        """
+        if self._settings.auth_provider != "keycloak" or not self._end_session_endpoint:
+            return
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                self._end_session_endpoint,
+                data={
+                    "client_id": self._settings.resolved_client_id,
+                    "client_secret": self._settings.resolved_client_secret,
+                    "refresh_token": refresh_token,
+                },
+            )
+            response.raise_for_status()
 
     async def exchange_code(self, code: str, redirect_uri: str) -> dict:
         async with httpx.AsyncClient() as client:

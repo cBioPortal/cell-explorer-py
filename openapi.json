@@ -11,7 +11,7 @@
           "auth"
         ],
         "summary": "Login",
-        "description": "Redirect to Keycloak login page.\n\n``next`` is the page to return to after login (a path on this site, e.g.\n``/view?dataset=spectrum``). It is kept in a cookie for the round trip.",
+        "description": "Redirect to Keycloak login page.\n\n``next`` is the page to return to after login (a path on this site, e.g.\n``/view?dataset=spectrum``). It is kept in a cookie for the round trip.\nAfter a sign-out the provider is asked to show its account chooser, so the\nuser can pick a different account instead of being signed straight back in.",
         "operationId": "login_api_auth_login_get",
         "parameters": [
           {
@@ -172,7 +172,7 @@
           "auth"
         ],
         "summary": "Logout",
-        "description": "Clear auth cookies.",
+        "description": "Sign out: end the provider session, clear auth cookies, mark the browser.\n\nEnding the provider's SSO session is best effort \u2014 if it fails the user is\nstill signed out here. The marker makes the next login ask for an account.",
         "operationId": "logout_api_auth_logout_post",
         "responses": {
           "200": {

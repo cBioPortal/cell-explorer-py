@@ -132,3 +132,64 @@ class TestLogoutUrl:
         url = _client(_entra_settings()).logout_url("https://cb/home")
         assert url.startswith("https://idp.example.com/logout?")
         assert "post_logout_redirect_uri=https%3A%2F%2Fcb%2Fhome" in url
+
+
+class TestAuthorizationUrlPrompt:
+    def test_no_prompt_by_default(self):
+        url = _client(_kc_settings()).authorization_url("https://cb/cb", "st")
+        assert "prompt=" not in url
+
+    def test_prompt_is_passed_through(self):
+        url = _client(_kc_settings()).authorization_url("https://cb/cb", "st", prompt="select_account")
+        assert "prompt=select_account" in url
+
+
+def _capture_posts(monkeypatch, status_code=204):
+    """Route the OIDC client's HTTP calls through a MockTransport; return the captured requests."""
+    import httpx
+
+    from cell_explorer_api.auth import oidc as oidc_module
+
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(status_code)
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        oidc_module.httpx, "AsyncClient",
+        lambda *a, **kw: real_client(transport=httpx.MockTransport(handler)),
+    )
+    return seen
+
+
+class TestEndSession:
+    async def test_keycloak_posts_refresh_token_to_end_session_endpoint(self, monkeypatch):
+        from urllib.parse import parse_qs
+
+        seen = _capture_posts(monkeypatch)
+        await _client(_kc_settings()).end_session("the-refresh-token")
+        assert len(seen) == 1
+        assert str(seen[0].url) == "https://idp.example.com/logout"
+        assert seen[0].method == "POST"
+        form = parse_qs(seen[0].content.decode())
+        assert form == {
+            "client_id": ["app"],
+            "client_secret": ["s"],
+            "refresh_token": ["the-refresh-token"],
+        }
+
+    async def test_keycloak_raises_when_rejected(self, monkeypatch):
+        import httpx
+
+        _capture_posts(monkeypatch, status_code=400)
+        with pytest.raises(httpx.HTTPStatusError):
+            await _client(_kc_settings()).end_session("bad")
+
+    async def test_entra_makes_no_request(self, monkeypatch):
+        # Entra has no back-channel logout; signing out there relies on the
+        # account-chooser prompt at the next sign-in instead.
+        seen = _capture_posts(monkeypatch)
+        await _client(_entra_settings()).end_session("the-refresh-token")
+        assert seen == []
