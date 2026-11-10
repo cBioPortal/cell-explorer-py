@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.14.0 (2026-11-10)
+
+### Features
+
+- **api**: Ask which account to use on the first sign-in after a sign-out
+  ([`50c3db0`](https://github.com/cBioPortal/cell-explorer-py/commit/50c3db0b2957f1d171fc114a33cc09c33b6cab32))
+
+
 ## v0.13.0 (2026-11-06)
 
 ### Features
