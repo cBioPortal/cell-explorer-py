@@ -96,3 +96,26 @@ def test_settings_from_env(monkeypatch):
 def test_defaults():
     s = Settings()
     assert (s.anon_chat_per_visitor_per_hour, s.anon_chat_per_ip_per_hour, s.anon_chat_per_day) == (20, 200, 10000)
+
+
+async def test_concurrent_requests_are_all_counted_without_errors(tmp_path):
+    """Parallel requests, each with its own session, as on a busy server."""
+    import asyncio as _asyncio
+
+    url = f"sqlite+aiosqlite:///{tmp_path / 'usage.db'}"
+    engine = create_engine(url)
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+    s = _settings(visitor=1000, ip=1000, day=10)
+
+    async def one(i):
+        async with AsyncSession(engine) as session:
+            return await check_and_count(session, anon_id=f"v{i}", ip="9.9.9.9", now=NOON, settings=s)
+
+    results = await _asyncio.gather(*(one(i) for i in range(20)))
+    assert results.count(None) == 10
+    assert results.count(DAILY_LIMIT_MESSAGE) == 10
+    async with AsyncSession(engine) as session:
+        day = (await session.exec(select(ChatUsage).where(ChatUsage.kind == "day"))).one()
+        assert day.count == 10
+    await engine.dispose()

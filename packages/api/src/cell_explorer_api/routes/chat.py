@@ -354,8 +354,14 @@ async def post_chat_turn(
 
     # Signed-out questions are rate-limited (cost guard); signed-in ones aren't.
     if is_anonymous(user):
-        from cell_explorer_api.services.chat_limits import check_and_count
+        from cell_explorer_api.services.chat_limits import (
+            OVERSIZED_TURN_MESSAGE,
+            check_and_count,
+            oversized_turn,
+        )
 
+        if oversized_turn([m.content for m in body.messages], body.view_state):
+            raise HTTPException(status_code=413, detail=OVERSIZED_TURN_MESSAGE)
         limit_message = await check_and_count(
             db,
             anon_id=user.sub.removeprefix(ANON_PREFIX),

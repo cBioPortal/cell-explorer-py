@@ -202,3 +202,67 @@ def test_signed_in_users_are_not_limited(seeded_app):
     for text in ("one", "two", "three"):
         r, _ = _turn(client, text)
         assert r.status_code == 200
+
+
+# ---------- size caps on signed-out turns ----------
+
+def _post(client, body):
+    async def _make_agent(**_):
+        return _agent()
+    with patch("cell_explorer_api.routes.chat.make_chat_agent", _make_agent):
+        with client.stream("POST", "/api/chat/public-atlas/turns", json=body) as r:
+            r.read()
+            return r
+
+
+def _history(n_turns, chars=10):
+    msgs = []
+    for i in range(n_turns):
+        msgs.append({"role": "user", "content": "q" * chars})
+        msgs.append({"role": "assistant", "content": "a" * chars})
+    msgs.append({"role": "user", "content": "last"})
+    return msgs
+
+
+def _anon_client(app):
+    _set_dataset(app, anonymous_chat=True)
+    client = TestClient(app)
+    client.cookies.set("cce_anon", str(uuid.uuid4()), path="/api")
+    return client
+
+
+def test_signed_out_turn_with_too_many_messages_is_refused(seeded_app):
+    client = _anon_client(seeded_app)
+    assert _post(client, {"messages": _history(14)}).status_code == 200  # 29 messages
+    assert _post(client, {"messages": _history(15)}).status_code == 413  # 31 messages
+
+
+def test_signed_out_turn_with_a_long_message_is_refused(seeded_app):
+    client = _anon_client(seeded_app)
+    assert _post(client, {"messages": [{"role": "user", "content": "x" * 4001}]}).status_code == 413
+
+
+def test_signed_out_turn_with_too_much_history_is_refused(seeded_app):
+    client = _anon_client(seeded_app)
+    assert _post(client, {"messages": _history(12, chars=3500)}).status_code == 413  # 84k chars
+
+
+def test_signed_out_turn_with_a_large_view_state_is_refused(seeded_app):
+    client = _anon_client(seeded_app)
+    big = {"x": "v" * 5000}
+    body = {"messages": [{"role": "user", "content": "hi"}], "view_state": big}
+    assert _post(client, body).status_code == 413
+
+
+def test_a_refused_oversized_turn_is_not_counted(seeded_app):
+    client = _anon_client(seeded_app)
+    seeded_app.state.settings.anon_chat_per_visitor_per_hour = 1
+    assert _post(client, {"messages": [{"role": "user", "content": "x" * 4001}]}).status_code == 413
+    assert _post(client, {"messages": [{"role": "user", "content": "ok"}]}).status_code == 200
+
+
+def test_signed_in_turns_are_not_size_capped(seeded_app):
+    _set_dataset(seeded_app, anonymous_chat=True)
+    client = TestClient(seeded_app)
+    _set_auth_cookie(client, seeded_app, sub="real-user")
+    assert _post(client, {"messages": _history(15)}).status_code == 200
