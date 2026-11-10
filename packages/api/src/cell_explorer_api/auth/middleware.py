@@ -39,6 +39,17 @@ class TokenRefreshMiddleware:
                 state = scope.get("state") or {}
                 new_access = state.get("new_access_token")
                 new_refresh = state.get("new_refresh_token")
+                anon_id = state.get("anon_cookie_id")
+                if anon_id:
+                    # A signed-out visitor was given an anonymous chat ID
+                    # (auth.anonymous.chat_user); hand it to the browser.
+                    from cell_explorer_api.auth.anonymous import set_anon_cookie
+
+                    tmp = Response()
+                    set_anon_cookie(Request(scope, receive), tmp, anon_id)
+                    message["headers"] = list(message["headers"]) + [
+                        (name, value) for name, value in tmp.raw_headers if name.lower() == b"set-cookie"
+                    ]
                 if new_access and new_refresh:
                     # Lazy-import to avoid a circular reference between
                     # auth and routes packages.
