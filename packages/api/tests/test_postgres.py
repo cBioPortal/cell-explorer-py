@@ -227,7 +227,7 @@ async def test_copy_from_sqlite(sqlite_url, migrated_url):
     counts = await copy(sqlite_url, migrated_url)
     assert counts == {
         "datasources": 1, "collections": 1, "datasets": 1, "dataset_metadata": 1,
-        "chat_threads": 1, "chat_messages": 1, "chat_feedback": 1,
+        "chat_threads": 1, "chat_messages": 1, "chat_feedback": 1, "chat_usage": 0,
     }
 
     target = create_engine(migrated_url)
@@ -258,3 +258,32 @@ async def test_copy_refuses_orphaned_rows(sqlite_url, migrated_url):
 
     with pytest.raises(CopyError, match="chat_threads.dataset_id: 1 row"):
         await copy(sqlite_url, migrated_url)
+
+
+def test_chat_limits_count_concurrent_requests_exactly(migrated_url):
+    """Signed-out chat limits under parallel requests: exact counts, no errors."""
+    from datetime import datetime, timezone
+
+    from cell_explorer_api.db.models import ChatUsage
+    from cell_explorer_api.services.chat_limits import DAILY_LIMIT_MESSAGE, check_and_count
+
+    settings = Settings(anon_chat_per_visitor_per_hour=1000, anon_chat_per_ip_per_hour=1000, anon_chat_per_day=10)
+    now = datetime(2026, 11, 15, 12, 5, tzinfo=timezone.utc)
+
+    async def _go():
+        engine = create_engine(migrated_url)
+
+        async def one(i):
+            async with AsyncSession(engine) as session:
+                return await check_and_count(session, anon_id=f"v{i}", ip="9.9.9.9", now=now, settings=settings)
+
+        results = await asyncio.gather(*(one(i) for i in range(20)))
+        async with AsyncSession(engine) as session:
+            day = (await session.exec(select(ChatUsage).where(ChatUsage.kind == "day"))).one()
+        await engine.dispose()
+        return results, day.count
+
+    results, day_count = asyncio.run(_go())
+    assert results.count(None) == 10
+    assert results.count(DAILY_LIMIT_MESSAGE) == 10
+    assert day_count == 10

@@ -93,6 +93,9 @@ class Dataset(SQLModel, table=True):
     prompt_addendum: str | None = Field(default=None, sa_type=Text)
     default_view: dict | None = Field(default=None, sa_column=Column(JSON, nullable=True))
     chat_enabled: bool = Field(default=False)
+    # Signed-out visitors may chat on this dataset (only with chat_enabled
+    # and is_public too). Switched on per event, e.g. a conference.
+    anonymous_chat: bool = Field(default=False)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -181,6 +184,26 @@ class ChatMessageRow(SQLModel, table=True):
     # Set on assistant rows when Langfuse tracing is enabled. Used by the
     # feedback PUT route to forward thumbs ratings to Langfuse Scores.
     langfuse_trace_id: str | None = Field(default=None, index=True)
+
+
+class ChatUsage(SQLModel, table=True):
+    """Signed-out chat questions counted per visitor, per IP hash, per day.
+
+    One row per (kind, key, window): kind "visitor" (key = anonymous ID) and
+    "ip" (key = SHA-256 of the IP) use clock-hour windows; "day" (key "*")
+    uses UTC days. Kept in the DB so every replica sees the same counts.
+    """
+
+    __tablename__ = "chat_usage"
+    __table_args__ = (
+        UniqueConstraint("kind", "key", "window_start", name="uq_chat_usage_kind_key_window"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    kind: str
+    key: str
+    window_start: datetime
+    count: int = 0
 
 
 class ChatFeedback(SQLModel, table=True):

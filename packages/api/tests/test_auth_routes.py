@@ -345,3 +345,108 @@ def test_callback_clears_the_signed_out_marker(auth_client, monkeypatch):
     [marker] = _set_cookie_headers(response, "cce_signed_out")
     assert "Max-Age=0" in marker
     assert "Path=/api/auth" in marker
+
+
+# --- moving anonymous chat conversations into the account on sign-in ---
+
+def _anon_db(app, anon_id):
+    """In-memory DB holding one anonymous thread with a message and its feedback."""
+    import asyncio
+
+    from sqlmodel import SQLModel
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    from cell_explorer_api.db import create_engine
+    from cell_explorer_api.db.models import (
+        ChatFeedback, ChatMessageRow, ChatThread, Dataset, Datasource, DatasourceType,
+    )
+
+    engine = create_engine("sqlite+aiosqlite://")
+
+    async def _seed():
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
+        async with AsyncSession(engine) as s:
+            src = Datasource(name="cdn", type=DatasourceType.S3_CLOUDFRONT, base_url="https://cdn.example.com")
+            s.add(src)
+            await s.flush()
+            ds = Dataset(datasource_id=src.id, name="A", slug="a", path="a.zarr", is_public=True)
+            s.add(ds)
+            await s.flush()
+            thread = ChatThread(user_sub=f"anon:{anon_id}", dataset_id=ds.id, title="t")
+            s.add(thread)
+            await s.flush()
+            msg = ChatMessageRow(thread_id=thread.id, role="assistant", content="hi")
+            s.add(msg)
+            await s.flush()
+            s.add(ChatFeedback(message_id=msg.id, user_sub=f"anon:{anon_id}", rating="up"))
+            await s.commit()
+
+    asyncio.run(_seed())
+    app.state.db_engine = engine
+    return engine
+
+
+def _subs(engine):
+    import asyncio
+
+    from sqlmodel import select
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    from cell_explorer_api.db.models import ChatFeedback, ChatThread
+
+    async def _go():
+        async with AsyncSession(engine) as s:
+            threads = [t.user_sub for t in (await s.exec(select(ChatThread))).all()]
+            feedback = [f.user_sub for f in (await s.exec(select(ChatFeedback))).all()]
+            return threads, feedback
+
+    return asyncio.run(_go())
+
+
+def _sign_in_with(client, monkeypatch, access_token):
+    login = client.get("/api/auth/login", follow_redirects=False)
+
+    async def fake_exchange_code(code, redirect_uri):
+        return {"access_token": access_token, "refresh_token": "refresh"}
+
+    monkeypatch.setattr(client.app.state.oidc, "exchange_code", fake_exchange_code)
+    return client.get(
+        "/api/auth/callback",
+        params={"code": "c", "state": login.cookies["cce_state"]},
+        follow_redirects=False,
+    )
+
+
+def test_callback_moves_anonymous_conversations_to_the_account(auth_client, rsa_keys, monkeypatch):
+    import uuid as _uuid
+
+    anon = str(_uuid.uuid4())
+    engine = _anon_db(auth_client.app, anon)
+    auth_client.cookies.set("cce_anon", anon, path="/api")
+    response = _sign_in_with(auth_client, monkeypatch, _make_token(rsa_keys[0], sub="user-123"))
+    assert response.status_code == 302
+    assert _subs(engine) == (["user-123"], ["user-123"])
+    [cleared] = _set_cookie_headers(response, "cce_anon")
+    assert "Max-Age=0" in cleared and "Path=/api" in cleared
+
+
+def test_callback_without_anon_cookie_leaves_anonymous_conversations(auth_client, rsa_keys, monkeypatch):
+    import uuid as _uuid
+
+    anon = str(_uuid.uuid4())
+    engine = _anon_db(auth_client.app, anon)
+    response = _sign_in_with(auth_client, monkeypatch, _make_token(rsa_keys[0], sub="user-123"))
+    assert response.status_code == 302
+    assert _subs(engine) == ([f"anon:{anon}"], [f"anon:{anon}"])
+    assert _set_cookie_headers(response, "cce_anon") == []
+
+
+def test_callback_with_nothing_to_claim_still_signs_in(auth_client, rsa_keys, monkeypatch):
+    import uuid as _uuid
+
+    _anon_db(auth_client.app, str(_uuid.uuid4()))
+    auth_client.cookies.set("cce_anon", str(_uuid.uuid4()), path="/api")
+    response = _sign_in_with(auth_client, monkeypatch, _make_token(rsa_keys[0], sub="user-123"))
+    assert response.status_code == 302
+    assert any("cce_access=" in c for c in response.headers.get_list("set-cookie"))

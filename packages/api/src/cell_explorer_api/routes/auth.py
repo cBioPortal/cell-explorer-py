@@ -9,8 +9,12 @@ from urllib.parse import quote, unquote
 import jwt as _jwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
+from sqlmodel.ext.asyncio.session import AsyncSession
 
+from cell_explorer_api.auth.anonymous import ANON_COOKIE, anon_id_from_cookie
 from cell_explorer_api.auth.dependencies import require_auth
+from cell_explorer_api.db import get_db
+from cell_explorer_api.services.threads import claim_anonymous
 from cell_explorer_api.auth.oidc import OidcClient
 from cell_explorer_api.auth.models import User
 
@@ -210,7 +214,7 @@ async def cli_login(request: Request, redirect_uri: str):
 
 
 @router.get("/callback")
-async def callback(request: Request, code: str, state: str):
+async def callback(request: Request, code: str, state: str, db: AsyncSession = Depends(get_db)):
     """Handle Keycloak callback — exchange code for tokens."""
     _require_auth_enabled(request)
     oidc: OidcClient = request.app.state.oidc
@@ -243,6 +247,16 @@ async def callback(request: Request, code: str, state: str):
     next_path = _safe_next_path(unquote(request.cookies.get("cce_next", "")))
     response = RedirectResponse(url=next_path, status_code=302)
     _set_token_cookies(request, response, tokens["access_token"], tokens["refresh_token"])
+    # Chatted signed out on this browser? Keep those conversations: move
+    # them into the account. Best effort — never block the sign-in.
+    anon_id = anon_id_from_cookie(request)
+    if anon_id:
+        try:
+            user = oidc.decode_token(tokens["access_token"])
+            await claim_anonymous(db, anon_id=anon_id, user_sub=user.sub)
+        except Exception:
+            logger.warning("Could not move anonymous conversations on sign-in", exc_info=True)
+        response.delete_cookie(ANON_COOKIE, path="/api")
     response.delete_cookie("cce_state", path="/api/auth")
     response.delete_cookie("cce_next", path="/api/auth")
     response.delete_cookie(_SIGNED_OUT_COOKIE, path="/api/auth")

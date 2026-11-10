@@ -97,6 +97,13 @@ class Settings(BaseSettings):
     # authenticated user can chat (subject to per-dataset chat_enabled).
     chat_required_role: str | None = None
 
+    # Limits on chat without signing in (datasets with anonymous_chat on).
+    # Signed-in users are never limited by these. Fixed clock-hour / UTC-day
+    # windows; the per-day cap is the ceiling on signed-out LLM cost.
+    anon_chat_per_visitor_per_hour: int = 20
+    anon_chat_per_ip_per_hour: int = 200
+    anon_chat_per_day: int = 10000
+
     # CLI integration
     cli_state_secret: str | None = None
 

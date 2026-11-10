@@ -1559,6 +1559,11 @@
               }
             ],
             "title": "Reason"
+          },
+          "anonymous": {
+            "type": "boolean",
+            "title": "Anonymous",
+            "default": false
           }
         },
         "type": "object",
@@ -2311,6 +2316,10 @@
             "type": "boolean",
             "title": "Chat Enabled"
           },
+          "anonymous_chat": {
+            "type": "boolean",
+            "title": "Anonymous Chat"
+          },
           "metadata": {
             "anyOf": [
               {
@@ -2335,7 +2344,8 @@
           "required_roles",
           "prompt_addendum",
           "default_view",
-          "chat_enabled"
+          "chat_enabled",
+          "anonymous_chat"
         ],
         "title": "DatasetAdminResponse"
       },
@@ -2502,6 +2512,11 @@
           "chat_enabled": {
             "type": "boolean",
             "title": "Chat Enabled",
+            "default": false
+          },
+          "anonymous_chat": {
+            "type": "boolean",
+            "title": "Anonymous Chat",
             "default": false
           }
         },
@@ -2930,6 +2945,17 @@
               }
             ],
             "title": "Chat Enabled"
+          },
+          "anonymous_chat": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anonymous Chat"
           },
           "collection_id": {
             "anyOf": [

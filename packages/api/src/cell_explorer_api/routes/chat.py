@@ -4,7 +4,7 @@ import asyncio
 import logging
 import uuid as _uuid
 from collections.abc import AsyncIterator
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -18,7 +18,7 @@ from cell_explorer_agent.config import AgentConfig
 from cell_explorer_agent.events import Error, ThreadOpen
 from cell_explorer_agent.messages import AssistantMessage, UserMessage
 from cell_explorer_agent.telemetry import langfuse_client
-from cell_explorer_api.auth.dependencies import require_auth
+from cell_explorer_api.auth.anonymous import ANON_PREFIX, anonymous_chat_allowed, chat_user, is_anonymous
 from cell_explorer_api.auth.models import User
 from cell_explorer_api.auth.optional import optional_auth
 from cell_explorer_api.config import Settings
@@ -122,6 +122,9 @@ class TurnRequest(BaseModel):
 class ChatPermissionResponse(BaseModel):
     can_chat: bool
     reason: str | None = None
+    # True when the visitor is signed out and chatting under an anonymous
+    # ID on a dataset that allows it.
+    anonymous: bool = False
 
 
 class ContextResponse(BaseModel):
@@ -291,6 +294,10 @@ async def get_chat_context(
     permission = compute_chat_permission(
         user, required_role=settings.chat_required_role,
     )
+    anonymous = False
+    if user is None:
+        dataset = (await db.exec(select(Dataset).where(Dataset.slug == slug))).first()
+        anonymous = anonymous_chat_allowed(dataset, settings)
     ctx = agent.dataset_ctx
     return ContextResponse(
         slug=ctx.slug,
@@ -311,8 +318,9 @@ async def get_chat_context(
         embedding_keys=list(ctx.embedding_keys),
         available_tools=[t.name for t in agent.catalog.all()],
         permission=ChatPermissionResponse(
-            can_chat=permission.can_chat,
-            reason=permission.reason,
+            can_chat=permission.can_chat or anonymous,
+            reason=None if anonymous else permission.reason,
+            anonymous=anonymous,
         ),
     )
 
@@ -322,7 +330,7 @@ async def post_chat_turn(
     slug: str,
     body: TurnRequest,
     request: Request,
-    user: User = Depends(require_auth),
+    user: User = Depends(chat_user),
     db: AsyncSession = Depends(get_db),
 ):
     settings: Settings = request.app.state.settings
@@ -343,6 +351,26 @@ async def post_chat_turn(
             status_code=403,
             detail=f"missing chat role: {settings.chat_required_role}",
         )
+
+    # Signed-out questions are rate-limited (cost guard); signed-in ones aren't.
+    if is_anonymous(user):
+        from cell_explorer_api.services.chat_limits import (
+            OVERSIZED_TURN_MESSAGE,
+            check_and_count,
+            oversized_turn,
+        )
+
+        if oversized_turn([m.content for m in body.messages], body.view_state):
+            raise HTTPException(status_code=413, detail=OVERSIZED_TURN_MESSAGE)
+        limit_message = await check_and_count(
+            db,
+            anon_id=user.sub.removeprefix(ANON_PREFIX),
+            ip=request.client.host if request.client else None,
+            now=datetime.now(timezone.utc),
+            settings=settings,
+        )
+        if limit_message:
+            raise HTTPException(status_code=429, detail=limit_message)
 
     # The dataset row was already looked up inside make_chat_agent; re-fetch
     # here for the FK on chat_threads (cheap, single-row).
@@ -407,7 +435,7 @@ async def post_chat_turn(
 async def get_chat_threads(
     slug: str,
     request: Request,
-    user: User = Depends(require_auth),
+    user: User = Depends(chat_user),
     db: AsyncSession = Depends(get_db),
 ) -> ThreadListResponse:
     settings: Settings = request.app.state.settings
@@ -442,7 +470,7 @@ async def get_chat_thread_detail(
     slug: str,
     thread_id: _uuid.UUID,
     request: Request,
-    user: User = Depends(require_auth),
+    user: User = Depends(chat_user),
     db: AsyncSession = Depends(get_db),
 ) -> ThreadDetailResponse:
     settings: Settings = request.app.state.settings
@@ -504,7 +532,7 @@ async def delete_chat_thread(
     slug: str,
     thread_id: _uuid.UUID,
     request: Request,
-    user: User = Depends(require_auth),
+    user: User = Depends(chat_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     settings: Settings = request.app.state.settings
@@ -547,7 +575,7 @@ async def put_message_feedback(
     slug: str,
     message_id: _uuid.UUID,
     body: FeedbackRequest,
-    user: User = Depends(require_auth),
+    user: User = Depends(chat_user),
     db: AsyncSession = Depends(get_db),
 ) -> FeedbackResponse:
     # Resolve message; verify ownership via thread.user_sub. We deliberately
@@ -619,7 +647,7 @@ async def put_message_feedback(
 async def delete_message_feedback(
     slug: str,
     message_id: _uuid.UUID,
-    user: User = Depends(require_auth),
+    user: User = Depends(chat_user),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     # Resolve message + thread ownership before deleting feedback.

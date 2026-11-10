@@ -469,3 +469,31 @@ def test_create_dataset_with_invalid_default_view_returns_422(seeded_app):
         },
     )
     assert resp.status_code == 422, resp.text
+
+
+# --- anonymous_chat field ---
+
+def _create(client, ds_id, slug, **extra):
+    return client.post(
+        "/api/admin/datasets",
+        headers=AUTH_HEADER,
+        json={"datasource_id": ds_id, "name": slug, "slug": slug, "path": f"{slug}.zarr",
+              "is_public": True, "chat_enabled": True, **extra},
+    )
+
+
+def test_admin_dataset_anonymous_chat_defaults_false(seeded_app):
+    client = TestClient(seeded_app)
+    response = _create(client, seeded_app.state.test_datasource_id, "anon-default")
+    assert response.status_code == 201, response.text
+    assert response.json()["anonymous_chat"] is False
+
+
+def test_admin_put_sets_anonymous_chat(seeded_app):
+    client = TestClient(seeded_app)
+    _create(client, seeded_app.state.test_datasource_id, "anon-toggle")
+    response = client.put(
+        "/api/admin/datasets/anon-toggle", headers=AUTH_HEADER, json={"anonymous_chat": True},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["anonymous_chat"] is True

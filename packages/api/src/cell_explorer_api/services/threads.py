@@ -167,3 +167,25 @@ async def delete_thread(
     thread = await load_thread(session, user=user, thread_id=thread_id)
     await session.delete(thread)
     await session.flush()
+
+
+async def claim_anonymous(db: AsyncSession, *, anon_id: str, user_sub: str) -> int:
+    """Move an anonymous visitor's conversations and feedback to a signed-in user.
+
+    Called when someone who chatted signed out signs in on the same browser.
+    Returns the number of conversations moved.
+    """
+    from sqlalchemy import update
+
+    from cell_explorer_api.auth.anonymous import ANON_PREFIX
+    from cell_explorer_api.db.models import ChatFeedback
+
+    anon_sub = f"{ANON_PREFIX}{anon_id}"
+    moved = await db.exec(
+        update(ChatThread).where(ChatThread.user_sub == anon_sub).values(user_sub=user_sub)
+    )
+    await db.exec(
+        update(ChatFeedback).where(ChatFeedback.user_sub == anon_sub).values(user_sub=user_sub)
+    )
+    await db.commit()
+    return moved.rowcount or 0

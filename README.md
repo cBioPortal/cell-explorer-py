@@ -138,6 +138,9 @@ and remain supported aliases for the generic names above.
 | `ADMIN_API_KEY` | unset | Enables `/api/admin/*`. Unset means the admin endpoints reject every request |
 | `ANTHROPIC_API_KEY` | unset | Unset means chat is disabled and `/api/info` reports `chat_enabled: false` |
 | `CHAT_REQUIRED_ROLE` | unset | Role required for chat. Unset means any authenticated user, still subject to each dataset's own `chat_enabled` |
+| `ANON_CHAT_PER_VISITOR_PER_HOUR` | `20` | Chat without signing in (datasets with `anonymous_chat` on): questions per anonymous visitor per clock hour |
+| `ANON_CHAT_PER_IP_PER_HOUR` | `200` | Signed-out questions per client IP per clock hour. Behind a proxy, set uvicorn's `FORWARDED_ALLOW_IPS` to the proxy's private address range (e.g. the VPC CIDR) so the real client IP is used. **Never `*`**: uvicorn then trusts the leftmost `X-Forwarded-For` entry, which any client can forge. Unset, every visitor shares the proxy's address |
+| `ANON_CHAT_PER_DAY` | `10000` | Signed-out questions per UTC day for the whole deployment: the ceiling on what signed-out chat can cost. Signed-in users are never counted |
 | `CLI_STATE_SECRET` | unset | Signs the CLI login callback state |
 
 ## Branding

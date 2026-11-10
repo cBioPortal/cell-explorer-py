@@ -517,7 +517,7 @@ def test_get_context_includes_permission_when_authed_with_no_role_required(seede
         response = client.get("/api/chat/public-atlas/context")
 
     assert response.status_code == 200, response.text
-    assert response.json()["permission"] == {"can_chat": True, "reason": None}
+    assert response.json()["permission"] == {"can_chat": True, "reason": None, "anonymous": False}
 
 
 def test_get_context_permission_missing_role(seeded_app):
@@ -537,6 +537,7 @@ def test_get_context_permission_missing_role(seeded_app):
     assert response.json()["permission"] == {
         "can_chat": False,
         "reason": "missing_role:cell-explorer-chat",
+        "anonymous": False,
     }
 
 
@@ -553,7 +554,7 @@ def test_get_context_permission_user_has_role(seeded_app):
         response = client.get("/api/chat/public-atlas/context")
 
     assert response.status_code == 200
-    assert response.json()["permission"] == {"can_chat": True, "reason": None}
+    assert response.json()["permission"] == {"can_chat": True, "reason": None, "anonymous": False}
 
 
 def test_get_context_anonymous_returns_requires_auth(seeded_app):
@@ -572,6 +573,7 @@ def test_get_context_anonymous_returns_requires_auth(seeded_app):
     assert response.json()["permission"] == {
         "can_chat": False,
         "reason": "requires_auth",
+        "anonymous": False,
     }
 
 
