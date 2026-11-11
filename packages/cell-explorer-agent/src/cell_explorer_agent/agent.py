@@ -115,16 +115,20 @@ class ChatAgent:
             user_text = messages[-1].content
         else:
             user_text = ""
+        is_public = (telemetry_context or {}).get("is_public", False)
         async with TurnTrace(
             client=client,
             user_id=(telemetry_context or {}).get("user_id"),
             thread_id=(telemetry_context or {}).get("thread_id", "no-thread"),
             dataset_slug=(telemetry_context or {}).get("dataset_slug", self.dataset_ctx.slug),
-            is_public=(telemetry_context or {}).get("is_public", False),
+            is_public=is_public,
             model=self.config.llm_model,
             environment=(telemetry_context or {}).get("environment", "unknown"),
             user_input=user_text,
             view_state=view_state,
+            # is_public still drives the visibility tag; this decides whether
+            # content is sent (LANGFUSE_REDACT_PRIVATE=false for self-hosted).
+            redact_content=self.config.langfuse_redact_private and not is_public,
         ) as trace:
             final_assistant_text_buffer: list[str] = []
             while True:

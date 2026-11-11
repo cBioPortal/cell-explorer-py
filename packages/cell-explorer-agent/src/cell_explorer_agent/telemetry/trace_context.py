@@ -1,8 +1,10 @@
 """TurnTrace — async context manager that owns the per-turn Langfuse trace.
 
 Wraps the Langfuse v3 SDK so the rest of the agent only sees this protocol.
-All redaction decisions are made once at __aenter__ based on `is_public`
-and applied to every subsequent add_* call.
+All redaction decisions are made once, at construction, from `redact_content`
+(which defaults to `not is_public`) and applied to every subsequent add_* call.
+`is_public` itself only drives the visibility tag, so the tag describes the
+dataset even when an instance is configured to receive private content.
 
 The root observation is opened via start_as_current_observation so that
 every child observation we create inside __aenter__/__aexit__ auto-attaches
@@ -50,12 +52,19 @@ class TurnTrace:
         environment: str,
         user_input: str,
         view_state: dict[str, Any] | None,
+        redact_content: bool | None = None,
     ) -> None:
         self._client = client
         self._user_id = user_id or "anonymous"
         self._thread_id = thread_id
         self._dataset_slug = dataset_slug
         self._is_public = is_public
+        # None means "redact unless public" — the safe default for a caller
+        # that doesn't apply the LANGFUSE_REDACT_PRIVATE toggle itself.
+        if redact_content is None:
+            redact_content = not is_public
+        # Passed as the redaction functions' `public=` flag: True ships content.
+        self._send_content = not redact_content
         self._model = model
         self._environment = environment
         self._user_input = user_input
@@ -91,9 +100,9 @@ class TurnTrace:
             self._root_cm = self._client.start_as_current_observation(
                 name="chat-turn",
                 as_type="span",
-                input=redact_user_input(self._user_input, public=self._is_public),
+                input=redact_user_input(self._user_input, public=self._send_content),
                 metadata={
-                    "view_state": redact_view_state(self._view_state, public=self._is_public),
+                    "view_state": redact_view_state(self._view_state, public=self._send_content),
                     "dataset_slug": self._dataset_slug,
                 },
             )
@@ -110,7 +119,7 @@ class TurnTrace:
                 user_id=self._user_id,
                 session_id=self._thread_id,
                 tags=tags,
-                input=redact_user_input(self._user_input, public=self._is_public),
+                input=redact_user_input(self._user_input, public=self._send_content),
             )
         except Exception:
             logger.exception("TurnTrace: failed to open trace")
@@ -141,7 +150,7 @@ class TurnTrace:
             self._gen_count += 1
             gen_input: Any = (
                 input_messages
-                if self._is_public
+                if self._send_content
                 else redact_user_input("", public=False)
             )
             gen = self._client.start_observation(
@@ -151,7 +160,7 @@ class TurnTrace:
                 model=self._model,
             )
             gen.update(
-                output=redact_assistant_output(output_text, public=self._is_public),
+                output=redact_assistant_output(output_text, public=self._send_content),
                 usage_details=dict(usage) if isinstance(usage, dict) else None,
             )
             gen.end()
@@ -177,10 +186,10 @@ class TurnTrace:
             sp = self._client.start_observation(
                 name=f"tool:{name}",
                 as_type="span",
-                input=redact_tool_args(name, args, public=self._is_public),
+                input=redact_tool_args(name, args, public=self._send_content),
             )
             sp.update(
-                output=redact_tool_result(result, public=self._is_public),
+                output=redact_tool_result(result, public=self._send_content),
                 metadata={"duration_ms": duration_ms, "status": status},
                 level=level,
                 status_message=status_message,
@@ -193,7 +202,7 @@ class TurnTrace:
         if self._root_obs is None:
             return
         try:
-            redacted = redact_assistant_output(text, public=self._is_public)
+            redacted = redact_assistant_output(text, public=self._send_content)
             # Root span's output (visible on the span row).
             self._root_obs.update(output=redacted)
             # And the trace-level output (visible on the trace card in the UI).
