@@ -94,6 +94,23 @@ def test_langfuse_explicit_disable_overrides_default(monkeypatch):
     assert cfg.langfuse_trace_enabled is False
 
 
+def test_langfuse_redact_private_default_is_true(monkeypatch):
+    monkeypatch.delenv("LANGFUSE_REDACT_PRIVATE", raising=False)
+    assert AgentConfig().langfuse_redact_private is True
+
+
+def test_langfuse_redact_private_disabled_via_env(monkeypatch):
+    monkeypatch.setenv("LANGFUSE_REDACT_PRIVATE", "false")
+    assert AgentConfig().langfuse_redact_private is False
+
+
+def test_langfuse_redact_private_rejects_unparseable_value(monkeypatch):
+    # A typo must not silently pick either behavior for a privacy setting.
+    monkeypatch.setenv("LANGFUSE_REDACT_PRIVATE", "maybe")
+    with pytest.raises(ValidationError):
+        AgentConfig()
+
+
 def test_langfuse_base_url_default(monkeypatch):
     monkeypatch.delenv("LANGFUSE_BASE_URL", raising=False)
     from cell_explorer_agent.config import AgentConfig
