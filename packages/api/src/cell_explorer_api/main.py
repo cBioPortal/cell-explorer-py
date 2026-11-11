@@ -2,7 +2,9 @@
 
 import hashlib
 import logging
+import os
 from contextlib import asynccontextmanager
+from email.utils import formatdate, parsedate_to_datetime
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
@@ -59,6 +61,27 @@ def _not_modified(request: Request, etag: str) -> bool:
         candidate == "*" or candidate.removeprefix("W/") == etag
         for candidate in (part.strip() for part in header.split(","))
     )
+
+
+def _brand_validators(stat: os.stat_result) -> tuple[str, str]:
+    """Generate ETag and Last-Modified validators for a static brand asset."""
+    etag = f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+    last_modified = formatdate(stat.st_mtime, usegmt=True)
+    return etag, last_modified
+
+
+def _not_modified_since(request: Request, mtime: float) -> bool:
+    """If-Modified-Since check; only valid when If-None-Match is absent (RFC 9110 §13.1.3)."""
+    if request.headers.get("if-none-match"):
+        return False
+    header = request.headers.get("if-modified-since")
+    if not header:
+        return False
+    try:
+        since = parsedate_to_datetime(header).timestamp()
+    except (TypeError, ValueError):
+        return False
+    return int(mtime) <= since
 
 
 CONSOLE_HANDLER_NAME = "cell-explorer-console"
@@ -192,7 +215,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         @app.api_route(
             "/brand/{filename:path}", methods=["GET", "HEAD"], include_in_schema=False
         )
-        async def brand_asset(filename: str):
+        async def brand_asset(request: Request, filename: str):
             if filename not in brand_assets:
                 return JSONResponse(status_code=404, content={"detail": "Not found"})
             # Resolved even though the name is a validated bare filename: it may
@@ -200,9 +223,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             file = _resolve_static_file(brand_root, filename)
             if file is None:
                 return JSONResponse(status_code=404, content={"detail": "Not found"})
-            return FileResponse(
-                str(file), headers={"Cache-Control": BRAND_ASSET_CACHE_CONTROL}
-            )
+            try:
+                stat = file.stat()
+            except OSError:
+                return JSONResponse(status_code=404, content={"detail": "Not found"})
+
+            etag, last_modified = _brand_validators(stat)
+            headers = {
+                "Cache-Control": BRAND_ASSET_CACHE_CONTROL,
+                "ETag": etag,
+                "Last-Modified": last_modified,
+            }
+
+            if _not_modified(request, etag) or _not_modified_since(
+                request, stat.st_mtime
+            ):
+                return Response(status_code=304, headers=headers)
+
+            return FileResponse(str(file), headers=headers, stat_result=stat)
 
     # 2 & 3. Static serving (if configured)
     if settings.static_dir is not None:
