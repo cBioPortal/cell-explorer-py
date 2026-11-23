@@ -124,6 +124,9 @@ class OpenDataset:
             self._obs_cache[name] = await self.anndata.obs_column(name)
         return self._obs_cache[name]
 
+    def drop_obs_column(self, name: str) -> None:
+        self._obs_cache.pop(name, None)
+
     def coarse_slug_for(self, obs_column: str) -> str | None:
         for slug in self.strata.coarse_slugs():
             if self.strata.coarse_axes(slug) == [obs_column]:

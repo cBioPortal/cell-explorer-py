@@ -26,6 +26,12 @@ import pandas as pd
 from cell_explorer_mcp.zarr_cache import OpenDataset
 
 MAX_RESULTS = 50
+MAX_OBS_VALUES = 500
+# More distinct values than this means a per-cell ID, not a grouping. Matches
+# the frontend's color-by limit.
+MAX_DISTINCT_VALUES = 65_535
+# Counting a string column builds a Python object per cell.
+MAX_STRING_COLUMN_CELLS = 2_000_000
 MAX_X_COLUMN_CELLS = 2_000_000
 MAX_X_SCAN_ELEMENTS = 250_000_000
 X_READ_CONCURRENCY = 2
@@ -285,14 +291,51 @@ async def _scan_x_group_sums(
 # --- obs -----------------------------------------------------------------------
 
 
-async def obs_column_values(ds: OpenDataset, column: str, limit: int = 50) -> dict[str, Any]:
-    limit = max(1, min(limit, MAX_RESULTS))
-    try:
-        col = await ds.obs_column(column)
-    except KeyError:
-        raise QueryError(
-            f"Obs column {column!r} not found. Available: {', '.join(ds.anndata.obs_columns)}"
-        ) from None
+def _column_meta(entry: dict[str, Any] | None, name: str) -> dict[str, Any] | None:
+    """The catalog's description of one obs column (dtype, cardinality), if any."""
+    for meta in ((entry or {}).get("metadata") or {}).get("obs_columns") or []:
+        if meta.get("name") == name:
+            return meta
+    return None
+
+
+def _unknown_column(ds: OpenDataset, name: str) -> QueryError:
+    return QueryError(f"Obs column {name!r} not found. Available: {', '.join(ds.anndata.obs_columns)}")
+
+
+def _too_many_values(name: str, n_values: int) -> QueryError:
+    return QueryError(
+        f"Obs column {name!r} has {n_values:,} distinct values (a per-cell ID, not a "
+        f"grouping), so it can't be counted or grouped by."
+    )
+
+
+def _string_column_too_large(ds: OpenDataset, name: str) -> QueryError:
+    return QueryError(
+        f"Obs column {name!r} is a free-text column on {ds.n_obs:,} cells; counting its "
+        f"values is limited to {MAX_STRING_COLUMN_CELLS:,} cells."
+    )
+
+
+async def obs_column_values(
+    ds: OpenDataset, column: str, limit: int = 50, entry: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    limit = max(1, min(limit, MAX_OBS_VALUES))
+    if column not in ds.anndata.obs_columns:
+        raise _unknown_column(ds, column)
+    # Refuse from the catalog's metadata before reading anything.
+    meta = _column_meta(entry, column) or {}
+    if meta.get("dtype") == "categorical" and (meta.get("cardinality") or 0) > MAX_DISTINCT_VALUES:
+        raise _too_many_values(column, meta["cardinality"])
+    if meta.get("dtype") == "string" and ds.n_obs > MAX_STRING_COLUMN_CELLS:
+        raise _string_column_too_large(ds, column)
+
+    col = await ds.obs_column(column)
+    # Same checks for datasets without catalog metadata; a refused column is
+    # not kept in the cache.
+    if isinstance(col, pd.Categorical) and len(col.categories) > MAX_DISTINCT_VALUES:
+        ds.drop_obs_column(column)
+        raise _too_many_values(column, len(col.categories))
 
     if isinstance(col, pd.Categorical):
         counts = pd.Series(col).value_counts(dropna=False)
@@ -333,6 +376,9 @@ async def obs_column_values(ds: OpenDataset, column: str, limit: int = 50) -> di
             },
         }
 
+    if arr.size > MAX_STRING_COLUMN_CELLS:
+        ds.drop_obs_column(column)
+        raise _string_column_too_large(ds, column)
     counts = Counter(None if v is None else str(v) for v in arr.tolist())
     total = int(arr.size)
     items = counts.most_common()

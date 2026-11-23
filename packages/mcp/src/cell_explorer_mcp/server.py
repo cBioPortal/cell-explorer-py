@@ -164,12 +164,12 @@ async def top_genes(
 async def obs_column_values(
     dataset: DatasetSlug,
     column: Annotated[str, Field(description="Obs (cell metadata) column name.")],
-    limit: Annotated[int, Field(ge=1, le=50)] = 50,
+    limit: Annotated[int, Field(ge=1, le=queries.MAX_OBS_VALUES)] = 50,
 ) -> dict[str, Any]:
     """Cell counts per value of an obs column (most frequent first), or summary
     statistics for a numeric column."""
-    ds, _ = await _open(dataset)
-    return await _run(queries.obs_column_values(ds, column, limit))
+    ds, entry = await _open(dataset)
+    return await _run(queries.obs_column_values(ds, column, limit, entry=entry))
 
 
 def main() -> None:

@@ -133,6 +133,52 @@ async def test_obs_column_values_unknown_column(pbmc):
         await queries.obs_column_values(pbmc, "nope")
 
 
+def _entry(*obs_columns):
+    return {"metadata": {"obs_columns": list(obs_columns)}}
+
+
+def _forbid_reads(monkeypatch, ds):
+    async def no_read(name):
+        raise AssertionError(f"obs column {name!r} was read")
+
+    monkeypatch.setattr(ds, "obs_column", no_read)
+
+
+async def test_obs_column_values_refuses_per_cell_ids_before_reading(generated, monkeypatch):
+    _forbid_reads(monkeypatch, generated)
+    entry = _entry({"name": "cluster", "dtype": "categorical", "cardinality": 927_205})
+    with pytest.raises(QueryError, match="927,205 distinct values"):
+        await queries.obs_column_values(generated, "cluster", entry=entry)
+
+
+async def test_obs_column_values_refuses_high_cardinality_without_metadata(generated, monkeypatch):
+    monkeypatch.setattr(queries, "MAX_DISTINCT_VALUES", 59)
+    with pytest.raises(QueryError, match="60 distinct values"):
+        await queries.obs_column_values(generated, "cluster")
+    assert "cluster" not in generated._obs_cache
+
+
+async def test_obs_column_values_returns_up_to_500_values(generated):
+    result = await queries.obs_column_values(generated, "cluster", limit=500)
+    assert len(result["values"]) == 60
+    assert result["other_count"] == 0
+
+
+async def test_obs_column_values_caps_string_columns_before_reading(generated, monkeypatch):
+    monkeypatch.setattr(queries, "MAX_STRING_COLUMN_CELLS", 100)
+    _forbid_reads(monkeypatch, generated)
+    entry = _entry({"name": "barcode", "dtype": "string", "cardinality": None})
+    with pytest.raises(QueryError, match="120 cells"):
+        await queries.obs_column_values(generated, "barcode", entry=entry)
+
+
+async def test_obs_column_values_caps_string_columns_without_metadata(generated, monkeypatch):
+    monkeypatch.setattr(queries, "MAX_STRING_COLUMN_CELLS", 100)
+    with pytest.raises(QueryError, match="120 cells"):
+        await queries.obs_column_values(generated, "barcode")
+    assert "barcode" not in generated._obs_cache
+
+
 async def test_dataset_info(strata_tiny):
     entry = {
         "name": "Strata tiny",

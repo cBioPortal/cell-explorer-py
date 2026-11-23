@@ -66,6 +66,13 @@ async def test_private_dataset_is_refused(client):
         await client.call_tool("get_dataset_info", {"dataset": "secret"})
 
 
+async def test_obs_column_values_accepts_limit_500(client):
+    result = (await client.call_tool(
+        "obs_column_values", {"dataset": "pbmc3k", "column": "louvain", "limit": 500}
+    )).data
+    assert result["n_values"] == 8
+
+
 async def test_query_error_is_tool_error(client):
     with pytest.raises(ToolError, match="not found"):
         await client.call_tool("obs_column_values", {"dataset": "pbmc3k", "column": "nope"})

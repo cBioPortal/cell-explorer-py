@@ -5,6 +5,8 @@ from pathlib import Path
 
 import anndata as ad
 import httpx
+import numpy as np
+import pandas as pd
 import pytest
 import pytest_asyncio
 from aiohttp import web
@@ -21,9 +23,38 @@ def _find_free_port() -> int:
         return s.getsockname()[1]
 
 
+def _write_generated(path: Path) -> None:
+    """120 cells x 3 genes: a per-cell string column, a 60-value categorical,
+    and two var IDs sharing the symbol HERC3."""
+    n = 120
+    rng = np.random.default_rng(0)
+    obs = pd.DataFrame(
+        {
+            "barcode": [f"cell-{i:04d}" for i in range(n)],
+            "cluster": pd.Categorical([f"c{i // 2:02d}" for i in range(n)]),
+            "cell_type": pd.Categorical(["T"] * 60 + ["B"] * 60),
+        },
+        index=[str(i) for i in range(n)],
+    )
+    var = pd.DataFrame(
+        {"feature_name": ["HERC3", "HERC3", "CD3E"]},
+        index=["ENSG00000287542", "ENSG00000138641", "ENSG00000198851"],
+    )
+    X = rng.random((n, 3), dtype="float32")
+    ad.AnnData(X=X, obs=obs, var=var).write_zarr(path)
+
+
+@pytest.fixture(scope="session")
+def generated_dir(tmp_path_factory) -> Path:
+    root = tmp_path_factory.mktemp("generated")
+    _write_generated(root / "generated.zarr")
+    return root
+
+
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
-async def fixture_server():
+async def fixture_server(generated_dir):
     app = web.Application()
+    app.router.add_static("/generated/", generated_dir)
     app.router.add_static("/", FIXTURES_DIR)
     port = _find_free_port()
     runner = web.AppRunner(app)
@@ -43,6 +74,12 @@ async def strata_tiny(fixture_server):
 async def pbmc(fixture_server):
     """2638 cells x 1838 genes, dense X, no strata."""
     return await open_dataset("pbmc3k", f"{fixture_server}/pbmc3k_v3.zarr")
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def generated(fixture_server):
+    """Opened fresh per test so its obs-column cache starts empty."""
+    return await open_dataset("generated", f"{fixture_server}/generated/generated.zarr")
 
 
 @pytest.fixture(scope="session")
