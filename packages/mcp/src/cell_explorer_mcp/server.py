@@ -41,6 +41,10 @@ cache = DatasetCache(maxsize=int(os.getenv("CELL_EXPLORER_MCP_MAX_DATASETS", DEF
 
 mcp = FastMCP(name="Cell Explorer MCP Server", instructions=INSTRUCTIONS)
 
+# Gene symbols and IDs (including versioned Ensembl IDs) are far shorter; the
+# limit bounds the per-character rescan behind unknown-gene suggestions.
+MAX_GENE_NAME = 64
+
 DatasetSlug = Annotated[str, Field(description="Dataset slug from list_datasets, e.g. 'spectrum'.")]
 
 
@@ -131,7 +135,7 @@ async def get_dataset_info(dataset: DatasetSlug) -> dict[str, Any]:
 @mcp.tool()
 async def search_genes(
     dataset: DatasetSlug,
-    query: Annotated[str, Field(description="Gene symbol or ID substring, case-insensitive.")],
+    query: Annotated[str, Field(description="Gene symbol or ID substring, case-insensitive.", max_length=MAX_GENE_NAME)],
     limit: Annotated[int, Field(ge=1, le=50)] = 20,
 ) -> dict[str, Any]:
     """Find genes by symbol or ID. Exact matches rank first, then prefix, then substring."""
@@ -142,7 +146,7 @@ async def search_genes(
 @mcp.tool()
 async def gene_expression(
     dataset: DatasetSlug,
-    gene: Annotated[str, Field(description="Gene symbol or ID.")],
+    gene: Annotated[str, Field(description="Gene symbol or ID.", max_length=MAX_GENE_NAME)],
     group_by: Annotated[str | None, Field(description="Categorical obs column to break results down by, e.g. a cell type column.")] = None,
 ) -> dict[str, Any]:
     """Mean expression and fraction of expressing cells for one gene, overall and

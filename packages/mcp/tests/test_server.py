@@ -63,6 +63,13 @@ async def test_gene_expression_tool(client):
     assert {g["group"] for g in result["groups"]} == {"A", "B", "C"}
 
 
+@pytest.mark.parametrize("tool, arg", [("gene_expression", "gene"), ("search_genes", "query")])
+async def test_gene_names_are_limited_to_64_characters(client, tool, arg):
+    # Suggestions for an unknown name rescan all genes once per character.
+    with pytest.raises(ToolError, match="at most 64 characters"):
+        await client.call_tool(tool, {"dataset": "pbmc3k", arg: "Z" * 65})
+
+
 async def test_unknown_dataset_is_tool_error(client):
     with pytest.raises(ToolError, match="Unknown dataset"):
         await client.call_tool("get_dataset_info", {"dataset": "nope"})
