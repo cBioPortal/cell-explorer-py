@@ -44,6 +44,7 @@ class OpenDataset:
     _var_ids: list[str] | None = field(default=None, init=False)
     _symbol_column: str | None = field(default=None, init=False)
     _gene_lookup: dict[str, int] | None = field(default=None, init=False)
+    _shared_symbols: dict[str, list[int]] = field(default_factory=dict, init=False)
     _obs_cache: dict[str, np.ndarray | pd.Categorical] = field(default_factory=dict, init=False)
     _coarse_cache: dict[str, CoarseStrataTable] = field(default_factory=dict, init=False)
 
@@ -72,10 +73,16 @@ class OpenDataset:
             for names in (symbols, ids):
                 for i, name in enumerate(names):
                     lookup.setdefault(name.upper(), i)
+            # Some symbols name several var IDs (crc-atlas-core has 42). The
+            # lookup above picks the first; callers report the others.
+            by_symbol: dict[str, list[int]] = {}
+            for i, name in enumerate(symbols):
+                by_symbol.setdefault(name, []).append(i)
             self._symbols = symbols
             self._var_ids = ids
             self._symbol_column = symbol_column
             self._gene_lookup = lookup
+            self._shared_symbols = {s: idx for s, idx in by_symbol.items() if len(idx) > 1}
 
     async def gene_symbols(self) -> list[str]:
         await self._ensure_genes()
@@ -90,6 +97,12 @@ class OpenDataset:
     async def symbol_column(self) -> str | None:
         await self._ensure_genes()
         return self._symbol_column
+
+    async def genes_sharing_symbol(self, gene_idx: int) -> list[int]:
+        """Other var indices with the same symbol as gene_idx (usually none)."""
+        await self._ensure_genes()
+        assert self._symbols is not None
+        return [i for i in self._shared_symbols.get(self._symbols[gene_idx], []) if i != gene_idx]
 
     async def gene_index(self, gene: str) -> int:
         """Resolve a gene symbol or var ID (case-insensitive) to its column in X."""

@@ -175,6 +175,13 @@ async def gene_expression(
     gene_idx = await _resolve_gene(ds, gene)
     symbol = (await ds.gene_symbols())[gene_idx]
     result: dict[str, Any] = {"gene": symbol}
+    others = await ds.genes_sharing_symbol(gene_idx)
+    if others:
+        ids = await ds.var_ids()
+        result["id"] = ids[gene_idx]
+        if gene.upper() != ids[gene_idx].upper():  # resolved by symbol, not by ID
+            alternatives = ", ".join(ids[i] for i in others)
+            result["note"] = f"{symbol} also matches {alternatives}; pass the ID as gene to use it."
 
     slug = ds.coarse_slug_for(group_by) if group_by else None
     if group_by is None and ds.strata.coarse_slugs():
@@ -257,19 +264,21 @@ async def top_genes(
     means = sum_x / n_cells
     order = np.argsort(-means, kind="stable")[:n]
     symbols = await ds.gene_symbols()
+    ids = await ds.var_ids()
+    genes = []
+    for i in (int(i) for i in order):
+        gene: dict[str, Any] = {"symbol": symbols[i]}
+        if await ds.genes_sharing_symbol(i):  # tell same-symbol genes apart
+            gene["id"] = ids[i]
+        gene["mean"] = _round(means[i])
+        gene["fraction_expressing"] = _round(nnz[i] / n_cells)
+        genes.append(gene)
     return {
         "obs_column": obs_column,
         "group": group_value,
         "n_cells": n_cells,
         "source": source,
-        "genes": [
-            {
-                "symbol": symbols[int(i)],
-                "mean": _round(means[i]),
-                "fraction_expressing": _round(nnz[i] / n_cells),
-            }
-            for i in order
-        ],
+        "genes": genes,
     }
 
 

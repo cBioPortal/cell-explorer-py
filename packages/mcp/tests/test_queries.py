@@ -199,6 +199,30 @@ async def test_top_genes_unknown_column_on_unscannable_dataset(pbmc, monkeypatch
         await queries.top_genes(pbmc, "nope", "B cells")
 
 
+async def test_gene_expression_flags_a_shared_symbol(generated):
+    result = await queries.gene_expression(generated, "HERC3")
+    assert result["gene"] == "HERC3"
+    assert result["id"] == "ENSG00000287542"
+    assert "ENSG00000138641" in result["note"]
+
+
+async def test_gene_expression_by_id_of_a_shared_symbol_has_no_note(generated):
+    result = await queries.gene_expression(generated, "ENSG00000138641")
+    assert (result["gene"], result["id"]) == ("HERC3", "ENSG00000138641")
+    assert "note" not in result
+
+
+async def test_gene_expression_unique_symbol_has_no_id(generated):
+    result = await queries.gene_expression(generated, "CD3E")
+    assert "id" not in result and "note" not in result
+
+
+async def test_top_genes_adds_ids_only_for_shared_symbols(generated):
+    result = await queries.top_genes(generated, "cell_type", "T", n=3)
+    by_id = {g.get("id"): g["symbol"] for g in result["genes"]}
+    assert by_id == {"ENSG00000287542": "HERC3", "ENSG00000138641": "HERC3", None: "CD3E"}
+
+
 async def test_dataset_info(strata_tiny):
     entry = {
         "name": "Strata tiny",
