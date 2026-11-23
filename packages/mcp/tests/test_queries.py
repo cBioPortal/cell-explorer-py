@@ -208,4 +208,5 @@ async def test_dataset_info(strata_tiny):
     assert (info["n_cells"], info["n_genes"]) == (50, 10)
     assert info["fast_group_by_columns"] == ["cell_type"]
     cell_type = next(c for c in info["obs_columns"] if c["name"] == "cell_type")
-    assert cell_type["categories"] == ["A", "B", "C"]
+    # Counts only; obs_column_values lists the values on demand.
+    assert cell_type == {"name": "cell_type", "dtype": "categorical", "n_categories": 3}

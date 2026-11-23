@@ -20,9 +20,12 @@ Query single-cell RNA-seq datasets hosted on Cell Explorer
 
 Workflow:
 1. list_datasets (optionally filtered by collection or text) to find a dataset slug.
-2. get_dataset_info to learn its cell metadata columns (obs columns) and which of
-   them have precomputed group statistics (fast_group_by_columns).
-3. search_genes to resolve gene names; then gene_expression or top_genes.
+2. get_dataset_info to learn its cell metadata columns (obs columns), their
+   number of distinct values, and which of them have precomputed group
+   statistics (fast_group_by_columns).
+3. obs_column_values to get a column's exact values before using one as
+   group_value; naming varies by dataset (e.g. 'T.cell' vs 'T cell').
+4. search_genes to resolve gene names; then gene_expression or top_genes.
 
 Expression values are as stored in each dataset: usually log-normalized, but
 some datasets are scaled (z-scored), where negative means are normal.
@@ -118,8 +121,9 @@ async def list_collections() -> dict[str, Any]:
 @mcp.tool()
 async def get_dataset_info(dataset: DatasetSlug) -> dict[str, Any]:
     """Dataset overview: cell and gene counts, obs (cell metadata) columns with
-    types and categories, var columns, embeddings, and the columns with
-    precomputed group statistics."""
+    types and number of distinct values, var columns, embeddings, and the
+    columns with precomputed group statistics. Use obs_column_values for a
+    column's values."""
     ds, entry = await _open(dataset)
     return await _run(queries.dataset_info(ds, entry))
 

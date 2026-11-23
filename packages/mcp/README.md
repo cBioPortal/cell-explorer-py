@@ -11,7 +11,7 @@ stores directly via `zarr-access`.
 |---|---|
 | `list_datasets` | Public datasets (slug, name, collection, cell/gene counts); filter by `collection` or text `query` |
 | `list_collections` | Dataset collections |
-| `get_dataset_info` | Cell/gene counts, obs columns with types and categories, var columns, embeddings, `fast_group_by_columns` |
+| `get_dataset_info` | Cell/gene counts, obs columns with types and number of distinct values, var columns, embeddings, `fast_group_by_columns` |
 | `search_genes` | Genes matching a symbol/ID substring (exact > prefix > substring) |
 | `gene_expression` | Mean + fraction expressing for one gene, overall and per group of a categorical obs column |
 | `top_genes` | Top-N genes by mean expression in one group of cells |

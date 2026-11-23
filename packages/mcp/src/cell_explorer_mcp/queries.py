@@ -106,10 +106,10 @@ async def dataset_info(ds: OpenDataset, entry: dict[str, Any]) -> dict[str, Any]
     for name in ds.anndata.obs_columns:
         meta = obs_meta.get(name, {})
         col: dict[str, Any] = {"name": name, "dtype": meta.get("dtype")}
+        # Counts only: listing every column's values made wide datasets cost
+        # thousands of tokens. obs_column_values lists them on demand.
         if meta.get("cardinality") is not None:
             col["n_categories"] = meta["cardinality"]
-        if meta.get("values"):
-            col["categories"] = meta["values"]
         obs_columns.append(col)
 
     coarse = [ds.strata.coarse_axes(s) for s in ds.strata.coarse_slugs()]
