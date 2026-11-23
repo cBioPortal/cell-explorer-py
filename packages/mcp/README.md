@@ -24,10 +24,13 @@ bounded (see `queries.py`):
 
 - Grouped stats use the precomputed coarse strata tables when one exists for
   the column (`fast_group_by_columns`). No per-cell data is read.
-- Per-cell gene reads are limited to datasets of up to 2M cells, at most 2
+- Per-cell gene reads are limited to datasets of up to 6M cells, at most 2
   concurrently.
 - Full-matrix scans (`top_genes` on a column without strata) are limited to
   250M cells × genes.
+- Columns with more than 65,535 distinct values (per-cell IDs) can't be
+  counted or grouped by; free-text columns are counted up to 2M cells.
+- Size checks run before any data is read.
 - There is no differential-expression tool.
 
 ## Running

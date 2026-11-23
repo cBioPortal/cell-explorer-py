@@ -179,6 +179,26 @@ async def test_obs_column_values_caps_string_columns_without_metadata(generated,
     assert "barcode" not in generated._obs_cache
 
 
+async def test_gene_expression_size_check_runs_before_reading_group_by(pbmc, monkeypatch):
+    monkeypatch.setattr(queries, "MAX_X_COLUMN_CELLS", 100)
+    _forbid_reads(monkeypatch, pbmc)
+    with pytest.raises(QueryError, match="per-cell reads are limited"):
+        await queries.gene_expression(pbmc, "CD79A", group_by="louvain")
+
+
+async def test_top_genes_size_check_runs_before_reading_obs_column(pbmc, monkeypatch):
+    monkeypatch.setattr(queries, "MAX_X_SCAN_ELEMENTS", 1000)
+    _forbid_reads(monkeypatch, pbmc)
+    with pytest.raises(QueryError, match="exceeds this server's limit"):
+        await queries.top_genes(pbmc, "louvain", "B cells")
+
+
+async def test_top_genes_unknown_column_on_unscannable_dataset(pbmc, monkeypatch):
+    monkeypatch.setattr(queries, "MAX_X_SCAN_ELEMENTS", 1000)
+    with pytest.raises(QueryError, match="'nope' not found"):
+        await queries.top_genes(pbmc, "nope", "B cells")
+
+
 async def test_dataset_info(strata_tiny):
     entry = {
         "name": "Strata tiny",

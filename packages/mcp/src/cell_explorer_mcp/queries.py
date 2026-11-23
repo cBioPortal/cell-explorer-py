@@ -32,7 +32,7 @@ MAX_OBS_VALUES = 500
 MAX_DISTINCT_VALUES = 65_535
 # Counting a string column builds a Python object per cell.
 MAX_STRING_COLUMN_CELLS = 2_000_000
-MAX_X_COLUMN_CELLS = 2_000_000
+MAX_X_COLUMN_CELLS = 6_000_000
 MAX_X_SCAN_ELEMENTS = 250_000_000
 X_READ_CONCURRENCY = 2
 # Gene columns per X read during a full scan; matches the published stores'
@@ -82,12 +82,16 @@ def _strata_hint(ds: OpenDataset) -> str:
     return f" Columns with precomputed group stats: {', '.join(columns)}." if columns else ""
 
 
-async def _read_gene_column(ds: OpenDataset, gene_idx: int) -> np.ndarray:
+def _check_gene_column_read(ds: OpenDataset) -> None:
     if ds.n_obs > MAX_X_COLUMN_CELLS:
         raise QueryError(
             f"Dataset {ds.slug!r} has {ds.n_obs:,} cells; per-cell reads are limited to "
             f"{MAX_X_COLUMN_CELLS:,}.{_strata_hint(ds)}"
         )
+
+
+async def _read_gene_column(ds: OpenDataset, gene_idx: int) -> np.ndarray:
+    _check_gene_column_read(ds)
     async with _x_semaphore:
         return await ds.gene_column(gene_idx)
 
@@ -195,6 +199,7 @@ async def gene_expression(
             result["groups"] = sorted(groups, key=lambda g: -g["mean"])[:MAX_RESULTS]
         return result
 
+    _check_gene_column_read(ds)  # before reading the group_by column
     categories = await _categorical(ds, group_by) if group_by else None
     expr = (await _read_gene_column(ds, gene_idx)).astype("float64", copy=False)
     expressing = expr > 0
@@ -235,13 +240,16 @@ async def top_genes(
         nnz = table.nnz[row].astype("int64")
         source = "strata"
     else:
+        if obs_column not in ds.anndata.obs_columns:
+            raise _unknown_column(ds, obs_column)
+        x = await _scannable_x(ds, obs_column)  # before reading the obs column
         categories = await _categorical(ds, obs_column)
         if group_value not in categories.categories:
             values = ", ".join(str(v) for v in list(categories.categories)[:MAX_RESULTS])
             raise QueryError(f"Group {group_value!r} not in {obs_column!r}. Values: {values}")
         mask = np.asarray(categories.codes) == categories.categories.get_loc(group_value)
         n_cells = int(mask.sum())
-        sum_x, nnz = await _scan_x_group_sums(ds, mask, obs_column)
+        sum_x, nnz = await _scan_x_group_sums(ds, x, mask)
         source = "cells"
 
     if n_cells == 0:
@@ -265,17 +273,19 @@ async def top_genes(
     }
 
 
-async def _scan_x_group_sums(
-    ds: OpenDataset, mask: np.ndarray, obs_column: str
-) -> tuple[np.ndarray, np.ndarray]:
-    elements = ds.n_obs * ds.n_vars
+async def _scannable_x(ds: OpenDataset, obs_column: str):
+    """The dense X array, if a full scan of it is within this server's limit."""
     x = await ds.dense_x()
-    if x is None or elements > MAX_X_SCAN_ELEMENTS:
+    if x is None or ds.n_obs * ds.n_vars > MAX_X_SCAN_ELEMENTS:
         raise QueryError(
             f"Top genes by {obs_column!r} needs a scan of the full expression matrix "
             f"({ds.n_obs:,} cells x {ds.n_vars:,} genes), which exceeds this server's limit."
             f"{_strata_hint(ds)}"
         )
+    return x
+
+
+async def _scan_x_group_sums(ds: OpenDataset, x, mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     sum_x = np.zeros(ds.n_vars, dtype="float64")
     nnz = np.zeros(ds.n_vars, dtype="int64")
     async with _x_semaphore:
