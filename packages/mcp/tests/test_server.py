@@ -43,6 +43,13 @@ async def test_list_datasets_hides_private_and_filters(client):
     assert [d["slug"] for d in by_text["datasets"]] == ["pbmc3k"]
 
 
+async def test_list_datasets_reports_collection_slug(client):
+    result = (await client.call_tool("list_datasets", {})).data
+    by_slug = {d["slug"]: d for d in result["datasets"]}
+    assert by_slug["strata-tiny"]["collection"] == "fixtures"
+    assert by_slug["pbmc3k"]["collection"] is None
+
+
 async def test_list_collections(client):
     result = (await client.call_tool("list_collections", {})).data
     assert result["collections"] == [{"slug": "fixtures", "name": "Fixtures", "dataset_count": 1}]

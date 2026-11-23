@@ -95,7 +95,8 @@ async def list_datasets(
             "slug": d["slug"],
             "name": d.get("name"),
             "description": d.get("description"),
-            "collection": d.get("collection"),
+            # Slug only; list_collections and get_dataset_info carry the details.
+            "collection": _collection_slug(d),
             "n_cells": metadata.get("n_obs"),
             "n_genes": metadata.get("n_vars"),
         })
