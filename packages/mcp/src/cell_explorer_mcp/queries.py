@@ -10,6 +10,10 @@ millions of cells, so every query is bounded.
 - Scanning all of X (top genes without strata) is allowed only up to
   MAX_X_SCAN_ELEMENTS cells x genes; larger requests are refused with a hint
   naming the columns that strata can answer.
+- Obs columns with more than MAX_DISTINCT_VALUES distinct values (per-cell
+  IDs) are refused for counting and grouping, from the catalog's metadata
+  before any read when it has them; free-text columns are counted only up
+  to MAX_STRING_COLUMN_CELLS cells.
 
 There is deliberately no differential-expression tool: an X-based DE reads the
 whole matrix. A strata-based one (Welch t-test from sum_x / sum_xx / n_cells)
@@ -17,6 +21,7 @@ fits within this policy if it is added.
 """
 
 import asyncio
+import os
 from collections import Counter
 from typing import Any
 
@@ -24,6 +29,9 @@ import numpy as np
 import pandas as pd
 
 from cell_explorer_mcp.zarr_cache import OpenDataset
+
+# Where refusals point users for data the server won't return.
+UI_URL = os.getenv("CELL_EXPLORER_URL", "https://cell-explorer.cbioportal.org").rstrip("/")
 
 MAX_RESULTS = 50
 MAX_OBS_VALUES = 500
@@ -64,15 +72,26 @@ async def _resolve_gene(ds: OpenDataset, gene: str) -> int:
         raise QueryError(f"Gene {gene!r} not found in dataset {ds.slug!r}.{hint}") from None
 
 
-async def _categorical(ds: OpenDataset, name: str) -> pd.Categorical:
-    try:
-        col = await ds.obs_column(name)
-    except KeyError:
-        raise QueryError(
-            f"Obs column {name!r} not found. Available: {', '.join(ds.anndata.obs_columns)}"
-        ) from None
-    if not isinstance(col, pd.Categorical):
+async def _categorical(ds: OpenDataset, name: str, entry: dict[str, Any] | None) -> pd.Categorical:
+    """A grouping column, refused from the catalog's metadata before any read
+    when it is not categorical or is a per-cell ID."""
+    if name not in ds.anndata.obs_columns:
+        raise _unknown_column(ds, name)
+    meta = _column_meta(entry, name) or {}
+    if meta.get("dtype") not in (None, "categorical"):
         raise QueryError(f"Obs column {name!r} is not categorical.")
+    if (meta.get("cardinality") or 0) > MAX_DISTINCT_VALUES:
+        raise _too_many_values(ds, name, meta["cardinality"])
+
+    col = await ds.obs_column(name)
+    # Same checks for datasets without catalog metadata; a refused column is
+    # not kept in the cache.
+    if not isinstance(col, pd.Categorical):
+        ds.drop_obs_column(name)
+        raise QueryError(f"Obs column {name!r} is not categorical.")
+    if len(col.categories) > MAX_DISTINCT_VALUES:
+        ds.drop_obs_column(name)
+        raise _too_many_values(ds, name, len(col.categories))
     return col
 
 
@@ -170,7 +189,7 @@ def _stats(sum_x: float, nnz: int, n_cells: int) -> dict[str, Any]:
 
 
 async def gene_expression(
-    ds: OpenDataset, gene: str, group_by: str | None = None
+    ds: OpenDataset, gene: str, group_by: str | None = None, entry: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     gene_idx = await _resolve_gene(ds, gene)
     symbol = (await ds.gene_symbols())[gene_idx]
@@ -207,7 +226,7 @@ async def gene_expression(
         return result
 
     _check_gene_column_read(ds)  # before reading the group_by column
-    categories = await _categorical(ds, group_by) if group_by else None
+    categories = await _categorical(ds, group_by, entry) if group_by else None
     expr = (await _read_gene_column(ds, gene_idx)).astype("float64", copy=False)
     expressing = expr > 0
     result["source"] = "cells"
@@ -231,7 +250,11 @@ async def gene_expression(
 
 
 async def top_genes(
-    ds: OpenDataset, obs_column: str, group_value: str, n: int = 20
+    ds: OpenDataset,
+    obs_column: str,
+    group_value: str,
+    n: int = 20,
+    entry: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     n = max(1, min(n, MAX_RESULTS))
     slug = ds.coarse_slug_for(obs_column)
@@ -250,7 +273,7 @@ async def top_genes(
         if obs_column not in ds.anndata.obs_columns:
             raise _unknown_column(ds, obs_column)
         x = await _scannable_x(ds, obs_column)  # before reading the obs column
-        categories = await _categorical(ds, obs_column)
+        categories = await _categorical(ds, obs_column, entry)
         if group_value not in categories.categories:
             values = ", ".join(str(v) for v in list(categories.categories)[:MAX_RESULTS])
             raise QueryError(f"Group {group_value!r} not in {obs_column!r}. Values: {values}")
@@ -322,10 +345,11 @@ def _unknown_column(ds: OpenDataset, name: str) -> QueryError:
     return QueryError(f"Obs column {name!r} not found. Available: {', '.join(ds.anndata.obs_columns)}")
 
 
-def _too_many_values(name: str, n_values: int) -> QueryError:
+def _too_many_values(ds: OpenDataset, name: str, n_values: int) -> QueryError:
     return QueryError(
         f"Obs column {name!r} has {n_values:,} distinct values (a per-cell ID, not a "
-        f"grouping), so it can't be counted or grouped by."
+        f"grouping), so it can't be counted or grouped by here. View it in Cell "
+        f"Explorer: {UI_URL}/{ds.slug}"
     )
 
 
@@ -345,7 +369,7 @@ async def obs_column_values(
     # Refuse from the catalog's metadata before reading anything.
     meta = _column_meta(entry, column) or {}
     if meta.get("dtype") == "categorical" and (meta.get("cardinality") or 0) > MAX_DISTINCT_VALUES:
-        raise _too_many_values(column, meta["cardinality"])
+        raise _too_many_values(ds, column, meta["cardinality"])
     if meta.get("dtype") == "string" and ds.n_obs > MAX_STRING_COLUMN_CELLS:
         raise _string_column_too_large(ds, column)
 
@@ -354,7 +378,7 @@ async def obs_column_values(
     # not kept in the cache.
     if isinstance(col, pd.Categorical) and len(col.categories) > MAX_DISTINCT_VALUES:
         ds.drop_obs_column(column)
-        raise _too_many_values(column, len(col.categories))
+        raise _too_many_values(ds, column, len(col.categories))
 
     if isinstance(col, pd.Categorical):
         counts = pd.Series(col).value_counts(dropna=False)

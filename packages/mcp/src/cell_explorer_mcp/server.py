@@ -151,8 +151,8 @@ async def gene_expression(
 ) -> dict[str, Any]:
     """Mean expression and fraction of expressing cells for one gene, overall and
     optionally per group of a categorical obs column (top 50 groups by mean)."""
-    ds, _ = await _open(dataset)
-    return await _run(queries.gene_expression(ds, gene, group_by))
+    ds, entry = await _open(dataset)
+    return await _run(queries.gene_expression(ds, gene, group_by, entry=entry))
 
 
 @mcp.tool()
@@ -165,8 +165,8 @@ async def top_genes(
     """Top-N genes by mean expression within one group of cells. Ranks by
     absolute expression, not specificity: housekeeping and ribosomal genes
     often lead."""
-    ds, _ = await _open(dataset)
-    return await _run(queries.top_genes(ds, obs_column, group_value, n))
+    ds, entry = await _open(dataset)
+    return await _run(queries.top_genes(ds, obs_column, group_value, n, entry=entry))
 
 
 @mcp.tool()

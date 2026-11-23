@@ -223,6 +223,38 @@ async def test_top_genes_adds_ids_only_for_shared_symbols(generated):
     assert by_id == {"ENSG00000287542": "HERC3", "ENSG00000138641": "HERC3", None: "CD3E"}
 
 
+PER_CELL_IDS = {"name": "cluster", "dtype": "categorical", "cardinality": 2_525_363}
+
+
+async def test_group_by_refuses_per_cell_ids_before_reading(generated, monkeypatch):
+    _forbid_reads(monkeypatch, generated)
+    with pytest.raises(QueryError, match=r"2,525,363 distinct values.*cell-explorer\.cbioportal\.org/generated"):
+        await queries.gene_expression(generated, "CD3E", group_by="cluster", entry=_entry(PER_CELL_IDS))
+
+
+async def test_top_genes_refuses_per_cell_ids_before_reading(generated, monkeypatch):
+    _forbid_reads(monkeypatch, generated)
+    with pytest.raises(QueryError, match="2,525,363 distinct values"):
+        await queries.top_genes(generated, "cluster", "c00", entry=_entry(PER_CELL_IDS))
+
+
+async def test_group_by_refuses_numeric_column_before_reading(pbmc, monkeypatch):
+    _forbid_reads(monkeypatch, pbmc)
+    entry = _entry({"name": "n_counts", "dtype": "numeric", "cardinality": None})
+    with pytest.raises(QueryError, match="not categorical"):
+        await queries.gene_expression(pbmc, "CD79A", group_by="n_counts", entry=entry)
+
+
+async def test_group_by_without_metadata_does_not_cache_refused_columns(generated, monkeypatch):
+    monkeypatch.setattr(queries, "MAX_DISTINCT_VALUES", 59)
+    with pytest.raises(QueryError, match="60 distinct values"):
+        await queries.gene_expression(generated, "CD3E", group_by="cluster")
+    with pytest.raises(QueryError, match="not categorical"):
+        await queries.gene_expression(generated, "CD3E", group_by="barcode")
+    assert "cluster" not in generated._obs_cache
+    assert "barcode" not in generated._obs_cache
+
+
 async def test_dataset_info(strata_tiny):
     entry = {
         "name": "Strata tiny",
