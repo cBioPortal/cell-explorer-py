@@ -1,8 +1,9 @@
 import asyncio
 
+import httpx
 import pytest
 
-from cell_explorer_mcp.catalog import DatasetNotFoundError
+from cell_explorer_mcp.catalog import CatalogClient, DatasetNotFoundError
 from cell_explorer_mcp.zarr_cache import DatasetCache
 
 from conftest import stub_catalog
@@ -68,6 +69,55 @@ async def test_catalog_refetches_after_ttl():
     await catalog.list_datasets()
     await catalog.list_datasets()
     assert calls == ["/api/datasets", "/api/datasets"]
+
+
+async def test_catalog_serves_last_good_list_when_refresh_fails():
+    api, calls = {"down": False}, []
+    catalog = stub_catalog("http://zarr.test", calls, api, ttl_seconds=0)
+    first = await catalog.list_datasets()
+    api["down"] = True
+    assert await catalog.list_datasets() == first
+    assert len(calls) == 2
+
+
+async def test_catalog_waits_before_retrying_a_failed_refresh():
+    api, calls = {"down": False}, []
+    catalog = stub_catalog("http://zarr.test", calls, api, ttl_seconds=0)
+    await catalog.list_datasets()
+    api["down"] = True
+    await catalog.list_datasets()
+    await catalog.list_datasets()
+    assert len(calls) == 2  # the third call is served without retrying
+
+
+async def test_catalog_retries_after_the_wait():
+    api, calls = {"down": False}, []
+    catalog = stub_catalog("http://zarr.test", calls, api, ttl_seconds=0, retry_after_seconds=0)
+    await catalog.list_datasets()
+    api["down"] = True
+    await catalog.list_datasets()
+    api["down"] = False
+    await catalog.list_datasets()
+    assert len(calls) == 3
+
+
+async def test_catalog_fails_without_a_previous_list():
+    catalog = stub_catalog("http://zarr.test", api={"down": True})
+    with pytest.raises(httpx.HTTPStatusError):
+        await catalog.list_datasets()
+
+
+async def test_catalog_stops_serving_a_list_past_its_max_age():
+    api = {"down": False}
+    catalog = stub_catalog("http://zarr.test", api=api, ttl_seconds=0, max_stale_seconds=0)
+    await catalog.list_datasets()
+    api["down"] = True
+    with pytest.raises(httpx.HTTPStatusError):
+        await catalog.list_datasets()
+
+
+def test_catalog_default_timeout_is_short():
+    assert CatalogClient()._client.timeout.read == 5.0
 
 
 async def test_catalog_unknown_slug():

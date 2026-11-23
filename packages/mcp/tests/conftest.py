@@ -139,12 +139,17 @@ def catalog_payload(base_url: str) -> dict:
     }
 
 
-def stub_catalog(base_url: str, calls: list[str] | None = None, **kwargs) -> CatalogClient:
+def stub_catalog(
+    base_url: str, calls: list[str] | None = None, api: dict | None = None, **kwargs
+) -> CatalogClient:
+    """api={"down": True} makes the stub answer 503 until it is set back."""
     payload = catalog_payload(base_url)
 
     def handler(request: httpx.Request) -> httpx.Response:
         if calls is not None:
             calls.append(request.url.path)
+        if api is not None and api.get("down"):
+            return httpx.Response(503)
         key = request.url.path.rsplit("/", 1)[-1]
         return httpx.Response(200, json={key: payload[key]})
 
