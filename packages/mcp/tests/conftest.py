@@ -55,6 +55,19 @@ def pbmc_adata():
     return ad.read_zarr(FIXTURES_DIR / "pbmc3k_v3.zarr")
 
 
+# Shape of the API's DatasetCollectionRef (routes/datasets.py).
+FIXTURES_COLLECTION = {
+    "slug": "fixtures",
+    "name": "Fixtures",
+    "publication_citation": "Doe et al. 2026",
+    "publication_url": None,
+    "license_name": "CC BY 4.0",
+    "license_url": None,
+    "source_url": None,
+    "attribution_note": None,
+}
+
+
 def catalog_payload(base_url: str) -> dict:
     return {
         "datasets": [
@@ -64,7 +77,7 @@ def catalog_payload(base_url: str) -> dict:
                 "description": "Synthetic fixture",
                 "is_public": True,
                 "url": f"{base_url}/strata-tiny.zarr",
-                "collection": "fixtures",
+                "collection": FIXTURES_COLLECTION,
                 "metadata": {"n_obs": 50, "n_vars": 10},
             },
             {

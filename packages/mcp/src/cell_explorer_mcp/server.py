@@ -68,6 +68,11 @@ async def _run(coro):
         raise ToolError(str(exc)) from exc
 
 
+def _collection_slug(dataset: dict[str, Any]) -> str | None:
+    # The API returns the collection as an object (DatasetCollectionRef) or null.
+    return (dataset.get("collection") or {}).get("slug")
+
+
 @mcp.tool()
 async def list_datasets(
     collection: Annotated[str | None, Field(description="Only datasets in this collection slug.")] = None,
@@ -80,7 +85,7 @@ async def list_datasets(
     for d in datasets:
         if not d.get("is_public", False):
             continue
-        if collection is not None and d.get("collection") != collection:
+        if collection is not None and _collection_slug(d) != collection:
             continue
         text = " ".join(str(d.get(k) or "") for k in ("slug", "name", "description")).lower()
         if q is not None and q not in text:
