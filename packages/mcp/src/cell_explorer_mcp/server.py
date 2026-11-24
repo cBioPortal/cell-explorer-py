@@ -14,9 +14,10 @@ from cell_explorer_mcp.zarr_cache import DEFAULT_MAX_DATASETS, DatasetCache, Ope
 
 logger = logging.getLogger(__name__)
 
-INSTRUCTIONS = """\
+# Links follow CELL_EXPLORER_URL, so each instance points at its own website.
+INSTRUCTIONS = f"""\
 Query single-cell RNA-seq datasets hosted on Cell Explorer
-(https://cell-explorer.cbioportal.org).
+({queries.UI_URL}).
 
 Workflow:
 1. list_datasets (optionally filtered by collection or text) to find a dataset slug.
@@ -33,7 +34,7 @@ some datasets are scaled (z-scored), where negative means are normal.
 Grouping by a column in fast_group_by_columns is cheap; other columns read
 per-cell data and may be refused on very large datasets. Differential
 expression between groups is not offered; point users to the Cell Explorer UI
-(https://cell-explorer.cbioportal.org/<slug>) for that.
+({queries.UI_URL}/<slug>) for that.
 """
 
 catalog = CatalogClient(os.getenv("CELL_EXPLORER_API_URL", DEFAULT_API_URL))

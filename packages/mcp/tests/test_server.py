@@ -1,5 +1,9 @@
 """End-to-end through the MCP protocol with an in-memory client."""
 
+import os
+import subprocess
+import sys
+
 import pytest
 import pytest_asyncio
 from fastmcp import Client
@@ -90,3 +94,13 @@ async def test_obs_column_values_accepts_limit_500(client):
 async def test_query_error_is_tool_error(client):
     with pytest.raises(ToolError, match="not found"):
         await client.call_tool("obs_column_values", {"dataset": "pbmc3k", "column": "nope"})
+
+
+def test_instructions_link_to_the_configured_cell_explorer():
+    # The URL is read at import, so check it in a fresh interpreter.
+    env = {**os.environ, "CELL_EXPLORER_URL": "https://btc.example.org"}
+    code = "from cell_explorer_mcp import server; print(server.mcp.instructions)"
+    out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True).stdout
+    assert "(https://btc.example.org)" in out
+    assert "(https://btc.example.org/<slug>)" in out
+    assert "cbioportal.org" not in out

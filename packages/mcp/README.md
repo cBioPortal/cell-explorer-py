@@ -48,7 +48,7 @@ MCP_TRANSPORT=http MCP_HOST=0.0.0.0 MCP_PORT=8000 uv run --package cell-explorer
 | `MCP_TRANSPORT` | `stdio` (`http`, `sse`) |
 | `MCP_HOST` / `MCP_PORT` / `MCP_HTTP_PATH` | `127.0.0.1` / `8000` / `/mcp` |
 | `CELL_EXPLORER_API_URL` | `https://cell-explorer.cbioportal.org/api` |
-| `CELL_EXPLORER_URL` | `https://cell-explorer.cbioportal.org` (linked from refusals) |
+| `CELL_EXPLORER_URL` | `https://cell-explorer.cbioportal.org` (the website linked from the server instructions and refusals) |
 | `CELL_EXPLORER_MCP_MAX_DATASETS` | `8` (open stores kept in the LRU cache) |
 
 Docker (build from the repo root):
