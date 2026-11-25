@@ -146,7 +146,28 @@ async def test_admin_revoke_invalidates_issued_tokens(client, engine):
     resp = await client.delete("/api/admin/oauth/grants/u1", headers=ADMIN)
     assert resp.json() == {"revoked": 0}
     # The revoked user's API token is now anonymous on dataset routes.
-    resp = await client.get("/api/datasets/nope", headers={"Authorization": f"Bearer {api}"})
-    assert resp.status_code in (401, 404)
-    resp = await client.post("/api/datasets/nope/access", headers={"Authorization": f"Bearer {api}"})
-    assert resp.status_code in (401, 404)
+    resp = await client.get("/api/datasets", headers={"Authorization": f"Bearer {api}"})
+    assert resp.status_code == 200
+    assert resp.json()["datasets"] == []
+
+
+async def test_reregistering_revoked_url_rotates_key(client, engine):
+    first = await _register(client)
+    async with AsyncSession(engine) as db:
+        grant = await store.create_grant(
+            db, user=User(sub="u1", email="u@x.org", name="U", roles=[]), client_id="c1", resource=RES
+        )
+        access, _ = await store.issue_token(db, grant=grant, kind="access", audience=RES)
+    form = {"grant_type": GRANT_TYPE, "subject_token": access, "subject_token_type": TOKEN_TYPE}
+    # Active URL stays 409.
+    dup = await client.post("/api/admin/mcp-resources", json={"url": RES, "name": "x"}, headers=ADMIN)
+    assert dup.status_code == 409
+    await client.delete(f"/api/admin/mcp-resources/{first['id']}", headers=ADMIN)
+    second = await _register(client, name="Renamed")
+    assert second["id"] == first["id"] and second["key"] != first["key"] and second["name"] == "Renamed"
+    old = await client.post(EXCHANGE, data=form, headers={"Authorization": f"Bearer {first['key']}"})
+    assert old.status_code == 401 and old.json() == {"error": "invalid_client"}
+    new = await client.post(EXCHANGE, data=form, headers={"Authorization": f"Bearer {second['key']}"})
+    assert new.status_code == 200
+    [row] = (await client.get("/api/admin/mcp-resources", headers=ADMIN)).json()["mcp_resources"]
+    assert row["revoked_at"] is None and row["name"] == "Renamed"

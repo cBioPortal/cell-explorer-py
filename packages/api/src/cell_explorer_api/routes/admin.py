@@ -24,9 +24,9 @@ from cell_explorer_api.db.models import (
 from cell_explorer_api.db.oauth_models import McpResource
 from cell_explorer_api.routes.datasets import _obs_columns_response
 from cell_explorer_api.schemas.obs import ObsColumnInfo
+from cell_explorer_api.services import oauth_store
 from cell_explorer_api.services.default_view import DefaultViewError, validate_default_view
 from cell_explorer_api.services.facets import resolve_facet
-from cell_explorer_api.services import oauth_store
 from cell_explorer_api.services.metadata_harvest import harvest_and_store
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
@@ -698,13 +698,17 @@ async def create_mcp_resource(
     body: McpResourceCreate, db: AsyncSession = Depends(get_db)
 ) -> McpResourceCreated:
     """Register an MCP server. The key is returned here once and never again."""
-    if await oauth_store.find_mcp_resource_by_url(db, body.url) is not None:
-        raise HTTPException(409, "An MCP resource with this URL already exists")
-    try:
-        key, resource = await oauth_store.create_mcp_resource(db, url=body.url, name=body.name)
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(409, "An MCP resource with this URL already exists")
+    existing = await oauth_store.find_mcp_resource_by_url(db, body.url)
+    if existing is not None:
+        if existing.revoked_at is None:
+            raise HTTPException(409, "An MCP resource with this URL already exists")
+        key, resource = await oauth_store.rotate_mcp_resource_key(db, existing, name=body.name)
+    else:
+        try:
+            key, resource = await oauth_store.create_mcp_resource(db, url=body.url, name=body.name)
+        except IntegrityError:
+            await db.rollback()
+            raise HTTPException(409, "An MCP resource with this URL already exists")
     return McpResourceCreated(id=str(resource.id), url=resource.url, name=resource.name, key=key)
 
 

@@ -127,6 +127,20 @@ async def create_mcp_resource(db: AsyncSession, *, url: str, name: str) -> tuple
     return key, resource
 
 
+async def rotate_mcp_resource_key(
+    db: AsyncSession, resource: McpResource, *, name: str
+) -> tuple[str, McpResource]:
+    """Re-register a revoked resource: same row, new key; the plaintext is returned once."""
+    key = secrets.token_urlsafe(32)
+    resource.key_hash = hash_secret(key)
+    resource.name = name
+    resource.revoked_at = None
+    db.add(resource)
+    await db.commit()
+    await db.refresh(resource)
+    return key, resource
+
+
 async def find_mcp_resource_by_key(db: AsyncSession, key: str) -> McpResource | None:
     result = await db.exec(
         select(McpResource).where(

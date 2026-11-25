@@ -150,7 +150,8 @@ An MCP server that signs users in through this API is registered once with the a
 `key` is shown only in the create response; store it as the MCP server's secret.
 
 ```bash
-# Register (url must be absolute https; http only for localhost). 409 if the URL is already registered.
+# Register (url must be absolute https; http only for localhost). 409 if the URL is already registered and active;
+# re-registering a revoked URL rotates it: same row, new key, old key stays dead.
 curl -X POST "$API/api/admin/mcp-resources" -H "Authorization: Bearer $ADMIN_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"url": "https://mcp.example.org/mcp", "name": "Signed-in MCP"}'
