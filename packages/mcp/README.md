@@ -52,6 +52,12 @@ Over HTTP one process can serve two addresses:
   metadata names Cell Explorer (`<CELL_EXPLORER_URL>/api/oauth`) as the
   authorization server.
 
+The protected-resource metadata (RFC 9728) is served at the **host root**, path
+inserted: `/.well-known/oauth-protected-resource<MCP_SIGNED_IN_HTTP_PATH>`
+(e.g. `/.well-known/oauth-protected-resource/signed-in/mcp`). Clients find it
+through the `WWW-Authenticate` challenge, so a reverse proxy in front of the
+server must route that path to the MCP Service too, not just the MCP paths.
+
 Add one address to a client, not both: the signed-in address also serves every
 public dataset.
 
@@ -62,8 +68,8 @@ public dataset.
 | `CELL_EXPLORER_API_URL` | `https://cell-explorer.cbioportal.org/api` (may be an internal address; tokens are exchanged at `<CELL_EXPLORER_API_URL>/oauth/token-exchange`) |
 | `CELL_EXPLORER_URL` | `https://cell-explorer.cbioportal.org` (the website linked from the server instructions and refusals; must be the API's public URL, as clients sign in there) |
 | `CELL_EXPLORER_MCP_KEY` | unset (the key Cell Explorer issued for this MCP server; enables the signed-in address) |
-| `MCP_SIGNED_IN_HTTP_PATH` | `/signed-in/mcp` |
-| `MCP_PUBLIC_URL` | unset (public URL of the signed-in address, e.g. `https://mcp.example.org/signed-in/mcp`; required with the key, must end with `MCP_SIGNED_IN_HTTP_PATH`) |
+| `MCP_SIGNED_IN_HTTP_PATH` | `/signed-in/mcp` (must differ from `MCP_HTTP_PATH`) |
+| `MCP_PUBLIC_URL` | unset (public URL of the signed-in address, e.g. `https://mcp.example.org/signed-in/mcp`; required with the key, an absolute http(s) URL ending with `MCP_SIGNED_IN_HTTP_PATH`; register exactly this URL with Cell Explorer) |
 | `CELL_EXPLORER_MCP_MAX_DATASETS` | `8` (open stores kept in the LRU cache) |
 
 Docker (build from the repo root):
