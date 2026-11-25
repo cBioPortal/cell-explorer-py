@@ -34,7 +34,7 @@ some datasets are scaled (z-scored), where negative means are normal.
 Grouping by a column in fast_group_by_columns is cheap; other columns read
 per-cell data and may be refused on very large datasets. Differential
 expression between groups is not offered; point users to the Cell Explorer UI
-({queries.UI_URL}/<slug>) for that.
+({queries.UI_URL}/view?dataset=<slug>) for that.
 """
 
 catalog = CatalogClient(os.getenv("CELL_EXPLORER_API_URL", DEFAULT_API_URL))

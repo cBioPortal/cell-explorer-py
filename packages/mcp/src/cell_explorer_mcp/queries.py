@@ -24,6 +24,7 @@ import asyncio
 import os
 from collections import Counter
 from typing import Any
+from urllib.parse import quote
 
 import numpy as np
 import pandas as pd
@@ -345,11 +346,16 @@ def _unknown_column(ds: OpenDataset, name: str) -> QueryError:
     return QueryError(f"Obs column {name!r} not found. Available: {', '.join(ds.anndata.obs_columns)}")
 
 
+def dataset_url(slug: str) -> str:
+    """The dataset's page in the Cell Explorer UI (the frontend's /view route)."""
+    return f"{UI_URL}/view?dataset={quote(slug, safe='')}"
+
+
 def _too_many_values(ds: OpenDataset, name: str, n_values: int) -> QueryError:
     return QueryError(
         f"Obs column {name!r} has {n_values:,} distinct values (a per-cell ID, not a "
         f"grouping), so it can't be counted or grouped by here. View it in Cell "
-        f"Explorer: {UI_URL}/{ds.slug}"
+        f"Explorer: {dataset_url(ds.slug)}"
     )
 
 

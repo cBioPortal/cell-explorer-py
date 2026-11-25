@@ -102,5 +102,5 @@ def test_instructions_link_to_the_configured_cell_explorer():
     code = "from cell_explorer_mcp import server; print(server.mcp.instructions)"
     out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True).stdout
     assert "(https://btc.example.org)" in out
-    assert "(https://btc.example.org/<slug>)" in out
+    assert "(https://btc.example.org/view?dataset=<slug>)" in out
     assert "cbioportal.org" not in out

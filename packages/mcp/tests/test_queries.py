@@ -228,8 +228,15 @@ PER_CELL_IDS = {"name": "cluster", "dtype": "categorical", "cardinality": 2_525_
 
 async def test_group_by_refuses_per_cell_ids_before_reading(generated, monkeypatch):
     _forbid_reads(monkeypatch, generated)
-    with pytest.raises(QueryError, match=r"2,525,363 distinct values.*cell-explorer\.cbioportal\.org/generated"):
+    with pytest.raises(QueryError, match=r"2,525,363 distinct values.*cell-explorer\.cbioportal\.org/view\?dataset=generated"):
         await queries.gene_expression(generated, "CD3E", group_by="cluster", entry=_entry(PER_CELL_IDS))
+
+
+async def test_explorer_link_encodes_the_slug(generated, monkeypatch):
+    # Encoded like the frontend's encodeURIComponent, so "/" becomes %2F too.
+    monkeypatch.setattr(generated, "slug", "a b/c")
+    with pytest.raises(QueryError, match=r"/view\?dataset=a%20b%2Fc$"):
+        await queries.obs_column_values(generated, "cluster", entry=_entry(PER_CELL_IDS))
 
 
 async def test_top_genes_refuses_per_cell_ids_before_reading(generated, monkeypatch):
