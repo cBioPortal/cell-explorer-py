@@ -11,7 +11,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from cell_explorer_api.auth.models import User
 from cell_explorer_api.auth.optional import optional_auth
 from cell_explorer_api.config import Settings
-from cell_explorer_api.db.models import Dataset, Datasource, DatasourceType
+from cell_explorer_api.db.models import Collection, Dataset, Datasource, DatasourceType
 from cell_explorer_api.main import create_app
 from cell_explorer_api.services import oauth_store as store
 
@@ -45,9 +45,12 @@ async def world(engine, monkeypatch):
         db.add(src)
         await db.flush()
         for slug, flag in (("hidden", False), ("exposed", True)):
+            col = Collection(name=f"{slug} study", slug=f"{slug}-study")
+            db.add(col)
+            await db.flush()
             db.add(Dataset(
-                datasource_id=src.id, name=slug, slug=slug, path=f"{slug}.zarr",
-                is_public=False, required_roles=["r"], mcp_enabled=flag,
+                datasource_id=src.id, collection_id=col.id, name=slug, slug=slug,
+                path=f"{slug}.zarr", is_public=False, required_roles=["r"], mcp_enabled=flag,
             ))
         await db.commit()
         user = User(sub="u1", email="u@example.org", name="U", roles=["r", "admin"])
@@ -58,8 +61,8 @@ async def world(engine, monkeypatch):
         return tokens
 
 
-@pytest_asyncio.fixture
-async def app(engine, world):
+@pytest_asyncio.fixture(params=[BASE])
+async def app(engine, world, request):
     app = create_app(Settings(
         database_url="sqlite+aiosqlite://",
         admin_api_key=ADMIN_KEY,
@@ -67,7 +70,7 @@ async def app(engine, world):
         keycloak_realm="test-realm",
         keycloak_client_id="test-client",
         keycloak_client_secret="test-secret",
-        public_url=BASE,
+        public_url=request.param,
     ))
     await app.state.db_engine.dispose()
     app.state.db_engine = engine
@@ -125,3 +128,21 @@ async def test_bearer_call_sets_no_cookies(client, world):
 async def test_api_token_is_not_admin(client, world):
     resp = await client.get("/api/admin/datasets", headers=_bearer(world["api"]))
     assert resp.status_code == 403
+
+
+async def test_collections_with_api_token(client, world):
+    h = _bearer(world["api"])
+    listed = (await client.get("/api/collections", headers=h)).json()["collections"]
+    assert [c["slug"] for c in listed] == ["exposed-study"]
+    assert (await client.get("/api/collections/exposed-study", headers=h)).status_code == 200
+    assert (await client.get("/api/collections/hidden-study", headers=h)).status_code == 404
+
+
+async def test_collections_hidden_from_anonymous(client):
+    assert (await client.get("/api/collections")).json()["collections"] == []
+    assert (await client.get("/api/collections/exposed-study")).status_code == 404
+
+
+@pytest.mark.parametrize("app", [None], indirect=True)
+async def test_api_token_is_anonymous_when_oauth_off(client, world):
+    assert await _slugs(client, _bearer(world["api"])) == []
