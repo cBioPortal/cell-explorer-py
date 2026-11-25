@@ -144,6 +144,23 @@ and remain supported aliases for the generic names above.
 | `ANON_CHAT_PER_DAY` | `10000` | Signed-out questions per UTC day for the whole deployment: the ceiling on what signed-out chat can cost. Signed-in users are never counted |
 | `CLI_STATE_SECRET` | unset | Signs the CLI login callback state |
 
+### Registering an MCP server (signed-in tier)
+
+An MCP server that signs users in through this API is registered once with the admin API. The
+`key` is shown only in the create response; store it as the MCP server's secret.
+
+```bash
+# Register (url must be absolute https; http only for localhost). 409 if the URL is already registered.
+curl -X POST "$API/api/admin/mcp-resources" -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://mcp.example.org/mcp", "name": "Signed-in MCP"}'
+# -> 201 {"id": "...", "url": "...", "name": "...", "key": "..."}
+
+curl "$API/api/admin/mcp-resources" -H "Authorization: Bearer $ADMIN_API_KEY"      # list (no keys)
+curl -X DELETE "$API/api/admin/mcp-resources/$ID" -H "Authorization: Bearer $ADMIN_API_KEY"  # revoke the key (204)
+curl -X DELETE "$API/api/admin/oauth/grants/$USER_SUB" -H "Authorization: Bearer $ADMIN_API_KEY"  # end a user's MCP connections -> {"revoked": N}
+```
+
 ## Branding
 
 `BRAND_DIR` (see [Configuration](#configuration) above) points at an operator-supplied

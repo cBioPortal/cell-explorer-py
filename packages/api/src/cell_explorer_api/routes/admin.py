@@ -3,9 +3,10 @@
 import uuid
 from collections import Counter
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -20,10 +21,12 @@ from cell_explorer_api.db.models import (
     DatasourceType,
     utcnow,
 )
+from cell_explorer_api.db.oauth_models import McpResource
 from cell_explorer_api.routes.datasets import _obs_columns_response
 from cell_explorer_api.schemas.obs import ObsColumnInfo
 from cell_explorer_api.services.default_view import DefaultViewError, validate_default_view
 from cell_explorer_api.services.facets import resolve_facet
+from cell_explorer_api.services import oauth_store
 from cell_explorer_api.services.metadata_harvest import harvest_and_store
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
@@ -641,3 +644,96 @@ async def delete_collection(
     await db.delete(collection)
     await db.commit()
     return Response(status_code=204)
+
+
+# --- MCP resources and OAuth connections ---
+
+_LOCAL_HOSTS = {"localhost", "127.0.0.1"}
+
+
+class McpResourceCreate(BaseModel):
+    url: str
+    name: str
+
+    @field_validator("url")
+    @classmethod
+    def _absolute_https(cls, v: str) -> str:
+        try:
+            parts = urlparse(v)
+            host = parts.hostname
+        except ValueError as exc:
+            raise ValueError("url must be an absolute https URL") from exc
+        if not host or not (
+            parts.scheme == "https" or (parts.scheme == "http" and host in _LOCAL_HOSTS)
+        ):
+            raise ValueError("url must be an absolute https URL (http only for localhost)")
+        return v
+
+
+class McpResourceCreated(BaseModel):
+    id: str
+    url: str
+    name: str
+    key: str
+
+
+class McpResourceResponse(BaseModel):
+    id: str
+    url: str
+    name: str
+    created_at: datetime
+    revoked_at: datetime | None
+
+
+class McpResourceListResponse(BaseModel):
+    mcp_resources: list[McpResourceResponse]
+
+
+class GrantsRevokedResponse(BaseModel):
+    revoked: int
+
+
+@router.post("/mcp-resources", status_code=201)
+async def create_mcp_resource(
+    body: McpResourceCreate, db: AsyncSession = Depends(get_db)
+) -> McpResourceCreated:
+    """Register an MCP server. The key is returned here once and never again."""
+    if await oauth_store.find_mcp_resource_by_url(db, body.url) is not None:
+        raise HTTPException(409, "An MCP resource with this URL already exists")
+    try:
+        key, resource = await oauth_store.create_mcp_resource(db, url=body.url, name=body.name)
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(409, "An MCP resource with this URL already exists")
+    return McpResourceCreated(id=str(resource.id), url=resource.url, name=resource.name, key=key)
+
+
+@router.get("/mcp-resources")
+async def list_mcp_resources(db: AsyncSession = Depends(get_db)) -> McpResourceListResponse:
+    result = await db.exec(select(McpResource).order_by(McpResource.created_at))
+    return McpResourceListResponse(
+        mcp_resources=[
+            McpResourceResponse(
+                id=str(r.id), url=r.url, name=r.name, created_at=r.created_at, revoked_at=r.revoked_at
+            )
+            for r in result.all()
+        ]
+    )
+
+
+@router.delete("/mcp-resources/{resource_id}", status_code=204)
+async def revoke_mcp_resource(resource_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> Response:
+    resource = await db.get(McpResource, resource_id)
+    if resource is None:
+        raise HTTPException(404, "MCP resource not found")
+    if resource.revoked_at is None:
+        resource.revoked_at = utcnow()
+        db.add(resource)
+        await db.commit()
+    return Response(status_code=204)
+
+
+@router.delete("/oauth/grants/{user_sub}")
+async def revoke_user_grants(user_sub: str, db: AsyncSession = Depends(get_db)) -> GrantsRevokedResponse:
+    """End all of a user's MCP connections; their tokens stop working at once."""
+    return GrantsRevokedResponse(revoked=await oauth_store.revoke_user_grants(db, user_sub))
