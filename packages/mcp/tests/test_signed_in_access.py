@@ -217,3 +217,20 @@ async def test_list_datasets_description_per_address(as_user):
     assert {k: v for k, v in signed_in.items() if k != "list_datasets"} == {
         k: v for k, v in open_.items() if k != "list_datasets"
     }
+
+
+@pytest.mark.parametrize("sub", ["", None])
+async def test_private_store_refused_without_user_sub(fixture_server, monkeypatch, api, api_log, opener, sub):
+    monkeypatch.setattr(server, "catalog", stub_catalog(fixture_server, api=api, log=api_log))
+    monkeypatch.setattr(server, "cache", DatasetCache(opener=opener))
+    user = AuthenticatedUser(AccessToken(
+        token="mcp-alice", client_id="cell-explorer", scopes=[], claims={"api_token": "api-alice", "sub": sub},
+    ))
+    reset = auth_context_var.set(user)
+    try:
+        async with Client(server.build_server(signed_in=True)) as client:
+            with pytest.raises(ToolError, match="signed-in user"):
+                await client.call_tool("get_dataset_info", {"dataset": "secret"})
+    finally:
+        auth_context_var.reset(reset)
+    assert opener.opened == []

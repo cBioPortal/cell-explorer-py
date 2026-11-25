@@ -121,6 +121,25 @@ def test_public_url_must_end_with_signed_in_path(env):
         app_module.build_http_app()
 
 
+@pytest.mark.parametrize("path", ["/mcp", "/mcp/"])
+def test_signed_in_path_must_differ_from_open_path(env, path):
+    env.setenv("CELL_EXPLORER_MCP_KEY", "mcp-key")
+    env.setenv("MCP_SIGNED_IN_HTTP_PATH", path)
+    env.setenv("MCP_PUBLIC_URL", "https://mcp.test/mcp")
+    with pytest.raises(RuntimeError, match="MCP_SIGNED_IN_HTTP_PATH must differ from MCP_HTTP_PATH"):
+        app_module.build_http_app()
+
+
+@pytest.mark.parametrize(
+    "url", ["/signed-in/mcp", "mcp.test/signed-in/mcp", "ftp://mcp.test/signed-in/mcp", "https:///signed-in/mcp"]
+)
+def test_public_url_must_be_absolute_http(env, url):
+    env.setenv("CELL_EXPLORER_MCP_KEY", "mcp-key")
+    env.setenv("MCP_PUBLIC_URL", url)
+    with pytest.raises(RuntimeError, match="absolute http"):
+        app_module.build_http_app()
+
+
 class _FakeVerifier(fastmcp.server.auth.auth.TokenVerifier):
     def __init__(self, *, exchange_url, mcp_key):
         super().__init__()

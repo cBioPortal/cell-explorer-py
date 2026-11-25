@@ -1,6 +1,7 @@
 """HTTP app: the open address, plus the signed-in address when an MCP key is set."""
 
 import os
+from urllib.parse import urlsplit
 
 from fastmcp.server.auth import RemoteAuthProvider
 from fastmcp.utilities.lifespan import combine_lifespans
@@ -18,15 +19,21 @@ DEFAULT_SIGNED_IN_HTTP_PATH = "/signed-in/mcp"
 def build_http_app() -> Starlette:
     """Serve the open server at MCP_HTTP_PATH and, with CELL_EXPLORER_MCP_KEY
     set, the signed-in server at MCP_SIGNED_IN_HTTP_PATH."""
-    open_app = server.mcp.http_app(path=os.getenv("MCP_HTTP_PATH", DEFAULT_HTTP_PATH))
+    open_path = os.getenv("MCP_HTTP_PATH", DEFAULT_HTTP_PATH)
+    open_app = server.mcp.http_app(path=open_path)
     mcp_key = os.getenv("CELL_EXPLORER_MCP_KEY")
     if not mcp_key:
         return open_app
 
     signed_in_path = os.getenv("MCP_SIGNED_IN_HTTP_PATH", DEFAULT_SIGNED_IN_HTTP_PATH)
+    if signed_in_path.rstrip("/") == open_path.rstrip("/"):
+        raise RuntimeError(f"MCP_SIGNED_IN_HTTP_PATH must differ from MCP_HTTP_PATH ({open_path})")
     public_url = os.getenv("MCP_PUBLIC_URL", "").rstrip("/")
     if not public_url:
         raise RuntimeError("MCP_PUBLIC_URL must be set when CELL_EXPLORER_MCP_KEY is set")
+    parts = urlsplit(public_url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise RuntimeError(f"MCP_PUBLIC_URL must be an absolute http(s) URL, got {public_url!r}")
     if not public_url.endswith(signed_in_path):
         raise RuntimeError(f"MCP_PUBLIC_URL must end with MCP_SIGNED_IN_HTTP_PATH ({signed_in_path})")
 

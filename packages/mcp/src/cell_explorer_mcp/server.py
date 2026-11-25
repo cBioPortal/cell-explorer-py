@@ -103,6 +103,9 @@ async def _open_private(slug: str, api_token: str) -> OpenDataset:
     /access is asked on every call, so a cached store is only served while the
     user's own access still holds.
     """
+    owner = current_user_sub()
+    if not owner:  # never share a private store under an empty owner
+        raise ToolError("No signed-in user for this request; sign in again.")
     try:
         credential = await catalog.access(slug, api_token=api_token)
     except DatasetAccessDeniedError:
@@ -111,7 +114,7 @@ async def _open_private(slug: str, api_token: str) -> OpenDataset:
         slug,
         credential["url"],
         headers=credential_headers(credential),
-        owner=current_user_sub(),
+        owner=owner,
         ttl=PRIVATE_STORE_TTL_SECONDS,
     )
 

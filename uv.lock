@@ -718,6 +718,7 @@ dependencies = [
     { name = "fastmcp" },
     { name = "httpx" },
     { name = "numpy" },
+    { name = "uvicorn" },
     { name = "zarr-access" },
 ]
 
@@ -734,6 +735,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.25.0" },
+    { name = "uvicorn", specifier = ">=0.41.0" },
     { name = "zarr-access", editable = "packages/zarr-access" },
 ]
 provides-extras = ["test"]
