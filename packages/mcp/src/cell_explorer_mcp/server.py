@@ -4,8 +4,10 @@ import logging
 import os
 from typing import Annotated, Any
 
+import fastmcp
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
+from fastmcp.server.auth import AuthProvider
 from pydantic import Field
 
 from cell_explorer_mcp import queries
@@ -47,8 +49,6 @@ can compare groups if chat is enabled for that dataset.
 catalog = CatalogClient(os.getenv("CELL_EXPLORER_API_URL", DEFAULT_API_URL))
 cache = DatasetCache(maxsize=int(os.getenv("CELL_EXPLORER_MCP_MAX_DATASETS", DEFAULT_MAX_DATASETS)))
 
-mcp = FastMCP(name="Cell Explorer MCP Server", instructions=INSTRUCTIONS)
-
 # Gene symbols and IDs (including versioned Ensembl IDs) are far shorter; the
 # limit bounds the per-character rescan behind unknown-gene suggestions.
 MAX_GENE_NAME = 64
@@ -88,7 +88,6 @@ def _collection_slug(dataset: dict[str, Any]) -> str | None:
     return (dataset.get("collection") or {}).get("slug")
 
 
-@mcp.tool()
 async def list_datasets(
     collection: Annotated[str | None, Field(description="Only datasets in this collection slug.")] = None,
     query: Annotated[str | None, Field(description="Case-insensitive text filter on slug, name and description.")] = None,
@@ -118,7 +117,6 @@ async def list_datasets(
     return {"n_datasets": len(out), "datasets": out}
 
 
-@mcp.tool()
 async def list_collections() -> dict[str, Any]:
     """List dataset collections (groups of related datasets, e.g. from one study)."""
     collections = await catalog.list_collections()
@@ -130,7 +128,6 @@ async def list_collections() -> dict[str, Any]:
     }
 
 
-@mcp.tool()
 async def get_dataset_info(dataset: DatasetSlug) -> dict[str, Any]:
     """Dataset overview: cell and gene counts, obs (cell metadata) columns with
     types and number of distinct values, var columns, embeddings, and the
@@ -140,7 +137,6 @@ async def get_dataset_info(dataset: DatasetSlug) -> dict[str, Any]:
     return await _run(queries.dataset_info(ds, entry))
 
 
-@mcp.tool()
 async def search_genes(
     dataset: DatasetSlug,
     query: Annotated[str, Field(description="Gene symbol or ID substring, case-insensitive.", max_length=MAX_GENE_NAME)],
@@ -151,7 +147,6 @@ async def search_genes(
     return await _run(queries.search_genes(ds, query, limit))
 
 
-@mcp.tool()
 async def gene_expression(
     dataset: DatasetSlug,
     gene: Annotated[str, Field(description="Gene symbol or ID.", max_length=MAX_GENE_NAME)],
@@ -163,7 +158,6 @@ async def gene_expression(
     return await _run(queries.gene_expression(ds, gene, group_by, entry=entry))
 
 
-@mcp.tool()
 async def top_genes(
     dataset: DatasetSlug,
     obs_column: Annotated[str, Field(description="Categorical obs column, e.g. a cell type column.")],
@@ -178,7 +172,6 @@ async def top_genes(
     return await _run(queries.top_genes(ds, obs_column, group_value, n, entry=entry))
 
 
-@mcp.tool()
 async def obs_column_values(
     dataset: DatasetSlug,
     column: Annotated[str, Field(description="Obs (cell metadata) column name.")],
@@ -190,17 +183,54 @@ async def obs_column_values(
     return await _run(queries.obs_column_values(ds, column, limit, entry=entry))
 
 
+TOOLS = (
+    list_datasets,
+    list_collections,
+    get_dataset_info,
+    search_genes,
+    gene_expression,
+    top_genes,
+    obs_column_values,
+)
+
+
+def build_server(*, signed_in: bool, auth: AuthProvider | None = None) -> FastMCP:
+    """One MCP server; the signed-in one requires a Cell Explorer sign-in."""
+    name = "Cell Explorer MCP Server (signed in)" if signed_in else "Cell Explorer MCP Server"
+    server = FastMCP(name=name, instructions=INSTRUCTIONS, auth=auth)
+    for tool in TOOLS:
+        server.tool(tool)
+    return server
+
+
+# The open server: stdio, and the open HTTP address.
+mcp = build_server(signed_in=False)
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     transport = os.getenv("MCP_TRANSPORT", "stdio")
     if transport == "stdio":
         mcp.run()
         return
-    mcp.run(
-        transport=transport,
-        host=os.getenv("MCP_HOST", "127.0.0.1"),
-        port=int(os.getenv("MCP_PORT", "8000")),
-        path=os.getenv("MCP_HTTP_PATH", "/mcp"),
+    host = os.getenv("MCP_HOST", "127.0.0.1")
+    port = int(os.getenv("MCP_PORT", "8000"))
+    if transport == "sse":
+        # Legacy transport: the open address only.
+        mcp.run(transport=transport, host=host, port=port, path=os.getenv("MCP_HTTP_PATH", "/mcp"))
+        return
+    if transport not in ("http", "streamable-http"):
+        raise ValueError(f"Unknown MCP_TRANSPORT {transport!r}")
+    import uvicorn
+
+    from cell_explorer_mcp.app import build_http_app
+
+    uvicorn.run(
+        build_http_app(),
+        host=host,
+        port=port,
+        timeout_graceful_shutdown=2,
+        log_level=fastmcp.settings.log_level.lower(),
     )
 
 

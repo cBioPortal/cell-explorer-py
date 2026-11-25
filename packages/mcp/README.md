@@ -43,12 +43,27 @@ uv run --package cell-explorer-mcp cell-explorer-mcp
 MCP_TRANSPORT=http MCP_HOST=0.0.0.0 MCP_PORT=8000 uv run --package cell-explorer-mcp cell-explorer-mcp
 ```
 
+Over HTTP one process can serve two addresses:
+
+- **Open** (`MCP_HTTP_PATH`, default `/mcp`): anonymous, public datasets only.
+- **Signed in** (`MCP_SIGNED_IN_HTTP_PATH`, default `/signed-in/mcp`): served
+  only when `CELL_EXPLORER_MCP_KEY` is set. Clients sign in through Cell
+  Explorer (OAuth); every request needs a valid token. Its protected-resource
+  metadata names Cell Explorer (`<CELL_EXPLORER_URL>/api/oauth`) as the
+  authorization server.
+
+Add one address to a client, not both: the signed-in address also serves every
+public dataset.
+
 | Variable | Default |
 |---|---|
-| `MCP_TRANSPORT` | `stdio` (`http`, `sse`) |
+| `MCP_TRANSPORT` | `stdio` (`http`, `sse`; `sse` serves the open address only) |
 | `MCP_HOST` / `MCP_PORT` / `MCP_HTTP_PATH` | `127.0.0.1` / `8000` / `/mcp` |
-| `CELL_EXPLORER_API_URL` | `https://cell-explorer.cbioportal.org/api` |
-| `CELL_EXPLORER_URL` | `https://cell-explorer.cbioportal.org` (the website linked from the server instructions and refusals) |
+| `CELL_EXPLORER_API_URL` | `https://cell-explorer.cbioportal.org/api` (may be an internal address; tokens are exchanged at `<CELL_EXPLORER_API_URL>/oauth/token-exchange`) |
+| `CELL_EXPLORER_URL` | `https://cell-explorer.cbioportal.org` (the website linked from the server instructions and refusals; must be the API's public URL, as clients sign in there) |
+| `CELL_EXPLORER_MCP_KEY` | unset (the key Cell Explorer issued for this MCP server; enables the signed-in address) |
+| `MCP_SIGNED_IN_HTTP_PATH` | `/signed-in/mcp` |
+| `MCP_PUBLIC_URL` | unset (public URL of the signed-in address, e.g. `https://mcp.example.org/signed-in/mcp`; required with the key, must end with `MCP_SIGNED_IN_HTTP_PATH`) |
 | `CELL_EXPLORER_MCP_MAX_DATASETS` | `8` (open stores kept in the LRU cache) |
 
 Docker (build from the repo root):
