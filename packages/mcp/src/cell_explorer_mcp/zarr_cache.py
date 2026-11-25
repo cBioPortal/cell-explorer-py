@@ -1,6 +1,7 @@
 """Opened AnnData zarr stores, cached across tool calls by dataset slug."""
 
 import asyncio
+import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 
@@ -152,42 +153,80 @@ class OpenDataset:
         return self._coarse_cache[slug]
 
 
-async def open_dataset(slug: str, url: str) -> OpenDataset:
-    zarr_store = await ZarrStore.open(url)
+async def open_dataset(slug: str, url: str, headers: dict[str, str] | None = None) -> OpenDataset:
+    zarr_store = await ZarrStore.open(url, headers=headers)
     anndata = await AnnDataStore.open(zarr_store)
     strata = await StrataStore.open(zarr_store)
     return OpenDataset(slug=slug, url=url, zarr=zarr_store, anndata=anndata, strata=strata)
 
 
+CacheKey = tuple[str, str | None]
+
+
 class DatasetCache:
-    """LRU of OpenDataset keyed by slug.
+    """LRU of OpenDataset keyed by (slug, owner).
+
+    Public stores have owner None and are shared. A private store is opened
+    with its owner's credential headers, keyed by that owner, and expires
+    after ttl seconds (before the credential does), so it is never served to
+    anyone else nor past its credential.
 
     An entry whose URL no longer matches the catalog (dataset re-ingested to a
-    new location) is reopened. Concurrent requests for the same slug share one
+    new location) is reopened. Concurrent requests for the same key share one
     open.
     """
 
     def __init__(self, maxsize: int = DEFAULT_MAX_DATASETS, opener=open_dataset) -> None:
         self._maxsize = maxsize
         self._opener = opener
-        self._entries: OrderedDict[str, OpenDataset] = OrderedDict()
-        self._opening: dict[str, asyncio.Lock] = {}
+        self._entries: OrderedDict[CacheKey, tuple[OpenDataset, float]] = OrderedDict()
+        self._opening: dict[CacheKey, asyncio.Lock] = {}
 
-    async def get(self, slug: str, url: str) -> OpenDataset:
-        entry = self._entries.get(slug)
-        if entry is not None and entry.url == url:
-            self._entries.move_to_end(slug)
+    def _fresh(self, key: CacheKey, url: str | None) -> OpenDataset | None:
+        hit = self._entries.get(key)
+        if hit is None:
+            return None
+        entry, expires_at = hit
+        if time.monotonic() >= expires_at:
+            del self._entries[key]
+            return None
+        if url is not None and entry.url != url:
+            return None
+        self._entries.move_to_end(key)
+        return entry
+
+    def peek(self, slug: str, *, owner: str | None = None) -> OpenDataset | None:
+        """The unexpired entry for (slug, owner), whatever its URL."""
+        return self._fresh((slug, owner), None)
+
+    async def get(
+        self,
+        slug: str,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        owner: str | None = None,
+        ttl: float | None = None,
+    ) -> OpenDataset:
+        key = (slug, owner)
+        entry = self._fresh(key, url)
+        if entry is not None:
             return entry
 
-        lock = self._opening.setdefault(slug, asyncio.Lock())
+        lock = self._opening.setdefault(key, asyncio.Lock())
         async with lock:
-            entry = self._entries.get(slug)
-            if entry is not None and entry.url == url:
-                self._entries.move_to_end(slug)
+            entry = self._fresh(key, url)
+            if entry is not None:
                 return entry
-            entry = await self._opener(slug, url)
-            self._entries[slug] = entry
-            self._entries.move_to_end(slug)
+            try:
+                entry = await self._opener(slug, url, headers=headers)
+            finally:
+                # Keys include owners, so locks must not pile up; waiters
+                # already holding this one still find the stored entry.
+                self._opening.pop(key, None)
+            expires_at = float("inf") if ttl is None else time.monotonic() + ttl
+            self._entries[key] = (entry, expires_at)
+            self._entries.move_to_end(key)
             while len(self._entries) > self._maxsize:
                 self._entries.popitem(last=False)
             return entry
@@ -195,5 +234,5 @@ class DatasetCache:
     def __len__(self) -> int:
         return len(self._entries)
 
-    def __contains__(self, slug: str) -> bool:
-        return slug in self._entries
+    def __contains__(self, key: str | CacheKey) -> bool:
+        return (key if isinstance(key, tuple) else (key, None)) in self._entries

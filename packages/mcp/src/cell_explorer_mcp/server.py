@@ -2,16 +2,25 @@
 
 import logging
 import os
+from contextvars import ContextVar
 from typing import Annotated, Any
 
 import fastmcp
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.server.auth import AuthProvider
+from fastmcp.server.middleware import Middleware
 from pydantic import Field
 
 from cell_explorer_mcp import queries
-from cell_explorer_mcp.catalog import DEFAULT_API_URL, CatalogClient, DatasetNotFoundError
+from cell_explorer_mcp.auth import current_api_token, current_user_sub
+from cell_explorer_mcp.catalog import (
+    DEFAULT_API_URL,
+    CatalogClient,
+    DatasetAccessDeniedError,
+    DatasetNotFoundError,
+    credential_headers,
+)
 from cell_explorer_mcp.zarr_cache import DEFAULT_MAX_DATASETS, DatasetCache, OpenDataset
 
 logger = logging.getLogger(__name__)
@@ -55,21 +64,68 @@ MAX_GENE_NAME = 64
 
 DatasetSlug = Annotated[str, Field(description="Dataset slug from list_datasets, e.g. 'spectrum'.")]
 
+# /access credentials last 30 minutes; a private store is dropped a minute before.
+PRIVATE_STORE_TTL_SECONDS = 1800 - 60
+
+# True while the signed-in server runs a tool: tools then act as the user.
+_signed_in_call: ContextVar[bool] = ContextVar("signed_in_call", default=False)
+
+
+class _SignedInCalls(Middleware):
+    async def on_call_tool(self, context, call_next):
+        reset = _signed_in_call.set(True)
+        try:
+            return await call_next(context)
+        finally:
+            _signed_in_call.reset(reset)
+
+
+def _api_token() -> str | None:
+    """The user's API token on the signed-in address; None on the open one."""
+    return current_api_token() if _signed_in_call.get() else None
+
 
 async def _dataset_entry(slug: str) -> dict[str, Any]:
+    api_token = _api_token()
     try:
-        entry = await catalog.get_dataset(slug)
+        entry = await catalog.get_dataset(slug, api_token=api_token)
     except DatasetNotFoundError:
         raise ToolError(f"Unknown dataset {slug!r}. Use list_datasets to find valid slugs.") from None
-    if not entry.get("is_public", False):
+    # Signed in, the API has already limited the catalog to what the user may see.
+    if api_token is None and not entry.get("is_public", False):
         raise ToolError(f"Dataset {slug!r} is not public.")
     return entry
 
 
+async def _open_private(slug: str, api_token: str) -> OpenDataset:
+    """The user's own store for a private dataset, opened with their credential."""
+    owner = current_user_sub()
+    ds = cache.peek(slug, owner=owner)
+    if ds is not None:
+        return ds
+    try:
+        credential = await catalog.access(slug, api_token=api_token)
+    except DatasetAccessDeniedError:
+        raise ToolError(f"You don't have access to dataset '{slug}'.") from None
+    return await cache.get(
+        slug,
+        credential["url"],
+        headers=credential_headers(credential),
+        owner=owner,
+        ttl=PRIVATE_STORE_TTL_SECONDS,
+    )
+
+
 async def _open(slug: str) -> tuple[OpenDataset, dict[str, Any]]:
     entry = await _dataset_entry(slug)
+    api_token = _api_token()
     try:
-        ds = await cache.get(slug, entry["url"])
+        if api_token is not None and not entry.get("is_public", False):
+            ds = await _open_private(slug, api_token)
+        else:
+            ds = await cache.get(slug, entry["url"])
+    except ToolError:
+        raise
     except Exception as exc:
         logger.exception("failed to open dataset %s", slug)
         raise ToolError(f"Could not open dataset {slug!r}: {exc}") from exc
@@ -93,11 +149,12 @@ async def list_datasets(
     query: Annotated[str | None, Field(description="Case-insensitive text filter on slug, name and description.")] = None,
 ) -> dict[str, Any]:
     """List public Cell Explorer datasets with their size and collection."""
-    datasets = await catalog.list_datasets()
+    api_token = _api_token()
+    datasets = await catalog.list_datasets(api_token=api_token)
     q = query.lower() if query else None
     out = []
     for d in datasets:
-        if not d.get("is_public", False):
+        if api_token is None and not d.get("is_public", False):
             continue
         if collection is not None and _collection_slug(d) != collection:
             continue
@@ -119,7 +176,7 @@ async def list_datasets(
 
 async def list_collections() -> dict[str, Any]:
     """List dataset collections (groups of related datasets, e.g. from one study)."""
-    collections = await catalog.list_collections()
+    collections = await catalog.list_collections(api_token=_api_token())
     keys = ("slug", "name", "description", "dataset_count", "publication_citation",
             "publication_url", "source_url", "license_name")
     return {
@@ -198,6 +255,8 @@ def build_server(*, signed_in: bool, auth: AuthProvider | None = None) -> FastMC
     """One MCP server; the signed-in one requires a Cell Explorer sign-in."""
     name = "Cell Explorer MCP Server (signed in)" if signed_in else "Cell Explorer MCP Server"
     server = FastMCP(name=name, instructions=INSTRUCTIONS, auth=auth)
+    if signed_in:
+        server.add_middleware(_SignedInCalls())
     for tool in TOOLS:
         server.tool(tool)
     return server
