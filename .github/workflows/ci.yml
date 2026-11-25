@@ -42,6 +42,8 @@ jobs:
 
       - run: uv run pytest packages/cell-explorer-agent/tests/ -v
 
+      - run: uv run pytest packages/mcp/tests/ -v
+
   postgres:
     runs-on: ubuntu-latest
     services:
@@ -115,3 +117,17 @@ jobs:
             GIT_SHA=${{ steps.sha.outputs.short }}
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
             FRONTEND_CACHE_BUST=${{ github.run_id }}
+
+      - name: Build MCP server image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: packages/mcp/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/cbioportal/cell-explorer-mcp:latest
+            ghcr.io/cbioportal/cell-explorer-mcp:sha-${{ steps.sha.outputs.short }}
+          # Own cache scope: in the shared default scope, each build's cache
+          # export replaces the other's.
+          cache-from: type=gha,scope=cell-explorer-mcp
+          cache-to: type=gha,mode=max,scope=cell-explorer-mcp
