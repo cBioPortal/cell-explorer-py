@@ -167,6 +167,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(create_auth_router(), prefix="/api")
     app.include_router(create_admin_router(), prefix="/api")
 
+    # MCP sign-in OAuth server: only with auth on and PUBLIC_URL set.
+    if settings.oauth_enabled:
+        from cell_explorer_api.routes.oauth import mount_oauth
+
+        mount_oauth(app, settings)
+
     # 1. API routes (highest precedence)
     app.include_router(router)
 
