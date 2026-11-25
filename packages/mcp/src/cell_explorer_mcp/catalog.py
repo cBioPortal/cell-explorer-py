@@ -33,6 +33,10 @@ class DatasetAccessDeniedError(PermissionError):
     pass
 
 
+# The cookies a signed-cookie credential consists of.
+CLOUDFRONT_COOKIES = ("CloudFront-Policy", "CloudFront-Signature", "CloudFront-Key-Pair-Id")
+
+
 def credential_headers(credential: dict[str, Any]) -> dict[str, str]:
     """HTTP headers that open a store with an /access credential."""
     kind = credential.get("credential_type")
@@ -45,11 +49,13 @@ def credential_headers(credential: dict[str, Any]) -> dict[str, str]:
     raise ValueError(f"unknown credential_type {kind!r}")
 
 
-def _set_cookie_values(resp: httpx.Response) -> dict[str, str]:
+def _cloudfront_cookies(resp: httpx.Response) -> dict[str, str]:
+    """The CloudFront cookies among the response's Set-Cookie headers."""
     cookies = {}
     for header in resp.headers.get_list("set-cookie"):
         name, _, value = header.split(";", 1)[0].strip().partition("=")
-        cookies[name] = value
+        if name in CLOUDFRONT_COOKIES:
+            cookies[name] = value
     return cookies
 
 
@@ -156,8 +162,12 @@ class CatalogClient:
             raise DatasetAccessDeniedError(slug)
         resp.raise_for_status()
         credential = resp.json()
-        if credential.get("credential_type") == "signed_cookies" and "cookies" not in credential:
-            credential["cookies"] = _set_cookie_values(resp)
+        if credential.get("credential_type") == "signed_cookies":
+            if "cookies" not in credential:
+                credential["cookies"] = _cloudfront_cookies(resp)
+            missing = [c for c in CLOUDFRONT_COOKIES if not credential["cookies"].get(c)]
+            if missing:
+                raise ValueError(f"signed-cookie credential has no CloudFront cookies {missing}")
         return credential
 
     async def aclose(self) -> None:

@@ -13,16 +13,18 @@ from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 from cell_explorer_mcp import server
 from cell_explorer_mcp.zarr_cache import DatasetCache, open_dataset
 
-from conftest import PRIVATE_STORE_COOKIES, PRIVATE_STORE_TOKEN, stub_catalog
+from conftest import PRIVATE_STORE_COOKIES, PRIVATE_STORE_TOKEN, cloudfront_set_cookies, stub_catalog
 
 
 class SpyOpener:
     def __init__(self):
         self.opened: list[tuple[str, str, dict | None]] = []
+        self.stores: list = []
 
     async def __call__(self, slug, url, headers=None):
         self.opened.append((slug, url, headers))
-        return await open_dataset(slug, url, headers=headers)
+        self.stores.append(await open_dataset(slug, url, headers=headers))
+        return self.stores[-1]
 
 
 @pytest.fixture
@@ -120,12 +122,40 @@ async def test_access_denied_is_tool_error(as_user, api, opener, status):
     assert opener.opened == []
 
 
+async def test_set_cookie_credential_keeps_only_cloudfront_cookies(as_user, api, opener):
+    api["set_cookies"] = cloudfront_set_cookies() + [("set-cookie", "session=abc; Path=/; HttpOnly")]
+    async with as_user("alice") as client:
+        await client.call_tool("get_dataset_info", {"dataset": "secret-cookies"})
+    cookie = "; ".join(f"{k}={v}" for k, v in PRIVATE_STORE_COOKIES.items())
+    assert opener.opened[0][2] == {"Cookie": cookie}
+
+
+async def test_signed_cookie_credential_without_cookies_is_tool_error(as_user, api, opener):
+    api["set_cookies"] = [("set-cookie", "session=abc; Path=/; HttpOnly")]
+    async with as_user("alice") as client:
+        with pytest.raises(ToolError, match=r"Could not open dataset 'secret-cookies'.*no CloudFront"):
+            await client.call_tool("get_dataset_info", {"dataset": "secret-cookies"})
+    assert opener.opened == []
+
+
+async def test_access_checked_on_every_private_call(as_user, api, api_log, opener):
+    async with as_user("alice") as client:
+        await client.call_tool("get_dataset_info", {"dataset": "secret"})
+        await client.call_tool("search_genes", {"dataset": "secret", "query": "gene1"})
+        # Revoked: her store is still cached, but /access now refuses her.
+        api["access_status"] = 403
+        with pytest.raises(ToolError, match=r"You don't have access to dataset 'secret'\.$"):
+            await client.call_tool("search_genes", {"dataset": "secret", "query": "gene1"})
+    assert ("secret", "sub-alice") in server.cache
+    assert _access_callers(api_log) == ["api-alice"] * 3
+    assert len(opener.opened) == 1  # the second call reused her store
+
+
 async def test_private_store_not_served_to_other_user(as_user, api_log, opener):
     async with as_user("alice") as client:
         await client.call_tool("get_dataset_info", {"dataset": "secret"})
         await client.call_tool("search_genes", {"dataset": "secret", "query": "gene1"})
-    alice_store = server.cache.peek("secret", owner="sub-alice")
-    assert alice_store is not None
+    assert ("secret", "sub-alice") in server.cache
 
     # Within alice's credential lifetime: dave's /access is refused, so he
     # gets an error, not alice's open store.
@@ -135,13 +165,15 @@ async def test_private_store_not_served_to_other_user(as_user, api_log, opener):
 
     async with as_user("bob") as client:
         await client.call_tool("gene_expression", {"dataset": "secret", "gene": "gene1"})
-    bob_store = server.cache.peek("secret", owner="sub-bob")
 
-    # alice's second call reused her store; dave and bob each asked for their own.
-    assert _access_callers(api_log) == ["api-alice", "api-dave", "api-bob"]
+    # Every call asked /access as its own user; alice's second call reused her
+    # store, and bob got a store of his own.
+    assert _access_callers(api_log) == ["api-alice", "api-alice", "api-dave", "api-bob"]
     assert [slug for slug, _, _ in opener.opened] == ["secret", "secret"]
-    assert bob_store is not None and bob_store is not alice_store
-    assert server.cache.peek("secret", owner="sub-dave") is None
+    alice_store, bob_store = opener.stores
+    assert bob_store is not alice_store
+    assert ("secret", "sub-bob") in server.cache
+    assert ("secret", "sub-dave") not in server.cache
 
 
 async def test_private_store_reopened_after_credential_ttl(as_user, api_log, opener, monkeypatch):
@@ -173,3 +205,15 @@ async def test_open_address_still_refuses_private(as_user, api_log, opener):
             await client.call_tool("get_dataset_info", {"dataset": "secret-cookies"})
     assert all(bearer is None for _, _, bearer in api_log)
     assert opener.opened == []
+
+
+async def test_list_datasets_description_per_address(as_user):
+    async with as_user("alice") as client:
+        signed_in = {t.name: t.description for t in await client.list_tools()}
+    async with as_user("alice", mcp=server.mcp) as client:
+        open_ = {t.name: t.description for t in await client.list_tools()}
+    assert open_["list_datasets"] == "List public Cell Explorer datasets with their size and collection."
+    assert signed_in["list_datasets"].startswith("List the Cell Explorer datasets you can access")
+    assert {k: v for k, v in signed_in.items() if k != "list_datasets"} == {
+        k: v for k, v in open_.items() if k != "list_datasets"
+    }

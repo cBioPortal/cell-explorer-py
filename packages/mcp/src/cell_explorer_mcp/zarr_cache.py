@@ -182,7 +182,7 @@ class DatasetCache:
         self._entries: OrderedDict[CacheKey, tuple[OpenDataset, float]] = OrderedDict()
         self._opening: dict[CacheKey, asyncio.Lock] = {}
 
-    def _fresh(self, key: CacheKey, url: str | None) -> OpenDataset | None:
+    def _fresh(self, key: CacheKey, url: str) -> OpenDataset | None:
         hit = self._entries.get(key)
         if hit is None:
             return None
@@ -190,14 +190,10 @@ class DatasetCache:
         if time.monotonic() >= expires_at:
             del self._entries[key]
             return None
-        if url is not None and entry.url != url:
+        if entry.url != url:
             return None
         self._entries.move_to_end(key)
         return entry
-
-    def peek(self, slug: str, *, owner: str | None = None) -> OpenDataset | None:
-        """The unexpired entry for (slug, owner), whatever its URL."""
-        return self._fresh((slug, owner), None)
 
     async def get(
         self,

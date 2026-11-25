@@ -129,9 +129,9 @@ async def test_cache_keys_private_entries_by_owner():
     opener = FakeOpener()
     cache = DatasetCache(opener=opener)
     alice = await cache.get("a", "u", headers={"Authorization": "Bearer x"}, owner="alice", ttl=60)
-    assert cache.peek("a", owner="bob") is None and cache.peek("a") is None
+    assert ("a", "bob") not in cache and "a" not in cache
     assert await cache.get("a", "u", owner="bob", ttl=60) is not alice
-    assert cache.peek("a", owner="alice") is alice
+    assert await cache.get("a", "u", owner="alice", ttl=60) is alice
     assert len(opener.opened) == 2
 
 

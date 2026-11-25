@@ -98,11 +98,11 @@ async def _dataset_entry(slug: str) -> dict[str, Any]:
 
 
 async def _open_private(slug: str, api_token: str) -> OpenDataset:
-    """The user's own store for a private dataset, opened with their credential."""
-    owner = current_user_sub()
-    ds = cache.peek(slug, owner=owner)
-    if ds is not None:
-        return ds
+    """The user's own store for a private dataset, opened with their credential.
+
+    /access is asked on every call, so a cached store is only served while the
+    user's own access still holds.
+    """
     try:
         credential = await catalog.access(slug, api_token=api_token)
     except DatasetAccessDeniedError:
@@ -111,7 +111,7 @@ async def _open_private(slug: str, api_token: str) -> OpenDataset:
         slug,
         credential["url"],
         headers=credential_headers(credential),
-        owner=owner,
+        owner=current_user_sub(),
         ttl=PRIVATE_STORE_TTL_SECONDS,
     )
 
@@ -240,6 +240,11 @@ async def obs_column_values(
     return await _run(queries.obs_column_values(ds, column, limit, entry=entry))
 
 
+SIGNED_IN_DESCRIPTIONS = {
+    "list_datasets": "List the Cell Explorer datasets you can access (public ones and the"
+                     " private ones your account may open) with their size and collection.",
+}
+
 TOOLS = (
     list_datasets,
     list_collections,
@@ -258,7 +263,8 @@ def build_server(*, signed_in: bool, auth: AuthProvider | None = None) -> FastMC
     if signed_in:
         server.add_middleware(_SignedInCalls())
     for tool in TOOLS:
-        server.tool(tool)
+        description = SIGNED_IN_DESCRIPTIONS.get(tool.__name__) if signed_in else None
+        server.tool(tool, description=description)
     return server
 
 

@@ -183,6 +183,14 @@ def private_datasets() -> list[dict]:
     ]
 
 
+def cloudfront_set_cookies() -> list[tuple[str, str]]:
+    return [
+        ("set-cookie", f"{name}={value}; Domain=.test; HttpOnly; Max-Age=1800; "
+                       "Path=/private/strata-tiny.zarr/; SameSite=lax; Secure")
+        for name, value in PRIVATE_STORE_COOKIES.items()
+    ]
+
+
 def _access(base_url: str, payload: dict, slug: str, bearer: str | None, api: dict | None):
     user = API_USERS.get(bearer)
     if user is None:
@@ -202,11 +210,7 @@ def _access(base_url: str, payload: dict, slug: str, bearer: str | None, api: di
             "token": PRIVATE_STORE_TOKEN, "expires_at": expires_at,
         })
     # Signed cookies come back as Set-Cookie headers, not in the body.
-    set_cookies = [
-        ("set-cookie", f"{name}={value}; Domain=.test; HttpOnly; Max-Age=1800; "
-                       "Path=/private/strata-tiny.zarr/; SameSite=lax; Secure")
-        for name, value in PRIVATE_STORE_COOKIES.items()
-    ]
+    set_cookies = (api or {}).get("set_cookies") or cloudfront_set_cookies()
     return httpx.Response(200, headers=set_cookies, json={
         "url": url, "credential_type": "signed_cookies", "expires_at": expires_at,
     })
@@ -220,7 +224,8 @@ def stub_catalog(
     **kwargs,
 ) -> CatalogClient:
     """api={"down": True} makes the stub answer 503 until it is set back;
-    api={"access_status": 403} makes /access answer that status. log records
+    api={"access_status": 403} makes /access answer that status;
+    api={"set_cookies": [...]} replaces its Set-Cookie headers. log records
     (method, path, bearer token) per request."""
     payload = catalog_payload(base_url)
 
