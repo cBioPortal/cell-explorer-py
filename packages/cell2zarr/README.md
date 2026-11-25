@@ -44,7 +44,15 @@ cell2zarr add atlas.h5ad atlas.zarr --key X --temp-dir /tmp
 
 # Add a specific layer
 cell2zarr add atlas.h5ad atlas.zarr --key layers/counts --temp-dir /tmp
+
+# Add raw (raw.X via the two-phase pipeline, plus raw.var and raw.varm)
+cell2zarr add atlas.h5ad atlas.zarr --key raw --temp-dir /tmp
 ```
+
+`raw` is written to a `raw/` group that `anndata.read_zarr` loads as `adata.raw`.
+`raw.X` keeps its own gene count, which may be larger than `X`'s when `raw` holds the
+genes from before filtering, and uses the encoding config's `X` section like `X` and
+layers do. `raw` is all-or-nothing: sub-keys such as `raw/X` are not accepted.
 
 ### Parallel adds
 
@@ -105,14 +113,14 @@ cell2zarr convert input.h5ad output.zarr --two-phase --run-db docs/conversion-ru
 
 | Option | Description |
 |--------|-------------|
-| `--key TEXT` | Key to add (e.g. obsm, obsm/X_umap, obs, X, layers/counts). Required. |
+| `--key TEXT` | Key to add (e.g. obsm, obsm/X_umap, obs, X, layers/counts, raw). Required. |
 | `--overwrite` | Overwrite existing keys. |
 | `--no-consolidate` | Skip rewriting consolidated metadata. Use with parallel adds, then run `cell2zarr consolidate`. |
 | `--encoding-config PATH` | Path to JSON encoding config. |
 | `--dtype CHOICE` | Target dtype. Default: float32. |
 | `--log-file PATH` | Log file path. Default: `<zarr_store>.add.log`. |
 | `--log-level CHOICE` | Log level: DEBUG, INFO, WARNING, ERROR. Default: INFO. |
-| `--temp-dir PATH` | Temp directory for large keys (X, layers). |
+| `--temp-dir PATH` | Temp directory for large keys (X, layers, raw). |
 
 ## `build-strata` — precompute aggregate tables (optional)
 

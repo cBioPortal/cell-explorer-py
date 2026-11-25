@@ -1,10 +1,14 @@
 """Tests for add-key functionality."""
 import json
 
+import anndata as ad
 import numpy as np
+import pandas as pd
 import pytest
 import zarr
+from anndata.io import write_elem
 from click.testing import CliRunner
+from scipy import sparse
 
 from cell2zarr.cli import cli
 from cell2zarr.convert import write_obsm_to_store, add_key_to_store
@@ -138,10 +142,100 @@ class TestAddLargeKeys:
         assert "counts" in root["layers"]
         assert "normalized" in root["layers"]
 
-    def test_add_raw_not_supported(self, sample_h5ad, sample_store):
+
+
+def _write_h5ad_with_raw(path, n_obs=40, n_vars=10, n_raw_vars=25, varm_key="PCs"):
+    """h5ad whose raw keeps more genes than X, as after gene filtering. Returns (path, adata)."""
+    rng = np.random.default_rng(0)
+    counts = sparse.random(n_obs, n_raw_vars, density=0.3, format="csr", dtype=np.float32, random_state=rng)
+    full = ad.AnnData(
+        X=counts,
+        obs=pd.DataFrame(index=[f"cell_{i}" for i in range(n_obs)]),
+        var=pd.DataFrame(
+            {"gene_symbol": [f"SYM{i}" for i in range(n_raw_vars)]},
+            index=[f"gene_{i}" for i in range(n_raw_vars)],
+        ),
+    )
+    full.varm[varm_key] = rng.standard_normal((n_raw_vars, 3)).astype(np.float32)
+    full.raw = full
+    adata = full[:, :n_vars].copy()
+    adata.write_h5ad(path)
+    return path, adata
+
+
+class TestAddRaw:
+    def test_add_raw_writes_x_var_and_varm(self, h5ad_path, sample_store, tmp_path):
+        path, adata = _write_h5ad_with_raw(h5ad_path)
+        add_key_to_store(path, sample_store, key="raw", overwrite=False, dtype="float32", temp_dir=tmp_path)
+
+        raw = open_zarr(sample_store)["raw"]
+        assert raw.attrs["encoding-type"] == "raw"
+        # raw.X keeps raw's own gene count, not X's.
+        assert raw["X"].shape == (40, 25)
+        np.testing.assert_array_almost_equal(raw["X"][:], adata.raw.X.toarray(), decimal=5)
+        assert raw["var"]["gene_symbol"].attrs["encoding-type"] == "categorical"
+        assert raw["varm"]["PCs"].shape == (25, 3)
+
+    def test_anndata_reads_added_raw(self, h5ad_path, sample_store, tmp_path):
+        path, adata = _write_h5ad_with_raw(h5ad_path)
+        for key in ("obs", "var", "X", "raw"):
+            add_key_to_store(path, sample_store, key=key, overwrite=False, dtype="float32", temp_dir=tmp_path)
+
+        back = ad.read_zarr(sample_store)
+        assert back.shape == (40, 10)
+        assert back.raw.shape == (40, 25)
+        np.testing.assert_array_almost_equal(np.asarray(back.raw.X), adata.raw.X.toarray(), decimal=5)
+        assert list(back.raw.var_names) == list(adata.raw.var_names)
+        assert list(back.raw.var["gene_symbol"]) == list(adata.raw.var["gene_symbol"])
+        np.testing.assert_array_almost_equal(back.raw.varm["PCs"], adata.raw.varm["PCs"])
+
+    def test_respects_dtype(self, h5ad_path, sample_store, tmp_path):
+        path, _ = _write_h5ad_with_raw(h5ad_path)
+        add_key_to_store(path, sample_store, key="raw", overwrite=False, dtype="float16", temp_dir=tmp_path)
+
+        assert open_zarr(sample_store)["raw"]["X"].dtype == np.float16
+
+    def test_raw_not_in_h5ad_fails(self, sample_h5ad, sample_store):
         h5ad_path, _ = sample_h5ad
         with pytest.raises(SystemExit):
             add_key_to_store(h5ad_path, sample_store, key="raw", overwrite=False, dtype="float32")
+
+    def test_sub_key_rejected(self, h5ad_path, sample_store):
+        path, _ = _write_h5ad_with_raw(h5ad_path)
+        with pytest.raises(SystemExit):
+            add_key_to_store(path, sample_store, key="raw/X", overwrite=False, dtype="float32")
+
+    def test_fails_without_overwrite(self, h5ad_path, sample_store, tmp_path):
+        path, _ = _write_h5ad_with_raw(h5ad_path)
+        add_key_to_store(path, sample_store, key="raw", overwrite=False, dtype="float32", temp_dir=tmp_path)
+
+        with pytest.raises(SystemExit):
+            add_key_to_store(path, sample_store, key="raw", overwrite=False, dtype="float32", temp_dir=tmp_path)
+
+    def test_overwrite_replaces_every_element(self, tmp_path, sample_store):
+        first, _ = _write_h5ad_with_raw(tmp_path / "first.h5ad", n_raw_vars=25, varm_key="PCs")
+        second, adata = _write_h5ad_with_raw(tmp_path / "second.h5ad", n_raw_vars=30, varm_key="loadings")
+        add_key_to_store(first, sample_store, key="raw", overwrite=False, dtype="float32", temp_dir=tmp_path)
+        add_key_to_store(second, sample_store, key="raw", overwrite=True, dtype="float32", temp_dir=tmp_path)
+
+        raw = open_zarr(sample_store)["raw"]
+        assert raw["X"].shape == (40, 30)
+        np.testing.assert_array_almost_equal(raw["X"][:], adata.raw.X.toarray(), decimal=5)
+        assert list(raw["varm"].keys()) == ["loadings"]
+
+    def test_overwrite_replaces_anndata_written_raw(self, h5ad_path, sample_store, tmp_path):
+        """A raw anndata wrote itself (sparse X, a group) is replaced by a dense one."""
+        path, adata = _write_h5ad_with_raw(h5ad_path)
+        root = zarr.open_group(zarr.storage.LocalStore(str(sample_store)), mode="r+")
+        write_elem(root, "raw", adata.raw)
+        assert root["raw"]["X"].attrs["encoding-type"] == "csr_matrix"
+
+        add_key_to_store(path, sample_store, key="raw", overwrite=True, dtype="float32", temp_dir=tmp_path)
+
+        raw = open_zarr(sample_store)["raw"]
+        assert isinstance(raw["X"], zarr.Array)
+        assert raw["X"].attrs["encoding-type"] == "array"
+        np.testing.assert_array_almost_equal(raw["X"][:], adata.raw.X.toarray(), decimal=5)
 
 
 class TestCLI:
@@ -161,6 +255,14 @@ class TestCLI:
         h5ad_path, _ = sample_h5ad
         result = CliRunner().invoke(cli, ["add", str(h5ad_path), str(sample_store), "--key", "obsm"])
         assert result.exit_code == 0, result.output
+
+    def test_add_raw_subcommand(self, h5ad_path, sample_store, tmp_path):
+        path, _ = _write_h5ad_with_raw(h5ad_path)
+        result = CliRunner().invoke(
+            cli, ["add", str(path), str(sample_store), "--key", "raw", "--temp-dir", str(tmp_path)]
+        )
+        assert result.exit_code == 0, result.output
+        assert open_zarr(sample_store)["raw"]["X"].shape == (40, 25)
 
 
 class TestEndToEnd:

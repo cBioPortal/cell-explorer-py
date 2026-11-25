@@ -581,7 +581,7 @@ SUB_KEY_ALLOWED = {"obsm", "layers"}
 
 VALID_KEYS = {"obs", "var", "obsm", "uns", "obsp", "varp", "X", "layers", "raw"}
 
-LARGE_KEYS = {"X", "layers"}
+LARGE_KEYS = {"X", "layers", "raw"}
 
 
 def _add_large_matrix(
@@ -595,8 +595,9 @@ def _add_large_matrix(
     encoding: EncodingConfig | None,
     temp_dir: Path | str | None,
     group_name: str | None = None,
+    n_vars: int | None = None,
 ) -> None:
-    """Add a large matrix (X or a single layer) using a two-phase pipeline.
+    """Add a large matrix (X, a single layer, or raw.X) using a two-phase pipeline.
 
     Parameters
     ----------
@@ -620,6 +621,9 @@ def _add_large_matrix(
         Directory for temp zarr. Uses system temp if None.
     group_name : str or None
         Optional group within root to write into (e.g. "layers").
+    n_vars : int or None
+        Number of columns in the matrix. None means adata.n_vars; raw.X
+        passes adata.raw.n_vars, which may differ.
     """
     # Determine target group
     if group_name is not None:
@@ -633,7 +637,9 @@ def _add_large_matrix(
         logger.error(f"{path} already exists in zarr store. Use overwrite=True to overwrite.")
         sys.exit(1)
 
-    n_obs, n_vars = adata.n_obs, adata.n_vars
+    n_obs = adata.n_obs
+    if n_vars is None:
+        n_vars = adata.n_vars
     cell_chunk_size = 10000
     tmp_var_chunk = min(1000, n_vars)
 
@@ -766,6 +772,62 @@ def _add_layers(
         )
 
 
+def _strings_to_categoricals(df: pd.DataFrame) -> pd.DataFrame:
+    """Store plain string columns as categoricals, which are far more compact."""
+    for c in df.columns:
+        if pd.api.types.is_string_dtype(df[c]) and not isinstance(df[c].dtype, pd.CategoricalDtype):
+            df[c] = df[c].astype("category")
+    return df
+
+
+def _add_raw(
+    adata,
+    root,
+    store,
+    overwrite: bool,
+    dtype: str,
+    encoding: EncodingConfig | None,
+    temp_dir: Path | str | None,
+) -> None:
+    """Write raw (X, var, varm) to a `raw` group, laid out the way anndata reads it.
+
+    raw.X goes through the two-phase pipeline with raw's own variable count,
+    which may differ from adata's since raw usually holds the pre-filtering
+    genes. On overwrite each element replaces its predecessor in turn rather
+    than the whole group being cleared up front, so an existing raw stays
+    intact while Phase 1 streams the new raw.X.
+    """
+    raw = adata.raw
+    if raw is None:
+        logger.error("raw not found in h5ad file")
+        sys.exit(1)
+    if not overwrite and "raw" in root:
+        logger.error("raw already exists in zarr store. Use overwrite=True to overwrite.")
+        sys.exit(1)
+
+    # overwrite=True: an existing raw was refused above unless overwriting.
+    _add_large_matrix(
+        adata,
+        root,
+        store,
+        array_name="X",
+        matrix_getter=lambda chunk: chunk.raw.X,
+        overwrite=True,
+        dtype=dtype,
+        encoding=encoding,
+        temp_dir=temp_dir,
+        group_name="raw",
+        n_vars=raw.n_vars,
+    )
+
+    raw_group = root["raw"]
+    with _anndata_write_settings():
+        write_elem(raw_group, "var", _strings_to_categoricals(raw.var.copy()))
+        write_elem(raw_group, "varm", dict(raw.varm))
+    # Encoding attrs go on last, after the elements, as anndata's writer does.
+    raw_group.attrs.update({"encoding-type": "raw", "encoding-version": "0.1.0"})
+
+
 def _add_obsm(adata, root, n_obs: int, sub_key: str | None, overwrite: bool, dtype: str, encoding: EncodingConfig | None) -> None:
     """Write obsm (or a single sub-key of obsm) to the zarr store."""
     if sub_key is not None:
@@ -798,11 +860,7 @@ def _add_obs_or_var(adata, root, key: str, overwrite: bool, encoding: EncodingCo
         logger.error(f"{key} already exists in zarr store. Use overwrite=True to overwrite.")
         sys.exit(1)
 
-    df = getattr(adata, key).copy()
-    str_cols = [c for c in df.columns if pd.api.types.is_string_dtype(df[c]) and not isinstance(df[c].dtype, pd.CategoricalDtype)]
-    if str_cols:
-        for c in str_cols:
-            df[c] = df[c].astype("category")
+    df = _strings_to_categoricals(getattr(adata, key).copy())
 
     with _anndata_write_settings():
         write_elem(root, key, df)
@@ -845,7 +903,8 @@ def add_key_to_store(
     zarr_path : Path or str
         Path to an existing zarr v3 store.
     key : str
-        Key to write, e.g. "obsm", "obsm/X_umap", "obs", "var", "uns", "obsp", "varp".
+        Key to write, e.g. "obsm", "obsm/X_umap", "obs", "var", "uns", "obsp",
+        "varp", "X", "layers", "layers/counts", "raw".
     overwrite : bool
         If True, overwrite existing keys. If False, exit with error if key exists.
     dtype : str
@@ -853,7 +912,8 @@ def add_key_to_store(
     encoding : EncodingConfig or None
         Optional encoding config for chunking/sharding/compression.
     temp_dir : Path or None
-        Temporary directory (reserved for future use).
+        Temporary directory for the large keys (X, layers, raw). Uses the
+        system temp directory if None.
     consolidate : bool
         If True (default), rewrite the store's consolidated metadata after
         writing the key. Set False when adding several keys in parallel
@@ -886,11 +946,6 @@ def add_key_to_store(
         logger.error(f"Sub-keys are only allowed for: {sorted(SUB_KEY_ALLOWED)}. Got '{key}'.")
         sys.exit(1)
 
-    # raw is not yet supported
-    if top_key == "raw":
-        logger.error("Writing 'raw' is not yet supported.")
-        sys.exit(1)
-
     # Initialize zarrs codec pipeline for large keys
     if top_key in LARGE_KEYS:
         _init_zarrs()
@@ -908,6 +963,8 @@ def add_key_to_store(
             _add_large_matrix(adata, root, store, "X", None, overwrite, dtype, encoding, temp_dir)
         elif top_key == "layers":
             _add_layers(adata, root, store, sub_key, overwrite, dtype, encoding, temp_dir)
+        elif top_key == "raw":
+            _add_raw(adata, root, store, overwrite, dtype, encoding, temp_dir)
         elif top_key == "obsm":
             _add_obsm(adata, root, n_obs, sub_key, overwrite, dtype, encoding)
         elif top_key in ("obs", "var"):

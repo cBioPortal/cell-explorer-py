@@ -253,7 +253,7 @@ def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes
 @cli.command()
 @click.argument("h5ad_file", type=click.Path(exists=True, path_type=Path))
 @click.argument("zarr_store", type=click.Path(path_type=Path))
-@click.option("--key", required=True, help="Key to add (e.g. obsm, obsm/X_umap, obs, X, layers/counts).")
+@click.option("--key", required=True, help="Key to add (e.g. obsm, obsm/X_umap, obs, X, layers/counts, raw).")
 @click.option("--overwrite", is_flag=True, help="Overwrite existing keys.")
 @click.option(
     "--no-consolidate",
@@ -264,7 +264,7 @@ def convert(input_file, output_file, obs_chunk_size, var_chunk_size, n_top_genes
 @click.option("--dtype", type=click.Choice(["float16", "float32", "float64"]), default="float32", help="Target dtype. Default: float32.")
 @click.option("--log-file", type=click.Path(path_type=Path), help="Log file path. Default: <zarr_store>.add.log.")
 @click.option("--log-level", type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False), default="INFO", help="Log level. Default: INFO.")
-@click.option("--temp-dir", type=click.Path(path_type=Path), help="Temp directory for large keys (X, layers).")
+@click.option("--temp-dir", type=click.Path(path_type=Path), help="Temp directory for large keys (X, layers, raw).")
 def add(h5ad_file, zarr_store, key, overwrite, no_consolidate, encoding_config, dtype, log_file, log_level, temp_dir):
     """Add a key from h5ad to an existing Zarr store."""
     if log_file is None:
