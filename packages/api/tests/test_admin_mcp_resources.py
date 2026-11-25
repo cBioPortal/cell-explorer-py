@@ -9,6 +9,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from cell_explorer_api.auth.models import User
 from cell_explorer_api.config import Settings
+from cell_explorer_api.db.models import Collection, Dataset, Datasource, DatasourceType
 from cell_explorer_api.main import create_app
 from cell_explorer_api.services import oauth_store as store
 
@@ -116,8 +117,22 @@ async def test_revoke_unknown_resource_404(client):
 async def test_admin_revoke_invalidates_issued_tokens(client, engine):
     body = await _register(client)
     async with AsyncSession(engine) as db:
+        src = Datasource(
+            name="CDN", type=DatasourceType.HTTP_TOKEN,
+            base_url="https://cdn.example.com", credential_ref="TEST_CDN",
+        )
+        db.add(src)
+        await db.flush()
+        col = Collection(name="Study", slug="study")
+        db.add(col)
+        await db.flush()
+        db.add(Dataset(
+            datasource_id=src.id, collection_id=col.id, name="exposed", slug="exposed",
+            path="exposed.zarr", is_public=False, required_roles=["r"], mcp_enabled=True,
+        ))
+        await db.commit()
         grant = await store.create_grant(
-            db, user=User(sub="u1", email="u@x.org", name="U", roles=["admin"]), client_id="c1", resource=RES
+            db, user=User(sub="u1", email="u@x.org", name="U", roles=["r"]), client_id="c1", resource=RES
         )
         access, _ = await store.issue_token(db, grant=grant, kind="access", audience=RES)
         api, _ = await store.issue_token(db, grant=grant, kind="api", audience="api")
@@ -133,6 +148,11 @@ async def test_admin_revoke_invalidates_issued_tokens(client, engine):
     resp = await client.get("/api/admin/mcp-resources", headers={"Authorization": f"Bearer {api}"})
     assert resp.status_code in (401, 403)
 
+    api_h = {"Authorization": f"Bearer {api}"}
+    resp = await client.get("/api/datasets", headers=api_h)
+    assert [d["slug"] for d in resp.json()["datasets"]] == ["exposed"]
+    assert (await client.get("/api/datasets/exposed", headers=api_h)).status_code == 200
+
     resp = await client.delete("/api/admin/oauth/grants/u1", headers=ADMIN)
     assert resp.status_code == 200
     assert resp.json() == {"revoked": 1}
@@ -146,9 +166,9 @@ async def test_admin_revoke_invalidates_issued_tokens(client, engine):
     resp = await client.delete("/api/admin/oauth/grants/u1", headers=ADMIN)
     assert resp.json() == {"revoked": 0}
     # The revoked user's API token is now anonymous on dataset routes.
-    resp = await client.get("/api/datasets", headers={"Authorization": f"Bearer {api}"})
-    assert resp.status_code == 200
+    resp = await client.get("/api/datasets", headers=api_h)
     assert resp.json()["datasets"] == []
+    assert (await client.get("/api/datasets/exposed", headers=api_h)).status_code == 401
 
 
 async def test_reregistering_revoked_url_rotates_key(client, engine):
