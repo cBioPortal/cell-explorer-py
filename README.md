@@ -81,6 +81,7 @@ than "broken".
 | Variable | Default | Notes |
 |---|---|---|
 | `ACCESS_CONTACT` | unset | Email shown to signed-in users who lack access to a private dataset ("Email … to request access"), served by `/api/info`. Unset means "Contact your administrator" with no address |
+| `PUBLIC_URL` | unset | Public base URL of this deployment (e.g. `https://cell-explorer.example.org`). With auth enabled, turns on the OAuth server under `/api/oauth` that signs MCP clients in; unset means no OAuth routes exist |
 
 ### Data and logging
 
@@ -142,6 +143,24 @@ and remain supported aliases for the generic names above.
 | `ANON_CHAT_PER_IP_PER_HOUR` | `200` | Signed-out questions per client IP per clock hour. Behind a proxy, set uvicorn's `FORWARDED_ALLOW_IPS` to the proxy's private address range (e.g. the VPC CIDR) so the real client IP is used. **Never `*`**: uvicorn then trusts the leftmost `X-Forwarded-For` entry, which any client can forge. Unset, every visitor shares the proxy's address |
 | `ANON_CHAT_PER_DAY` | `10000` | Signed-out questions per UTC day for the whole deployment: the ceiling on what signed-out chat can cost. Signed-in users are never counted |
 | `CLI_STATE_SECRET` | unset | Signs the CLI login callback state |
+
+### Registering an MCP server (signed-in tier)
+
+An MCP server that signs users in through this API is registered once with the admin API. The
+`key` is shown only in the create response; store it as the MCP server's secret.
+
+```bash
+# Register (url must be absolute https; http only for localhost). 409 if the URL is already registered and active;
+# re-registering a revoked URL rotates it: same row, new key, old key stays dead.
+curl -X POST "$API/api/admin/mcp-resources" -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://mcp.example.org/mcp", "name": "Signed-in MCP"}'
+# -> 201 {"id": "...", "url": "...", "name": "...", "key": "..."}
+
+curl "$API/api/admin/mcp-resources" -H "Authorization: Bearer $ADMIN_API_KEY"      # list (no keys)
+curl -X DELETE "$API/api/admin/mcp-resources/$ID" -H "Authorization: Bearer $ADMIN_API_KEY"  # revoke the key (204)
+curl -X DELETE "$API/api/admin/oauth/grants/$USER_SUB" -H "Authorization: Bearer $ADMIN_API_KEY"  # end a user's MCP connections -> {"revoked": N}
+```
 
 ## Branding
 

@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from cell_explorer_api.auth.models import User
-from cell_explorer_api.auth.optional import optional_auth
+from cell_explorer_api.auth.bearer import user_or_mcp_caller
 from cell_explorer_api.db import get_db
 from cell_explorer_api.db.models import Collection, Dataset, DatasetMetadata, Datasource
 from cell_explorer_api.routes.datasets import DatasetResponse, _dataset_to_response
@@ -99,7 +99,7 @@ def _summary(collection: Collection, count: int) -> CollectionSummary:
 
 @router.get("/collections")
 async def list_collections(
-    user: User | None = Depends(optional_auth),
+    user: User | None = Depends(user_or_mcp_caller),
     db: AsyncSession = Depends(get_db),
 ) -> CollectionListResponse:
     """List collections containing at least one dataset the caller can access."""
@@ -117,7 +117,7 @@ async def list_collections(
 @router.get("/collections/{slug}")
 async def get_collection(
     slug: str,
-    user: User | None = Depends(optional_auth),
+    user: User | None = Depends(user_or_mcp_caller),
     db: AsyncSession = Depends(get_db),
 ) -> CollectionDetail:
     """Get one collection and the datasets in it the caller can access."""

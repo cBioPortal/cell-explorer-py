@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 _LOCALHOST_REDIRECT_RE = re.compile(r"^http://(localhost|127\.0\.0\.1):\d{1,5}(/.*)?$")
+# The one API path login may return to: the MCP consent page (request ids are token_urlsafe).
+_CONSENT_NEXT_RE = re.compile(r"/api/oauth/consent\?request=[A-Za-z0-9_-]+")
 _CLI_STATE_EXP_SECONDS = 600  # 10 minutes
 _LOGIN_FLOW_COOKIE_MAX_AGE = 600
 # Set by logout so the next login asks which account to use. Long enough to
@@ -72,8 +74,11 @@ def _safe_next_path(next_path: str | None) -> str:
 
     Only a path is accepted, never a URL: anything that a browser could resolve to another
     origin (``//host``, ``/\\host``, a scheme) falls back to the index page, so the parameter
-    cannot be used as an open redirect. API paths fall back too, since they are not pages.
+    cannot be used as an open redirect. API paths fall back too, since they are not pages,
+    except the MCP sign-in consent page for a pending request.
     """
+    if _CONSENT_NEXT_RE.fullmatch(next_path or ""):
+        return next_path
     if (
         not next_path
         or not next_path.startswith("/")
