@@ -28,9 +28,17 @@ from cell_explorer_api.auth.optional import optional_auth
 from cell_explorer_api.config import Settings
 from cell_explorer_api.db.models import utcnow
 from cell_explorer_api.db.oauth_models import OAuthPendingAuthorization
-from cell_explorer_api.services.oauth_store import find_mcp_resource_by_url
+from cell_explorer_api.services.oauth_store import (
+    API_TTL,
+    find_mcp_resource_by_key,
+    find_mcp_resource_by_url,
+    find_token,
+    issue_token,
+)
 
 OAUTH_PREFIX = "/api/oauth"
+TOKEN_EXCHANGE_GRANT = "urn:ietf:params:oauth:grant-type:token-exchange"
+ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"
 REGISTRATIONS_PER_HOUR = 20
 
 _PAGE_HEADERS = {
@@ -205,6 +213,40 @@ def _consent_router(provider: CellExplorerOAuthProvider, public_origin: str | No
             str(pending.params["redirect_uri"]), error="access_denied", state=pending.params.get("state")
         )
         return RedirectResponse(target, status_code=302)
+
+    @router.post("/token-exchange")
+    async def token_exchange(request: Request) -> Response:
+        """RFC 8693: an MCP server trades its key and a user's access token for an API token."""
+        headers = {"Cache-Control": "no-store"}
+
+        def error(status: int, code: str) -> JSONResponse:
+            return JSONResponse({"error": code}, status_code=status, headers=headers)
+
+        scheme, _, key = request.headers.get("authorization", "").partition(" ")
+        form = await request.form()
+        subject_token = str(form.get("subject_token", ""))
+        async with session(request) as db:
+            key = key.strip()
+            resource = await find_mcp_resource_by_key(db, key) if scheme.lower() == "bearer" and key else None
+            if resource is None:
+                return error(401, "invalid_client")
+            if form.get("grant_type") != TOKEN_EXCHANGE_GRANT:
+                return error(400, "unsupported_grant_type")
+            found = await find_token(db, subject_token, kind="access") if subject_token else None
+            if found is None or found[0].audience != resource.url:
+                return error(400, "invalid_grant")
+            plaintext, _ = await issue_token(db, grant=found[1], kind="api", audience="api")
+            subject = found[1].user_sub
+        return JSONResponse(
+            {
+                "access_token": plaintext,
+                "issued_token_type": ACCESS_TOKEN_TYPE,
+                "token_type": "Bearer",
+                "expires_in": API_TTL,
+                "subject": subject,
+            },
+            headers=headers,
+        )
 
     return router
 
