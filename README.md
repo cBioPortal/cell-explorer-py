@@ -82,6 +82,7 @@ than "broken".
 |---|---|---|
 | `ACCESS_CONTACT` | unset | Email shown to signed-in users who lack access to a private dataset ("Email … to request access"), served by `/api/info`. Unset means "Contact your administrator" with no address |
 | `PUBLIC_URL` | unset | Public base URL of this deployment (e.g. `https://cell-explorer.example.org`). With auth enabled, turns on the OAuth server under `/api/oauth` that signs MCP clients in; unset means no OAuth routes exist |
+| `OAUTH_REGISTRATIONS_PER_HOUR` | `200` | OAuth client registrations (`/api/oauth/register`) allowed per client IP per hour, counted per replica. Server-side clients (Claude.ai and Claude Desktop connectors, LibreChat) register from shared egress IPs, so keep it well above one user's needs. Behind a proxy, set uvicorn's `FORWARDED_ALLOW_IPS` (see `ANON_CHAT_PER_IP_PER_HOUR`) or every client shares the proxy's address |
 
 ### Data and logging
 

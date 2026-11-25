@@ -107,6 +107,8 @@ class Settings(BaseSettings):
     # Public base URL of this deployment (https://host, no path). Setting it,
     # with auth enabled, turns on the OAuth server that signs MCP clients in.
     public_url: str | None = None
+    # OAuth client registrations per client IP per hour, per replica.
+    oauth_registrations_per_hour: int = 200
 
     # CLI integration
     cli_state_secret: str | None = None

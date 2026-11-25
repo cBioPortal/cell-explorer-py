@@ -6,6 +6,7 @@ cookie) signs the user in, and the host-root copy of the metadata.
 """
 
 import html
+import math
 import secrets
 import time
 from collections import deque
@@ -29,7 +30,6 @@ from cell_explorer_api.config import Settings
 from cell_explorer_api.db.models import utcnow
 from cell_explorer_api.db.oauth_models import OAuthPendingAuthorization
 from cell_explorer_api.services.oauth_store import (
-    API_TTL,
     find_mcp_resource_by_key,
     find_mcp_resource_by_url,
     find_token,
@@ -39,12 +39,12 @@ from cell_explorer_api.services.oauth_store import (
 OAUTH_PREFIX = "/api/oauth"
 TOKEN_EXCHANGE_GRANT = "urn:ietf:params:oauth:grant-type:token-exchange"
 ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"
-REGISTRATIONS_PER_HOUR = 20
 
 _PAGE_HEADERS = {
     "Cache-Control": "no-store",
     "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'",
     "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
 }
 
 _PAGE = """<!doctype html>
@@ -105,7 +105,7 @@ def _login_redirect(request_id: str) -> RedirectResponse:
 class _RegistrationLimit:
     """At most ``limit`` POSTs per client IP per ``window`` seconds, in process."""
 
-    def __init__(self, app: ASGIApp, limit: int = REGISTRATIONS_PER_HOUR, window: float = 3600):
+    def __init__(self, app: ASGIApp, limit: int, window: float = 3600):
         self.app, self.limit, self.window = app, limit, window
         self._hits: dict[str, deque[float]] = {}
 
@@ -223,26 +223,36 @@ def _consent_router(provider: CellExplorerOAuthProvider, public_origin: str | No
             return JSONResponse({"error": code}, status_code=status, headers=headers)
 
         scheme, _, key = request.headers.get("authorization", "").partition(" ")
-        form = await request.form()
-        subject_token = str(form.get("subject_token", ""))
+        key = key.strip()
         async with session(request) as db:
-            key = key.strip()
+            # The key is checked before the body is read.
             resource = await find_mcp_resource_by_key(db, key) if scheme.lower() == "bearer" and key else None
             if resource is None:
                 return error(401, "invalid_client")
+            resource_url = resource.url  # read before cleanup's commit expires the row
+            form = await request.form()
             if form.get("grant_type") != TOKEN_EXCHANGE_GRANT:
                 return error(400, "unsupported_grant_type")
+            if form.get("subject_token_type") != ACCESS_TOKEN_TYPE:
+                return error(400, "invalid_request")
+            await provider.cleanup(db)
+            subject_token = str(form.get("subject_token", ""))
             found = await find_token(db, subject_token, kind="access") if subject_token else None
-            if found is None or found[0].audience != resource.url:
+            if found is None or found[0].audience != resource_url:
                 return error(400, "invalid_grant")
-            plaintext, _ = await issue_token(db, grant=found[1], kind="api", audience="api")
-            subject = found[1].user_sub
+            access, grant = found
+            # Never outlives the user's access token, so the MCP's cache can't either.
+            plaintext, row = await issue_token(
+                db, grant=grant, kind="api", audience="api", not_after=access.expires_at
+            )
+            expires_in = max(1, math.ceil((row.expires_at - utcnow()).total_seconds()))
+            subject = grant.user_sub
         return JSONResponse(
             {
                 "access_token": plaintext,
                 "issued_token_type": ACCESS_TOKEN_TYPE,
                 "token_type": "Bearer",
-                "expires_in": API_TTL,
+                "expires_in": expires_in,
                 "subject": subject,
             },
             headers=headers,
@@ -268,7 +278,9 @@ def mount_oauth(app: FastAPI, settings: Settings) -> None:
         revocation_options=revocation,
     )
     sdk_routes = [
-        Route(r.path, _RegistrationLimit(r.app), methods=r.methods) if r.path == REGISTRATION_PATH else r
+        Route(r.path, _RegistrationLimit(r.app, settings.oauth_registrations_per_hour), methods=r.methods)
+        if r.path == REGISTRATION_PATH
+        else r
         for r in sdk_routes
     ]
 

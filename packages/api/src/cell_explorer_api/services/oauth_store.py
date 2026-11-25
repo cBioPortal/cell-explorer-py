@@ -7,21 +7,30 @@ digest is stored; plaintext is returned once, at creation.
 import hashlib
 import secrets
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Literal
 
-from sqlmodel import col, select, update
+from sqlalchemy import and_, exists, or_
+from sqlmodel import col, delete, select, update
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from cell_explorer_api.auth.models import User
 from cell_explorer_api.db.models import utcnow
-from cell_explorer_api.db.oauth_models import McpResource, OAuthGrant, OAuthToken
+from cell_explorer_api.db.oauth_models import (
+    McpResource,
+    OAuthCode,
+    OAuthGrant,
+    OAuthPendingAuthorization,
+    OAuthToken,
+)
 
 CODE_TTL = 60
 ACCESS_TTL = 3600
 API_TTL = 600
 GRANT_TTL = timedelta(days=30)
 PENDING_TTL = 600
+# An approved grant whose code was never exchanged is dropped after this.
+UNEXCHANGED_GRANT_TTL = timedelta(minutes=10)
 
 _TTL = {"access": ACCESS_TTL, "api": API_TTL}
 
@@ -56,13 +65,16 @@ async def issue_token(
     grant: OAuthGrant,
     kind: Literal["access", "refresh", "api"],
     audience: str,
+    not_after: datetime | None = None,
 ) -> tuple[str, OAuthToken]:
-    """Create a token; returns (plaintext, row). Never outlives its grant."""
+    """Create a token; returns (plaintext, row). Never outlives its grant, nor ``not_after``."""
     await db.refresh(grant)  # earlier commits may have expired it
     plaintext = secrets.token_urlsafe(32)
     expires_at = grant.expires_at
     if kind != "refresh":
         expires_at = min(utcnow() + timedelta(seconds=_TTL[kind]), expires_at)
+    if not_after is not None:
+        expires_at = min(expires_at, not_after)
     token = OAuthToken(
         token_hash=hash_secret(plaintext),
         kind=kind,
@@ -115,6 +127,36 @@ async def revoke_user_grants(db: AsyncSession, user_sub: str) -> int:
     )
     await db.commit()
     return result.rowcount
+
+
+async def purge_expired(db: AsyncSession) -> None:
+    """Delete expired pending requests, codes and tokens, and dead grants with their rows.
+
+    A grant is dead once expired or revoked, or when it is older than
+    ``UNEXCHANGED_GRANT_TTL`` and has no tokens (approved, code never exchanged).
+    """
+    now = utcnow()
+    has_token = exists().where(col(OAuthToken.grant_id) == col(OAuthGrant.id))
+    dead = await db.exec(
+        select(OAuthGrant.id).where(
+            or_(
+                col(OAuthGrant.expires_at) <= now,
+                col(OAuthGrant.revoked_at).is_not(None),
+                and_(col(OAuthGrant.created_at) <= now - UNEXCHANGED_GRANT_TTL, ~has_token),
+            )
+        )
+    )
+    dead_ids = list(dead.all())
+    # Children first: SQLite enforces the cascade only with foreign keys on.
+    for start in range(0, len(dead_ids), 500):
+        chunk = dead_ids[start : start + 500]
+        await db.exec(delete(OAuthCode).where(col(OAuthCode.grant_id).in_(chunk)))
+        await db.exec(delete(OAuthToken).where(col(OAuthToken.grant_id).in_(chunk)))
+        await db.exec(delete(OAuthGrant).where(col(OAuthGrant.id).in_(chunk)))
+    await db.exec(delete(OAuthToken).where(col(OAuthToken.expires_at) <= now))
+    await db.exec(delete(OAuthCode).where(col(OAuthCode.expires_at) <= now))
+    await db.exec(delete(OAuthPendingAuthorization).where(col(OAuthPendingAuthorization.expires_at) <= now))
+    await db.commit()
 
 
 async def create_mcp_resource(db: AsyncSession, *, url: str, name: str) -> tuple[str, McpResource]:
