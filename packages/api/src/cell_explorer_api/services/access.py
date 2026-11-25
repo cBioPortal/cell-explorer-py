@@ -7,6 +7,7 @@ from typing import Protocol
 class _DatasetLike(Protocol):
     is_public: bool
     required_roles: list[str]
+    mcp_enabled: bool
 
 
 class _UserLike(Protocol):
@@ -18,10 +19,14 @@ def user_can_access(dataset: _DatasetLike, *, user: _UserLike | None) -> bool:
 
     - Public datasets are accessible to everyone (including anonymous).
     - Private datasets require at least one role overlap with required_roles.
+    - MCP callers (user.via_mcp) additionally need the dataset's mcp_enabled flag
+      for private datasets; the flag never bypasses roles.
     """
     if dataset.is_public:
         return True
     if user is None:
+        return False
+    if getattr(user, "via_mcp", False) and not dataset.mcp_enabled:
         return False
     if not dataset.required_roles:
         return False

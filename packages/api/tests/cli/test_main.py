@@ -109,7 +109,7 @@ def test_datasets_lists_accessible(monkeypatch, tmp_path):
     with patch("cell_explorer_api.cli.main._list_datasets_sync") as mock_list, \
          patch("cell_explorer_api.cli.main._load_user_sync") as mock_user:
         mock_list.return_value = fake_rows
-        mock_user.return_value = MagicMock(roles=["researcher"], username="researcher@example.com")
+        mock_user.return_value = MagicMock(roles=["researcher"], username="researcher@example.com", via_mcp=False)
 
         runner = CliRunner()
         result = runner.invoke(app, ["datasets"])

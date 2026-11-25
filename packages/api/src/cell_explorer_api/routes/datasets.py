@@ -246,6 +246,8 @@ async def get_dataset(
     dataset.datasource = datasource
     dataset.collection = collection
     if not user_can_access(dataset, user=user):
+        if user is not None and user.via_mcp:
+            raise HTTPException(status_code=404, detail="Dataset not found")
         if not request.app.state.settings.auth_enabled:
             raise HTTPException(status_code=404, detail="Dataset not found")
         status, detail = (
@@ -316,14 +318,16 @@ async def access_dataset(
             "credential_type": "public",
         }
 
-    # Private dataset — require auth
+    # Private dataset — require auth. Hidden from MCP callers as nonexistent.
+    if user is not None and user.via_mcp and not user_can_access(dataset, user=user):
+        raise HTTPException(status_code=404, detail="Dataset not found")
     if user is None:
         # Same rule as get_dataset: with auth disabled there is no sign-in to offer.
         if not request.app.state.settings.auth_enabled:
             raise HTTPException(status_code=404, detail="Dataset not found")
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    if not set(user.roles) & set(dataset.required_roles):
+    if not user_can_access(dataset, user=user):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     try:
