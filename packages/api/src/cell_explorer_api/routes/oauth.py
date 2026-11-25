@@ -68,6 +68,27 @@ def _error_page(message: str) -> HTMLResponse:
     )
 
 
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _host(url: str) -> str | None:
+    """``scheme://host[:port]`` lowercased, default port dropped; None if unparseable.
+
+    Built from ``hostname`` (never ``netloc``) so userinfo such as ``trusted@`` is dropped.
+    """
+    try:
+        parts = urlparse(url)
+        port = parts.port
+    except ValueError:
+        return None
+    scheme, host = parts.scheme.lower(), parts.hostname
+    if not scheme or not host:
+        return None
+    if port is not None and port != _DEFAULT_PORTS.get(scheme):
+        host = f"{host}:{port}"
+    return f"{scheme}://{host}"
+
+
 def _login_redirect(request_id: str) -> RedirectResponse:
     next_path = f"{OAUTH_PREFIX}/consent?request={request_id}"
     return RedirectResponse(f"/api/auth/login?next={quote(next_path, safe='')}", status_code=302)
@@ -105,7 +126,7 @@ class _RegistrationLimit:
         return True
 
 
-def _consent_router(provider: CellExplorerOAuthProvider, public_origin: str) -> APIRouter:
+def _consent_router(provider: CellExplorerOAuthProvider, public_origin: str | None) -> APIRouter:
     router = APIRouter(prefix="/oauth", tags=["oauth"], include_in_schema=False)
 
     def session(request: Request) -> AsyncSession:
@@ -136,7 +157,8 @@ def _consent_router(provider: CellExplorerOAuthProvider, public_origin: str) -> 
 
         e = html.escape
         client_name = client.client_name or client.client_id
-        redirect = urlparse(str(pending.params.get("redirect_uri", "")))
+        redirect = str(pending.params.get("redirect_uri", ""))
+        redirect_host = _host(redirect) or urlparse(redirect).scheme + ":"
         return _page(
             "Allow access?",
             f"<h2>Allow {e(client_name)} to use Cell Explorer as you?</h2>"
@@ -144,7 +166,7 @@ def _consent_router(provider: CellExplorerOAuthProvider, public_origin: str) -> 
             f"<strong>{e(resource.name)}</strong> (<code>{e(resource.url)}</code>) "
             f"signed in as <strong>{e(user.email or user.name or user.sub)}</strong>.</p>"
             f"<p>It can then see the datasets your account can see. "
-            f"You will be returned to <code>{e(redirect.scheme)}://{e(redirect.netloc)}</code>.</p>"
+            f"You will be returned to <code>{e(redirect_host)}</code>.</p>"
             f'<form method="post" action="{OAUTH_PREFIX}/consent">'
             f'<input type="hidden" name="request" value="{e(request_id)}">'
             f'<input type="hidden" name="csrf" value="{e(pending.csrf)}">'
@@ -156,7 +178,7 @@ def _consent_router(provider: CellExplorerOAuthProvider, public_origin: str) -> 
     @router.post("/consent")
     async def consent_decision(request: Request) -> Response:
         origin = request.headers.get("origin")
-        if origin is not None and origin != public_origin:
+        if origin is not None and (public_origin is None or _host(origin) != public_origin):
             return _error_page("This request did not come from the consent page.")
         form = await request.form()
         request_id, csrf, decision = (str(form.get(k, "")) for k in ("request", "csrf", "decision"))
@@ -173,7 +195,7 @@ def _consent_router(provider: CellExplorerOAuthProvider, public_origin: str) -> 
                 return _error_page("This sign-in request is unknown, has expired, or is no longer valid.")
 
         pending = await live_pending(request, request_id)
-        if pending is None or not secrets.compare_digest(pending.csrf, csrf):
+        if pending is None or not secrets.compare_digest(pending.csrf.encode(), csrf.encode()):
             return _error_page("This sign-in request is unknown or has expired.")
         async with session(request) as db:
             await db.exec(delete(OAuthPendingAuthorization).where(col(OAuthPendingAuthorization.id) == request_id))
@@ -217,7 +239,6 @@ def mount_oauth(app: FastAPI, settings: Settings) -> None:
             methods=["GET", "OPTIONS"],
         )
     )
-    public = urlparse(settings.public_url)
     # The consent routes come before the mount, which would otherwise claim /api/oauth/consent.
-    app.include_router(_consent_router(provider, f"{public.scheme}://{public.netloc}"), prefix="/api")
+    app.include_router(_consent_router(provider, _host(settings.public_url)), prefix="/api")
     app.router.routes.append(Mount(OAUTH_PREFIX, app=Router(routes=sdk_routes)))

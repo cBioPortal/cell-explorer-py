@@ -112,11 +112,11 @@ def _pkce() -> tuple[str, str]:
     return verifier, challenge
 
 
-async def _register(client, name="Claude <script>") -> str:
+async def _register(client, name="Claude <script>", redirect=REDIRECT) -> str:
     resp = await client.post(
         "/api/oauth/register",
         json={
-            "redirect_uris": [REDIRECT],
+            "redirect_uris": [redirect],
             "token_endpoint_auth_method": "none",
             "grant_types": ["authorization_code", "refresh_token"],
             "response_types": ["code"],
@@ -127,14 +127,14 @@ async def _register(client, name="Claude <script>") -> str:
     return resp.json()["client_id"]
 
 
-async def _authorize(client, client_id: str, challenge: str) -> str:
+async def _authorize(client, client_id: str, challenge: str, redirect=REDIRECT, issuer=ISSUER) -> str:
     """Start /authorize; returns the pending request id from the consent URL."""
     resp = await client.get(
         "/api/oauth/authorize",
         params={
             "response_type": "code",
             "client_id": client_id,
-            "redirect_uri": REDIRECT,
+            "redirect_uri": redirect,
             "code_challenge": challenge,
             "code_challenge_method": "S256",
             "state": "st-1",
@@ -143,7 +143,7 @@ async def _authorize(client, client_id: str, challenge: str) -> str:
     )
     assert resp.status_code == 302, resp.text
     location = resp.headers["location"]
-    assert location.startswith(f"{ISSUER}/consent?request=")
+    assert location.startswith(f"{issuer}/consent?request=")
     return parse_qs(urlparse(location).query)["request"][0]
 
 
@@ -275,7 +275,7 @@ async def test_consent_post_requires_matching_csrf(client, engine, signing_key):
 
     # No session: never approves, even with the right csrf.
     resp = await client.post("/api/oauth/consent", data={"request": request_id, "csrf": csrf, "decision": "approve"})
-    assert resp.status_code in (302, 303)
+    assert resp.status_code == 302
     assert resp.headers["location"].startswith("/api/auth/login?")
     assert await _count(engine, OAuthCode) == 0
 
@@ -369,3 +369,70 @@ async def test_full_code_flow(client, signing_key):
     refreshed = resp.json()
     assert refreshed["access_token"] != tokens["access_token"]
     assert refreshed["refresh_token"] != tokens["refresh_token"]
+
+
+async def test_consent_page_shows_redirect_hostname_not_userinfo(client, signing_key):
+    redirect = "https://claude.ai@evil.test/cb"
+    client_id = await _register(client, redirect=redirect)
+    request_id = await _authorize(client, client_id, _pkce()[1], redirect=redirect)
+    resp = await client.get("/api/oauth/consent", params={"request": request_id}, headers=_session_cookie(signing_key))
+    assert resp.status_code == 200
+    assert "<code>https://evil.test</code>" in resp.text
+    assert "claude.ai" not in resp.text
+
+
+async def _approve(client, signing_key, headers: dict | None = None, issuer=ISSUER):
+    cookie = _session_cookie(signing_key)
+    client_id = await _register(client)
+    request_id = await _authorize(client, client_id, _pkce()[1], issuer=issuer)
+    csrf = await _consent_csrf(client, request_id, cookie)
+    return await client.post(
+        "/api/oauth/consent",
+        data={"request": request_id, "csrf": csrf, "decision": "approve"},
+        headers={**cookie, **(headers or {})},
+    )
+
+
+async def test_consent_approve_without_origin_header(client, signing_key):
+    resp = await _approve(client, signing_key)
+    assert resp.status_code == 302
+    assert resp.headers["location"].startswith(REDIRECT + "?")
+    assert "code" in parse_qs(urlparse(resp.headers["location"]).query)
+
+
+async def test_consent_origin_compared_normalized(engine, signing_key):
+    app = create_app(_settings(public_url="https://CE.test:443"))
+    oidc = app.state.oidc
+    oidc._apply_discovery({
+        "issuer": KC_ISSUER,
+        "authorization_endpoint": f"{KC_ISSUER}/protocol/openid-connect/auth",
+        "token_endpoint": f"{KC_ISSUER}/protocol/openid-connect/token",
+        "jwks_uri": f"{KC_ISSUER}/protocol/openid-connect/certs",
+        "end_session_endpoint": f"{KC_ISSUER}/protocol/openid-connect/logout",
+    })
+    oidc._jwks = {
+        "test-kid": signing_key.public_key().public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
+    }
+    app.state.db_engine = engine
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as c:
+        for origin in ("https://ce.test", "HTTPS://CE.TEST:443"):
+            resp = await _approve(c, signing_key, {"Origin": origin}, issuer="https://CE.test:443/api/oauth")
+            assert resp.status_code == 302, origin
+            assert resp.headers["location"].startswith(REDIRECT + "?")
+        resp = await _approve(c, signing_key, {"Origin": "https://ce.test:8443"}, issuer="https://CE.test:443/api/oauth")
+        assert resp.status_code == 400
+
+
+@pytest.mark.parametrize("decision", ["approve", "deny"])
+async def test_consent_non_ascii_csrf_is_rejected(client, engine, signing_key, decision):
+    cookie = _session_cookie(signing_key)
+    client_id = await _register(client)
+    request_id = await _authorize(client, client_id, _pkce()[1])
+    resp = await client.post(
+        "/api/oauth/consent",
+        data={"request": request_id, "csrf": "caf\u00e9", "decision": decision},
+        headers=cookie,
+    )
+    assert resp.status_code == 400
+    assert "location" not in resp.headers
+    assert await _count(engine, OAuthCode) == 0

@@ -91,7 +91,7 @@ class CellExplorerOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCo
         """Consent given: grant + single-use code; returns the client redirect URL."""
         async with self._session() as db:
             pending = await db.get(OAuthPendingAuthorization, pending_id)
-            if pending is None or not secrets.compare_digest(pending.csrf, csrf):
+            if pending is None or not secrets.compare_digest(pending.csrf.encode(), csrf.encode()):
                 raise AuthorizeError("invalid_request", "unknown authorization request")
             client_id, raw, expires_at = pending.client_id, pending.params, pending.expires_at
             # Claim the request atomically so it can be approved only once.
