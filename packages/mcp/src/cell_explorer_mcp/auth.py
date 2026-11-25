@@ -54,19 +54,23 @@ class CellExplorerTokenVerifier(TokenVerifier):
             if resp.status_code not in (400, 401):
                 logger.warning("token exchange returned %s", resp.status_code)
             return None
-        body = resp.json()
-        access = AccessToken(
-            token=token,
-            client_id="cell-explorer",
-            scopes=[],
-            expires_at=int(time.time() + body["expires_in"]),
-            claims={"api_token": body["access_token"], "sub": body["subject"]},
-        )
+        try:
+            body = resp.json()
+            access = AccessToken(
+                token=token,
+                client_id="cell-explorer",
+                scopes=[],
+                expires_at=int(time.time() + body["expires_in"]),
+                claims={"api_token": body["access_token"], "sub": body["subject"]},
+            )
+        except (ValueError, KeyError, TypeError) as e:
+            logger.warning("malformed token exchange response: %s", type(e).__name__)
+            return None
         self._store(key, access)
         return access
 
     def _store(self, key: str, access: AccessToken) -> None:
-        if len(self._cache) >= MAX_CACHE_ENTRIES:
+        if key not in self._cache and len(self._cache) >= MAX_CACHE_ENTRIES:
             now = time.time()
             self._cache = {
                 k: v for k, v in self._cache.items() if v.expires_at > now

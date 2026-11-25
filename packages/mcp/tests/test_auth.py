@@ -12,7 +12,7 @@ from cell_explorer_mcp.auth import CellExplorerTokenVerifier
 URL = "http://api.test/api/oauth/token-exchange"
 
 
-def make_verifier(status=200, expires_in=600, calls=None, **kwargs):
+def make_verifier(status=200, expires_in=600, calls=None):
     def handler(request: httpx.Request) -> httpx.Response:
         if calls is not None:
             calls.append(request)
@@ -31,7 +31,7 @@ def make_verifier(status=200, expires_in=600, calls=None, **kwargs):
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     return CellExplorerTokenVerifier(
-        exchange_url=URL, mcp_key="mcp-key", client=client, **kwargs
+        exchange_url=URL, mcp_key="mcp-key", client=client
     )
 
 
@@ -120,3 +120,30 @@ def test_current_helpers(monkeypatch):
         auth.current_api_token()
     with pytest.raises(RuntimeError):
         auth.current_user_sub()
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(200, text="<html>proxy</html>"),
+        httpx.Response(200, json={"access_token": "a", "expires_in": 600}),
+        httpx.Response(200, json=["not", "a", "dict"]),
+    ],
+)
+async def test_malformed_200_is_none_and_not_cached(response):
+    v = CellExplorerTokenVerifier(
+        exchange_url=URL,
+        mcp_key="k",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: response)),
+    )
+    assert await v.verify_token("t") is None
+    assert v._cache == {}
+
+
+async def test_refresh_at_capacity_keeps_other_entries(monkeypatch):
+    v = make_verifier()
+    monkeypatch.setattr(auth, "MAX_CACHE_ENTRIES", 2)
+    await v.verify_token("a")
+    await v.verify_token("b")
+    v._store(hashlib.sha256(b"b").hexdigest(), v._cache[hashlib.sha256(b"b").hexdigest()])
+    assert len(v._cache) == 2
