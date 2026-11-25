@@ -1,5 +1,7 @@
 """Token exchange: an MCP server trades its key + a user's access token for an API token."""
 
+from datetime import timedelta
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -11,6 +13,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from cell_explorer_api.auth.models import User
 from cell_explorer_api.config import Settings
 from cell_explorer_api.db.models import utcnow
+from cell_explorer_api.db.oauth_models import OAuthGrant, OAuthToken
 from cell_explorer_api.main import create_app
 from cell_explorer_api.services import oauth_store as store
 
@@ -108,7 +111,9 @@ async def test_exchange_refuses_refresh_and_api_tokens(client, world):
         resp = await client.post(URL, data=_form(token), headers=_auth(world["key"]))
         assert resp.status_code == 400, name
         assert resp.json() == {"error": "invalid_grant"}
-    resp = await client.post(URL, data={"grant_type": GRANT_TYPE}, headers=_auth(world["key"]))
+    resp = await client.post(
+        URL, data={"grant_type": GRANT_TYPE, "subject_token_type": TOKEN_TYPE}, headers=_auth(world["key"])
+    )
     assert resp.status_code == 400
     assert resp.json() == {"error": "invalid_grant"}
 
@@ -133,3 +138,56 @@ async def test_exchange_refuses_other_grant_type(client, world):
     )
     assert resp.status_code == 400
     assert resp.json() == {"error": "unsupported_grant_type"}
+
+
+@pytest.mark.parametrize(
+    "token_type", [None, "urn:ietf:params:oauth:token-type:refresh_token", "urn:ietf:params:oauth:token-type:jwt"]
+)
+async def test_exchange_refuses_other_subject_token_type(client, world, token_type):
+    form = _form(world["access"])
+    if token_type is None:
+        del form["subject_token_type"]
+    else:
+        form["subject_token_type"] = token_type
+    resp = await client.post(URL, data=form, headers=_auth(world["key"]))
+    assert resp.status_code == 400
+    assert resp.json() == {"error": "invalid_request"}
+
+
+async def test_exchange_checks_key_before_reading_body(client, world, monkeypatch):
+    from starlette.requests import Request
+
+    async def no_form(self, *a, **k):
+        raise AssertionError("body read before the MCP key was checked")
+
+    monkeypatch.setattr(Request, "form", no_form)
+    for headers in ({}, _auth("wrong")):
+        resp = await client.post(URL, data=_form(world["access"]), headers=headers)
+        assert resp.status_code == 401
+        assert resp.json() == {"error": "invalid_client"}
+
+
+async def _set_expiry(engine, model, key, seconds: float):
+    async with AsyncSession(engine) as db:
+        row = await db.get(model, key)
+        row.expires_at = utcnow() + timedelta(seconds=seconds)
+        db.add(row)
+        await db.commit()
+
+
+async def test_api_token_capped_at_access_token_expiry(client, engine, world):
+    await _set_expiry(engine, OAuthToken, store.hash_secret(world["access"]), 100)
+    resp = await client.post(URL, data=_form(world["access"]), headers=_auth(world["key"]))
+    assert resp.status_code == 200, resp.text
+    assert 95 <= resp.json()["expires_in"] <= 100
+    async with AsyncSession(engine) as db:
+        api = await db.get(OAuthToken, store.hash_secret(resp.json()["access_token"]))
+        access = await db.get(OAuthToken, store.hash_secret(world["access"]))
+    assert api.expires_at <= access.expires_at
+
+
+async def test_expires_in_follows_grant_cap(client, engine, world):
+    await _set_expiry(engine, OAuthGrant, world["grant"].id, 30)
+    resp = await client.post(URL, data=_form(world["access"]), headers=_auth(world["key"]))
+    assert resp.status_code == 200, resp.text
+    assert 1 <= resp.json()["expires_in"] <= 30

@@ -2,14 +2,25 @@
 
 import logging
 import os
+from contextvars import ContextVar
 from typing import Annotated, Any
 
+import fastmcp
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
+from fastmcp.server.auth import AuthProvider
+from fastmcp.server.middleware import Middleware
 from pydantic import Field
 
 from cell_explorer_mcp import queries
-from cell_explorer_mcp.catalog import DEFAULT_API_URL, CatalogClient, DatasetNotFoundError
+from cell_explorer_mcp.auth import current_api_token, current_user_sub
+from cell_explorer_mcp.catalog import (
+    DEFAULT_API_URL,
+    CatalogClient,
+    DatasetAccessDeniedError,
+    DatasetNotFoundError,
+    credential_headers,
+)
 from cell_explorer_mcp.zarr_cache import DEFAULT_MAX_DATASETS, DatasetCache, OpenDataset
 
 logger = logging.getLogger(__name__)
@@ -47,29 +58,77 @@ can compare groups if chat is enabled for that dataset.
 catalog = CatalogClient(os.getenv("CELL_EXPLORER_API_URL", DEFAULT_API_URL))
 cache = DatasetCache(maxsize=int(os.getenv("CELL_EXPLORER_MCP_MAX_DATASETS", DEFAULT_MAX_DATASETS)))
 
-mcp = FastMCP(name="Cell Explorer MCP Server", instructions=INSTRUCTIONS)
-
 # Gene symbols and IDs (including versioned Ensembl IDs) are far shorter; the
 # limit bounds the per-character rescan behind unknown-gene suggestions.
 MAX_GENE_NAME = 64
 
 DatasetSlug = Annotated[str, Field(description="Dataset slug from list_datasets, e.g. 'spectrum'.")]
 
+# /access credentials last 30 minutes; a private store is dropped a minute before.
+PRIVATE_STORE_TTL_SECONDS = 1800 - 60
+
+# True while the signed-in server runs a tool: tools then act as the user.
+_signed_in_call: ContextVar[bool] = ContextVar("signed_in_call", default=False)
+
+
+class _SignedInCalls(Middleware):
+    async def on_call_tool(self, context, call_next):
+        reset = _signed_in_call.set(True)
+        try:
+            return await call_next(context)
+        finally:
+            _signed_in_call.reset(reset)
+
+
+def _api_token() -> str | None:
+    """The user's API token on the signed-in address; None on the open one."""
+    return current_api_token() if _signed_in_call.get() else None
+
 
 async def _dataset_entry(slug: str) -> dict[str, Any]:
+    api_token = _api_token()
     try:
-        entry = await catalog.get_dataset(slug)
+        entry = await catalog.get_dataset(slug, api_token=api_token)
     except DatasetNotFoundError:
         raise ToolError(f"Unknown dataset {slug!r}. Use list_datasets to find valid slugs.") from None
-    if not entry.get("is_public", False):
+    # Signed in, the API has already limited the catalog to what the user may see.
+    if api_token is None and not entry.get("is_public", False):
         raise ToolError(f"Dataset {slug!r} is not public.")
     return entry
 
 
+async def _open_private(slug: str, api_token: str) -> OpenDataset:
+    """The user's own store for a private dataset, opened with their credential.
+
+    /access is asked on every call, so a cached store is only served while the
+    user's own access still holds.
+    """
+    owner = current_user_sub()
+    if not owner:  # never share a private store under an empty owner
+        raise ToolError("No signed-in user for this request; sign in again.")
+    try:
+        credential = await catalog.access(slug, api_token=api_token)
+    except DatasetAccessDeniedError:
+        raise ToolError(f"You don't have access to dataset '{slug}'.") from None
+    return await cache.get(
+        slug,
+        credential["url"],
+        headers=credential_headers(credential),
+        owner=owner,
+        ttl=PRIVATE_STORE_TTL_SECONDS,
+    )
+
+
 async def _open(slug: str) -> tuple[OpenDataset, dict[str, Any]]:
     entry = await _dataset_entry(slug)
+    api_token = _api_token()
     try:
-        ds = await cache.get(slug, entry["url"])
+        if api_token is not None and not entry.get("is_public", False):
+            ds = await _open_private(slug, api_token)
+        else:
+            ds = await cache.get(slug, entry["url"])
+    except ToolError:
+        raise
     except Exception as exc:
         logger.exception("failed to open dataset %s", slug)
         raise ToolError(f"Could not open dataset {slug!r}: {exc}") from exc
@@ -88,17 +147,17 @@ def _collection_slug(dataset: dict[str, Any]) -> str | None:
     return (dataset.get("collection") or {}).get("slug")
 
 
-@mcp.tool()
 async def list_datasets(
     collection: Annotated[str | None, Field(description="Only datasets in this collection slug.")] = None,
     query: Annotated[str | None, Field(description="Case-insensitive text filter on slug, name and description.")] = None,
 ) -> dict[str, Any]:
     """List public Cell Explorer datasets with their size and collection."""
-    datasets = await catalog.list_datasets()
+    api_token = _api_token()
+    datasets = await catalog.list_datasets(api_token=api_token)
     q = query.lower() if query else None
     out = []
     for d in datasets:
-        if not d.get("is_public", False):
+        if api_token is None and not d.get("is_public", False):
             continue
         if collection is not None and _collection_slug(d) != collection:
             continue
@@ -118,10 +177,9 @@ async def list_datasets(
     return {"n_datasets": len(out), "datasets": out}
 
 
-@mcp.tool()
 async def list_collections() -> dict[str, Any]:
     """List dataset collections (groups of related datasets, e.g. from one study)."""
-    collections = await catalog.list_collections()
+    collections = await catalog.list_collections(api_token=_api_token())
     keys = ("slug", "name", "description", "dataset_count", "publication_citation",
             "publication_url", "source_url", "license_name")
     return {
@@ -130,7 +188,6 @@ async def list_collections() -> dict[str, Any]:
     }
 
 
-@mcp.tool()
 async def get_dataset_info(dataset: DatasetSlug) -> dict[str, Any]:
     """Dataset overview: cell and gene counts, obs (cell metadata) columns with
     types and number of distinct values, var columns, embeddings, and the
@@ -140,7 +197,6 @@ async def get_dataset_info(dataset: DatasetSlug) -> dict[str, Any]:
     return await _run(queries.dataset_info(ds, entry))
 
 
-@mcp.tool()
 async def search_genes(
     dataset: DatasetSlug,
     query: Annotated[str, Field(description="Gene symbol or ID substring, case-insensitive.", max_length=MAX_GENE_NAME)],
@@ -151,7 +207,6 @@ async def search_genes(
     return await _run(queries.search_genes(ds, query, limit))
 
 
-@mcp.tool()
 async def gene_expression(
     dataset: DatasetSlug,
     gene: Annotated[str, Field(description="Gene symbol or ID.", max_length=MAX_GENE_NAME)],
@@ -163,7 +218,6 @@ async def gene_expression(
     return await _run(queries.gene_expression(ds, gene, group_by, entry=entry))
 
 
-@mcp.tool()
 async def top_genes(
     dataset: DatasetSlug,
     obs_column: Annotated[str, Field(description="Categorical obs column, e.g. a cell type column.")],
@@ -178,7 +232,6 @@ async def top_genes(
     return await _run(queries.top_genes(ds, obs_column, group_value, n, entry=entry))
 
 
-@mcp.tool()
 async def obs_column_values(
     dataset: DatasetSlug,
     column: Annotated[str, Field(description="Obs (cell metadata) column name.")],
@@ -190,17 +243,62 @@ async def obs_column_values(
     return await _run(queries.obs_column_values(ds, column, limit, entry=entry))
 
 
+SIGNED_IN_DESCRIPTIONS = {
+    "list_datasets": "List the Cell Explorer datasets you can access (public ones and the"
+                     " private ones your account may open) with their size and collection.",
+}
+
+TOOLS = (
+    list_datasets,
+    list_collections,
+    get_dataset_info,
+    search_genes,
+    gene_expression,
+    top_genes,
+    obs_column_values,
+)
+
+
+def build_server(*, signed_in: bool, auth: AuthProvider | None = None) -> FastMCP:
+    """One MCP server; the signed-in one requires a Cell Explorer sign-in."""
+    name = "Cell Explorer MCP Server (signed in)" if signed_in else "Cell Explorer MCP Server"
+    server = FastMCP(name=name, instructions=INSTRUCTIONS, auth=auth)
+    if signed_in:
+        server.add_middleware(_SignedInCalls())
+    for tool in TOOLS:
+        description = SIGNED_IN_DESCRIPTIONS.get(tool.__name__) if signed_in else None
+        server.tool(tool, description=description)
+    return server
+
+
+# The open server: stdio, and the open HTTP address.
+mcp = build_server(signed_in=False)
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     transport = os.getenv("MCP_TRANSPORT", "stdio")
     if transport == "stdio":
         mcp.run()
         return
-    mcp.run(
-        transport=transport,
-        host=os.getenv("MCP_HOST", "127.0.0.1"),
-        port=int(os.getenv("MCP_PORT", "8000")),
-        path=os.getenv("MCP_HTTP_PATH", "/mcp"),
+    host = os.getenv("MCP_HOST", "127.0.0.1")
+    port = int(os.getenv("MCP_PORT", "8000"))
+    if transport == "sse":
+        # Legacy transport: the open address only.
+        mcp.run(transport=transport, host=host, port=port, path=os.getenv("MCP_HTTP_PATH", "/mcp"))
+        return
+    if transport not in ("http", "streamable-http"):
+        raise ValueError(f"Unknown MCP_TRANSPORT {transport!r}")
+    import uvicorn
+
+    from cell_explorer_mcp.app import build_http_app
+
+    uvicorn.run(
+        build_http_app(),
+        host=host,
+        port=port,
+        timeout_graceful_shutdown=2,
+        log_level=fastmcp.settings.log_level.lower(),
     )
 
 

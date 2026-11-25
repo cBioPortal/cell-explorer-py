@@ -7,6 +7,7 @@ roles copied onto the grant at approval are the only roles tokens carry.
 
 import math
 import secrets
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
@@ -21,7 +22,8 @@ from mcp.server.auth.provider import (
     construct_redirect_uri,
 )
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
-from sqlmodel import col, delete, update
+from pydantic import AnyUrl
+from sqlmodel import col, delete, func, select, update
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from cell_explorer_api.auth.models import User
@@ -41,8 +43,14 @@ from cell_explorer_api.services.oauth_store import (
     find_token,
     hash_secret,
     issue_token,
+    purge_expired,
     revoke_grant,
 )
+
+CLEANUP_INTERVAL = 60.0  # seconds between purges of expired rows, per process
+MAX_PENDING_PER_CLIENT = 50  # unexpired /authorize requests awaiting consent
+
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "[::1]"})
 
 
 def _epoch(dt: datetime) -> int:
@@ -53,19 +61,67 @@ def _live(grant: OAuthGrant | None) -> bool:
     return grant is not None and grant.revoked_at is None and grant.expires_at > utcnow()
 
 
+def _same_loopback(requested: AnyUrl, registered: AnyUrl) -> bool:
+    """True if both are the same http loopback URI apart from the port.
+
+    The host must be spelled the same: ``localhost`` and ``127.0.0.1`` do not match.
+    """
+    return (
+        requested.scheme == registered.scheme == "http"
+        and requested.host in _LOOPBACK_HOSTS
+        and requested.host == registered.host
+        and (requested.path, requested.query, requested.fragment)
+        == (registered.path, registered.query, registered.fragment)
+        and requested.username is None
+        and requested.password is None
+        and registered.username is None
+        and registered.password is None
+    )
+
+
+class _ClientInformation(OAuthClientInformationFull):
+    """A stored client whose loopback redirect URIs match on any port (RFC 8252 §7.3).
+
+    Native clients such as Claude Code listen on an ephemeral port. Other URIs
+    must match a registered one exactly. The requested URI, port included, is
+    what the code records, so the token request must repeat it.
+    """
+
+    def validate_redirect_uri(self, redirect_uri: AnyUrl | None) -> AnyUrl:
+        if (
+            redirect_uri is not None
+            and self.redirect_uris
+            and redirect_uri not in self.redirect_uris
+            and any(_same_loopback(redirect_uri, r) for r in self.redirect_uris)
+        ):
+            return redirect_uri
+        return super().validate_redirect_uri(redirect_uri)
+
+
 class CellExplorerOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, RefreshToken, AccessToken]):
     def __init__(self, session_factory: Callable[[], AsyncSession], issuer_url: str):
         self._session = session_factory
         self._issuer_url = issuer_url.rstrip("/")
+        self._next_cleanup = 0.0  # time.monotonic() of the next allowed purge
+
+    async def cleanup(self, db: AsyncSession) -> None:
+        """Purge expired and abandoned rows, at most once per CLEANUP_INTERVAL."""
+        now = time.monotonic()
+        if now < self._next_cleanup:
+            return
+        self._next_cleanup = now + CLEANUP_INTERVAL
+        await purge_expired(db)
 
     # Clients
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
         async with self._session() as db:
             row = await db.get(OAuthClient, client_id)
-            return OAuthClientInformationFull.model_validate(row.info) if row else None
+            return _ClientInformation.model_validate(row.info) if row else None
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
+        # The SDK compares a confidential client's client_secret in plaintext, so
+        # it is stored as-is in oauth_clients.info, unlike tokens and MCP keys.
         async with self._session() as db:
             db.add(OAuthClient(client_id=client_info.client_id, info=client_info.model_dump(mode="json")))
             await db.commit()
@@ -75,6 +131,17 @@ class CellExplorerOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCo
     async def authorize(self, client: OAuthClientInformationFull, params: AuthorizationParams) -> str:
         async with self._session() as db:
             await self._require_resource(db, params.resource)
+            await self.cleanup(db)
+            waiting = await db.exec(
+                select(func.count())
+                .select_from(OAuthPendingAuthorization)
+                .where(
+                    col(OAuthPendingAuthorization.client_id) == client.client_id,
+                    col(OAuthPendingAuthorization.expires_at) > utcnow(),
+                )
+            )
+            if waiting.one() >= MAX_PENDING_PER_CLIENT:
+                raise AuthorizeError("temporarily_unavailable", "too many sign-in requests in progress; try again later")
             pending_id = secrets.token_urlsafe(32)
             pending = OAuthPendingAuthorization(
                 id=pending_id,
@@ -150,6 +217,7 @@ class CellExplorerOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCo
     ) -> OAuthToken:
         code_hash = hash_secret(authorization_code.code)
         async with self._session() as db:
+            await self.cleanup(db)
             row = await db.get(OAuthCode, code_hash)
             grant_id = row.grant_id if row else None
             # Single use: deleting the row is the claim.

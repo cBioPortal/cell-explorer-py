@@ -8,7 +8,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from mcp.server.auth.provider import AuthorizationParams, AuthorizeError, TokenError
-from mcp.shared.auth import OAuthClientInformationFull
+from mcp.shared.auth import InvalidRedirectUriError, OAuthClientInformationFull
 from pydantic import AnyUrl
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -326,3 +326,180 @@ async def test_expires_in_never_below_one(provider, db, monkeypatch):
     monkeypatch.setattr(oauth_provider, "utcnow", lambda: later)
     tokens = await provider.exchange_authorization_code(CLIENT, code)
     assert tokens.expires_in == 1
+
+
+# Loopback redirect URIs (RFC 8252 7.3)
+
+
+@pytest.mark.asyncio
+async def test_loopback_redirect_any_port_from_stored_client(provider):
+    await provider.register_client(
+        OAuthClientInformationFull(
+            client_id="native",
+            redirect_uris=[AnyUrl("http://127.0.0.1:1234/cb"), AnyUrl("http://[::1]/cb"), AnyUrl("https://app.test/cb")],
+            token_endpoint_auth_method="none",
+        )
+    )
+    client = await provider.get_client("native")
+    for ok in ("http://127.0.0.1:1234/cb", "http://127.0.0.1:9/cb", "http://[::1]:5678/cb", "https://app.test/cb"):
+        assert str(client.validate_redirect_uri(AnyUrl(ok))) == ok
+    for bad in (
+        "http://127.0.0.1:9/cb2",
+        "http://localhost:9/cb",
+        "https://127.0.0.1:9/cb",
+        "https://app.test:8443/cb",
+        "http://127.0.0.1.evil.test:9/cb",
+    ):
+        with pytest.raises(InvalidRedirectUriError):
+            client.validate_redirect_uri(AnyUrl(bad))
+
+
+# Cleanup of expired and abandoned rows
+
+
+def _ago(seconds: float):
+    return utcnow() - timedelta(seconds=seconds)
+
+
+async def _grant(db, *, client_id="cid", **fields) -> OAuthGrant:
+    grant = await store.create_grant(db, user=USER, client_id=client_id, resource=RES)
+    for name, value in fields.items():
+        setattr(grant, name, value)
+    db.add(grant)
+    await db.commit()
+    await db.refresh(grant)
+    return grant
+
+
+def _pending_row(pid: str, expires_at, client_id="cid") -> OAuthPendingAuthorization:
+    return OAuthPendingAuthorization(id=pid, client_id=client_id, params={}, csrf="c", expires_at=expires_at)
+
+
+def _code_row(code_hash: str, grant: OAuthGrant, expires_at) -> OAuthCode:
+    return OAuthCode(
+        code_hash=code_hash,
+        grant_id=grant.id,
+        client_id="cid",
+        code_challenge="x",
+        redirect_uri=REDIRECT,
+        redirect_uri_provided_explicitly=True,
+        resource=RES,
+        expires_at=expires_at,
+    )
+
+
+async def _ids(db, model, key: str) -> set:
+    db.expunge_all()
+    return {getattr(r, key) for r in (await db.exec(select(model))).all()}
+
+
+@pytest.mark.asyncio
+async def test_purge_deletes_expired_pending_authorizations(db):
+    db.add(_pending_row("old", _ago(1)))
+    db.add(_pending_row("live", utcnow() + timedelta(seconds=60)))
+    await db.commit()
+    await store.purge_expired(db)
+    assert await _ids(db, OAuthPendingAuthorization, "id") == {"live"}
+
+
+@pytest.mark.asyncio
+async def test_purge_deletes_expired_codes(db):
+    grant = await _grant(db)
+    await store.issue_token(db, grant=grant, kind="refresh", audience=RES)  # keeps the grant
+    db.add(_code_row("old", grant, _ago(1)))
+    db.add(_code_row("live", grant, utcnow() + timedelta(seconds=60)))
+    await db.commit()
+    await store.purge_expired(db)
+    assert await _ids(db, OAuthCode, "code_hash") == {"live"}
+
+
+@pytest.mark.asyncio
+async def test_purge_deletes_expired_tokens(db):
+    grant = await _grant(db)
+    _, old = await store.issue_token(db, grant=grant, kind="access", audience=RES)
+    old_hash = old.token_hash
+    old.expires_at = _ago(1)
+    db.add(old)
+    await db.commit()
+    _, live = await store.issue_token(db, grant=grant, kind="refresh", audience=RES)
+    live_hash = live.token_hash
+    await store.purge_expired(db)
+    assert await _ids(db, OAuthToken, "token_hash") == {live_hash}
+    assert old_hash != live_hash
+
+
+@pytest.mark.asyncio
+async def test_purge_deletes_expired_and_revoked_grants_with_their_rows(db):
+    live = await _grant(db)
+    live_id = live.id
+    expired = await _grant(db, expires_at=_ago(1))
+    revoked = await _grant(db, revoked_at=_ago(1))
+    for grant in (live, expired, revoked):
+        await store.issue_token(db, grant=grant, kind="refresh", audience=RES)
+        db.add(_code_row(f"code-{grant.id}", grant, utcnow() + timedelta(seconds=60)))
+        await db.commit()
+    await store.purge_expired(db)
+    assert await _ids(db, OAuthGrant, "id") == {live_id}
+    assert await _ids(db, OAuthToken, "grant_id") == {live_id}
+    assert await _ids(db, OAuthCode, "grant_id") == {live_id}
+
+
+@pytest.mark.asyncio
+async def test_purge_deletes_grants_never_exchanged_after_10_minutes(db):
+    fresh = await _grant(db, created_at=_ago(9 * 60))
+    keep = {fresh.id}
+    abandoned = await _grant(db, created_at=_ago(11 * 60))
+    db.add(_code_row("abandoned", abandoned, _ago(10 * 60)))
+    await db.commit()
+    used = await _grant(db, created_at=_ago(11 * 60))
+    keep.add(used.id)
+    await store.issue_token(db, grant=used, kind="refresh", audience=RES)
+    await store.purge_expired(db)
+    assert await _ids(db, OAuthGrant, "id") == keep
+    assert await _ids(db, OAuthCode, "code_hash") == set()
+
+
+@pytest.mark.asyncio
+async def test_authorize_cleans_up_at_most_once_a_minute(provider, db):
+    db.add(_pending_row("old-1", _ago(1)))
+    await db.commit()
+    await provider.authorize(CLIENT, _params())
+    assert "old-1" not in await _ids(db, OAuthPendingAuthorization, "id")
+
+    db.add(_pending_row("old-2", _ago(1)))
+    await db.commit()
+    await provider.authorize(CLIENT, _params())
+    assert "old-2" in await _ids(db, OAuthPendingAuthorization, "id")  # throttled
+
+    provider._next_cleanup = 0.0  # a minute later
+    await provider.authorize(CLIENT, _params())
+    assert "old-2" not in await _ids(db, OAuthPendingAuthorization, "id")
+
+
+@pytest.mark.asyncio
+async def test_code_exchange_cleans_up(provider, db):
+    code = await provider.load_authorization_code(CLIENT, await _code(provider, db))
+    db.add(_pending_row("old", _ago(1)))
+    await db.commit()
+    provider._next_cleanup = 0.0
+    await provider.exchange_authorization_code(CLIENT, code)
+    assert "old" not in await _ids(db, OAuthPendingAuthorization, "id")
+
+
+@pytest.mark.asyncio
+async def test_pending_authorizations_capped_per_client(provider, db):
+    other = OAuthClientInformationFull(
+        client_id="other", redirect_uris=[AnyUrl(REDIRECT)], token_endpoint_auth_method="none"
+    )
+    await provider.register_client(other)
+    for i in range(5):
+        db.add(_pending_row(f"expired-{i}", _ago(1)))  # expired rows never count
+    await db.commit()
+    provider._next_cleanup = float("inf")  # keep the expired rows in place
+    for _ in range(oauth_provider.MAX_PENDING_PER_CLIENT):
+        await provider.authorize(CLIENT, _params())
+    with pytest.raises(AuthorizeError) as exc:
+        await provider.authorize(CLIENT, _params())
+    assert exc.value.error == "temporarily_unavailable"
+    assert oauth_provider.MAX_PENDING_PER_CLIENT == 50
+    await provider.authorize(other, _params())  # other clients unaffected

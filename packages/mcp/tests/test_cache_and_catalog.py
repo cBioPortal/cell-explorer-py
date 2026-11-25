@@ -13,7 +13,7 @@ class FakeOpener:
     def __init__(self):
         self.opened: list[tuple[str, str]] = []
 
-    async def __call__(self, slug, url):
+    async def __call__(self, slug, url, headers=None):
         self.opened.append((slug, url))
         await asyncio.sleep(0.01)
         return type("Entry", (), {"slug": slug, "url": url})()
@@ -123,3 +123,26 @@ def test_catalog_default_timeout_is_short():
 async def test_catalog_unknown_slug():
     with pytest.raises(DatasetNotFoundError):
         await stub_catalog("http://zarr.test").get_dataset("nope")
+
+
+async def test_cache_keys_private_entries_by_owner():
+    opener = FakeOpener()
+    cache = DatasetCache(opener=opener)
+    alice = await cache.get("a", "u", headers={"Authorization": "Bearer x"}, owner="alice", ttl=60)
+    assert ("a", "bob") not in cache and "a" not in cache
+    assert await cache.get("a", "u", owner="bob", ttl=60) is not alice
+    assert await cache.get("a", "u", owner="alice", ttl=60) is alice
+    assert len(opener.opened) == 2
+
+
+async def test_catalog_caches_user_listings_apart_for_60s():
+    log: list = []
+    catalog = stub_catalog("http://zarr.test", log=log)
+    assert catalog._user_ttl == 60.0
+    mine = await catalog.list_datasets(api_token="api-alice")
+    await catalog.list_datasets(api_token="api-alice")
+    await catalog.list_datasets(api_token="api-carol")
+    shared = await catalog.list_datasets()
+    assert [bearer for _, _, bearer in log] == ["api-alice", "api-carol", None]
+    assert "secret-cookies" in {d["slug"] for d in mine}
+    assert "secret-cookies" not in {d["slug"] for d in shared}

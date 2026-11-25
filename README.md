@@ -82,6 +82,7 @@ than "broken".
 |---|---|---|
 | `ACCESS_CONTACT` | unset | Email shown to signed-in users who lack access to a private dataset ("Email … to request access"), served by `/api/info`. Unset means "Contact your administrator" with no address |
 | `PUBLIC_URL` | unset | Public base URL of this deployment (e.g. `https://cell-explorer.example.org`). With auth enabled, turns on the OAuth server under `/api/oauth` that signs MCP clients in; unset means no OAuth routes exist |
+| `OAUTH_REGISTRATIONS_PER_HOUR` | `200` | OAuth client registrations (`/api/oauth/register`) allowed per client IP per hour, counted per replica. Server-side clients (Claude.ai and Claude Desktop connectors, LibreChat) register from shared egress IPs, so keep it well above one user's needs. Behind a proxy, set uvicorn's `FORWARDED_ALLOW_IPS` (see `ANON_CHAT_PER_IP_PER_HOUR`) or every client shares the proxy's address |
 
 ### Data and logging
 
@@ -147,20 +148,36 @@ and remain supported aliases for the generic names above.
 ### Registering an MCP server (signed-in tier)
 
 An MCP server that signs users in through this API is registered once with the admin API. The
-`key` is shown only in the create response; store it as the MCP server's secret.
+`key` is shown only in the create response; store it as the MCP server's secret
+(`CELL_EXPLORER_MCP_KEY`).
+
+The registered `url` must equal the MCP server's `MCP_PUBLIC_URL` exactly: its **signed-in**
+address (e.g. `https://mcp.example.org/cell-explorer/signed-in/mcp`), not the open one. Clients
+sign in for that URL, and the API refuses any other.
 
 ```bash
 # Register (url must be absolute https; http only for localhost). 409 if the URL is already registered and active;
 # re-registering a revoked URL rotates it: same row, new key, old key stays dead.
 curl -X POST "$API/api/admin/mcp-resources" -H "Authorization: Bearer $ADMIN_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"url": "https://mcp.example.org/mcp", "name": "Signed-in MCP"}'
+  -d '{"url": "https://mcp.example.org/cell-explorer/signed-in/mcp", "name": "Signed-in MCP"}'
 # -> 201 {"id": "...", "url": "...", "name": "...", "key": "..."}
 
 curl "$API/api/admin/mcp-resources" -H "Authorization: Bearer $ADMIN_API_KEY"      # list (no keys)
 curl -X DELETE "$API/api/admin/mcp-resources/$ID" -H "Authorization: Bearer $ADMIN_API_KEY"  # revoke the key (204)
 curl -X DELETE "$API/api/admin/oauth/grants/$USER_SUB" -H "Authorization: Bearer $ADMIN_API_KEY"  # end a user's MCP connections -> {"revoked": N}
 ```
+
+- **Revoking or rotating an MCP key does not end users' connections.** Users stay connected and
+  keep working once the MCP server has the new key. To cut a user off, end their grants with
+  `DELETE /api/admin/oauth/grants/{user_sub}`.
+- **Private datasets also need `mcp_enabled: true`** (`PUT /api/admin/datasets/{slug}`) to reach
+  MCP clients; without it they stay hidden from MCP callers even for users who can see them on the
+  website. Public datasets are unaffected.
+- Clients register redirect URIs as usual and must reuse one exactly, except `http` loopback URIs
+  (`localhost`, `127.0.0.1`, `[::1]`), which match on any port, as native clients such as Claude
+  Code use an ephemeral port. The host must be spelled as registered: `localhost` does not match
+  `127.0.0.1`.
 
 ## Branding
 

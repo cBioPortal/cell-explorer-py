@@ -287,6 +287,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 file = _resolve_static_file(validated, path)
                 if file is not None and file != index_path:
                     return FileResponse(str(file))
+                # Discovery clients must see a 404, not the SPA shell, for
+                # well-known paths nothing serves.
+                if path.startswith(".well-known/"):
+                    return JSONResponse(status_code=404, content={"detail": "Not found"})
                 if index_body is None:
                     return FileResponse(str(index_html))
                 if _not_modified(request, index_headers["ETag"]):

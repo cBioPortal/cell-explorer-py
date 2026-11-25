@@ -1,7 +1,9 @@
 """Tables for the OAuth server that signs MCP clients in.
 
 Tokens, authorization codes and MCP keys are stored only as SHA-256 hex
-digests. No identity-provider (Keycloak/Entra) tokens are stored.
+digests. No identity-provider (Keycloak/Entra) tokens are stored. The one
+plaintext secret is a dynamically registered confidential client's
+``client_secret`` in ``oauth_clients.info``, which the MCP SDK compares as-is.
 """
 
 import uuid
@@ -18,7 +20,8 @@ class OAuthClient(SQLModel, table=True):
     __tablename__ = "oauth_clients"
 
     client_id: str = Field(primary_key=True)
-    # OAuthClientInformationFull.model_dump(mode="json")
+    # OAuthClientInformationFull.model_dump(mode="json"); a confidential client's
+    # client_secret is kept here in plaintext, as the SDK's client auth requires.
     info: dict = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utcnow)
 

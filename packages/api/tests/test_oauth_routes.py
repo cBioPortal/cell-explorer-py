@@ -184,6 +184,26 @@ async def test_root_metadata_not_shadowed_by_spa(engine, static_dir):
     assert resp.json()["issuer"] == ISSUER
 
 
+async def test_unknown_well_known_paths_are_404_not_spa(engine, static_dir):
+    (static_dir / ".well-known").mkdir()
+    (static_dir / ".well-known" / "security.txt").write_text("Contact: x")
+    app = create_app(_settings(static_dir=static_dir))
+    app.state.db_engine = engine
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as c:
+        for path in (
+            "/.well-known/oauth-protected-resource",
+            "/.well-known/oauth-authorization-server",
+            "/.well-known/openid-configuration",
+            "/.well-known/oauth-authorization-server/other",
+        ):
+            resp = await c.get(path)
+            assert resp.status_code == 404, path
+            assert not resp.headers["content-type"].startswith("text/html"), path
+        assert (await c.get("/.well-known/oauth-authorization-server/api/oauth")).status_code == 200
+        assert (await c.get("/.well-known/security.txt")).text == "Contact: x"  # real files still served
+        assert (await c.get("/some/page")).status_code == 200  # SPA routes unchanged
+
+
 @pytest.mark.parametrize("overrides", [{"public_url": None}, {"keycloak_client_secret": None}])
 async def test_oauth_routes_absent_without_public_url(overrides):
     app = create_app(_settings(**overrides))
@@ -196,6 +216,7 @@ async def test_oauth_routes_absent_without_public_url(overrides):
             ):
                 assert (await c.get(path)).status_code == 404, path
             assert (await c.post("/api/oauth/register", json={})).status_code == 404
+            assert (await c.post("/api/oauth/token-exchange", data={})).status_code == 404
     finally:
         await app.state.db_engine.dispose()
 
@@ -242,6 +263,7 @@ async def test_consent_page_names_client_resource_and_user(client, signing_key):
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/html")
     assert "frame-ancestors 'none'" in resp.headers["content-security-policy"]
+    assert resp.headers["referrer-policy"] == "no-referrer"
     body = resp.text
     assert "Claude &lt;script&gt;" in body and "<script>" not in body
     assert "Cell Explorer &lt;MCP&gt;" in body
@@ -311,13 +333,20 @@ async def test_consent_deny_redirects_with_access_denied(client, engine, signing
 # Registration limit
 
 
-async def test_registration_is_rate_limited(client):
-    for _ in range(20):
-        await _register(client)
-    resp = await client.post(
-        "/api/oauth/register",
-        json={"redirect_uris": [REDIRECT], "token_endpoint_auth_method": "none"},
-    )
+def test_registration_limit_defaults_to_200_per_hour():
+    assert Settings.model_fields["oauth_registrations_per_hour"].default == 200
+
+
+async def test_registration_is_rate_limited(engine):
+    app = create_app(_settings(oauth_registrations_per_hour=3))
+    app.state.db_engine = engine
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as c:
+        for _ in range(3):
+            await _register(c)
+        resp = await c.post(
+            "/api/oauth/register",
+            json={"redirect_uris": [REDIRECT], "token_endpoint_auth_method": "none"},
+        )
     assert resp.status_code == 429
 
 
@@ -436,3 +465,79 @@ async def test_consent_non_ascii_csrf_is_rejected(client, engine, signing_key, d
     assert resp.status_code == 400
     assert "location" not in resp.headers
     assert await _count(engine, OAuthCode) == 0
+
+
+# Loopback redirect URIs (RFC 8252 7.3)
+
+
+def _authorize_params(client_id: str, challenge: str, redirect: str) -> dict:
+    return {
+        "response_type": "code",
+        "client_id": client_id,
+        "redirect_uri": redirect,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+        "state": "st-1",
+        "resource": RES,
+    }
+
+
+async def test_loopback_redirect_matches_any_port(client, signing_key):
+    cookie = _session_cookie(signing_key)
+    verifier, challenge = _pkce()
+    client_id = await _register(client, redirect="http://127.0.0.1:1234/callback")
+    redirect = "http://127.0.0.1:5678/callback"
+    request_id = await _authorize(client, client_id, challenge, redirect=redirect)
+    csrf = await _consent_csrf(client, request_id, cookie)
+    resp = await client.post(
+        "/api/oauth/consent",
+        data={"request": request_id, "csrf": csrf, "decision": "approve"},
+        headers={**cookie, "Origin": BASE},
+    )
+    assert resp.status_code == 302
+    assert resp.headers["location"].startswith(redirect + "?")
+    code = parse_qs(urlparse(resp.headers["location"]).query)["code"][0]
+
+    token_form = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "client_id": client_id,
+        "code_verifier": verifier,
+        "resource": RES,
+    }
+    # The code is bound to the port it was requested with.
+    other_port = await client.post("/api/oauth/token", data={**token_form, "redirect_uri": "http://127.0.0.1:1234/callback"})
+    assert other_port.status_code == 400
+    resp = await client.post("/api/oauth/token", data={**token_form, "redirect_uri": redirect})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["access_token"]
+
+
+@pytest.mark.parametrize(
+    ("registered", "requested"),
+    [
+        ("http://127.0.0.1:1234/callback", "http://127.0.0.1:5678/other"),  # path
+        ("http://127.0.0.1:1234/callback", "http://localhost:5678/callback"),  # host spelled differently
+        ("http://localhost:1234/callback", "http://127.0.0.1:5678/callback"),
+        ("http://127.0.0.1:1234/callback", "http://127.0.0.1:5678/callback?x=1"),  # query
+        ("http://127.0.0.1:1234/callback", "http://u@127.0.0.1:5678/callback"),  # userinfo
+        ("https://app.test:8443/callback", "https://app.test:9443/callback"),  # not loopback
+        ("http://app.test:1234/callback", "http://app.test:5678/callback"),
+    ],
+)
+async def test_loopback_port_relaxation_is_narrow(client, registered, requested):
+    client_id = await _register(client, redirect=registered)
+    resp = await client.get("/api/oauth/authorize", params=_authorize_params(client_id, _pkce()[1], requested))
+    assert resp.status_code == 400, requested
+    assert "location" not in resp.headers
+
+
+async def test_authorize_refused_beyond_pending_cap(client):
+    client_id = await _register(client)
+    for _ in range(50):
+        await _authorize(client, client_id, _pkce()[1])
+    resp = await client.get("/api/oauth/authorize", params=_authorize_params(client_id, _pkce()[1], REDIRECT))
+    assert resp.status_code == 302
+    location = urlparse(resp.headers["location"])
+    assert f"{location.scheme}://{location.netloc}{location.path}" == REDIRECT
+    assert parse_qs(location.query)["error"] == ["temporarily_unavailable"]
