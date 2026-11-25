@@ -15,6 +15,7 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from cell_explorer_api.auth import oauth_provider
 from cell_explorer_api.auth.models import User
 from cell_explorer_api.auth.oauth_provider import CellExplorerOAuthProvider
 from cell_explorer_api.db.models import utcnow
@@ -65,10 +66,10 @@ CLIENT = OAuthClientInformationFull(
 )
 
 
-def _params(resource: str | None = RES) -> AuthorizationParams:
+def _params(resource: str | None = RES, scopes: list[str] | None = None) -> AuthorizationParams:
     return AuthorizationParams(
         state="st",
-        scopes=None,
+        scopes=scopes,
         code_challenge="challenge",
         redirect_uri=AnyUrl(REDIRECT),
         redirect_uri_provided_explicitly=True,
@@ -81,8 +82,8 @@ async def _pending(db, url: str) -> OAuthPendingAuthorization:
     return await db.get(OAuthPendingAuthorization, request_id)
 
 
-async def _code(provider, db) -> str:
-    url = await provider.authorize(CLIENT, _params())
+async def _code(provider, db, scopes: list[str] | None = None) -> str:
+    url = await provider.authorize(CLIENT, _params(scopes=scopes))
     pending = await _pending(db, url)
     redirect = await provider.approve(pending.id, pending.csrf, USER)
     q = parse_qs(urlparse(redirect).query)
@@ -279,3 +280,49 @@ async def test_revoke_token_revokes_whole_grant(provider, db):
     await provider.revoke_token(at)
     assert await provider.load_access_token(tokens.access_token) is None
     assert await provider.load_refresh_token(CLIENT, tokens.refresh_token) is None
+
+
+@pytest.mark.asyncio
+async def test_requested_scopes_survive_exchange_and_refresh(provider, db):
+    code = await provider.load_authorization_code(CLIENT, await _code(provider, db, ["read", "write"]))
+    assert code.scopes == ["read", "write"]
+    tokens = await provider.exchange_authorization_code(CLIENT, code)
+    assert tokens.scope == "read write"
+    assert (await provider.load_access_token(tokens.access_token)).scopes == ["read", "write"]
+    rt = await provider.load_refresh_token(CLIENT, tokens.refresh_token)
+    requested = "read write".split(" ")
+    # The SDK TokenHandler refuses any requested scope not on the refresh token.
+    assert all(s in rt.scopes for s in requested)
+    new = await provider.exchange_refresh_token(CLIENT, rt, requested)
+    assert new.scope == "read write"
+    assert (await provider.load_access_token(new.access_token)).scopes == ["read", "write"]
+
+
+@pytest.mark.asyncio
+async def test_no_scopes_requested_gives_no_scope(provider, db):
+    tokens = await _tokens(provider, db)
+    assert tokens.scope is None
+    assert (await provider.load_access_token(tokens.access_token)).scopes == []
+
+
+@pytest.mark.asyncio
+async def test_expires_in_comes_from_access_token_capped_by_grant(provider, db):
+    tokens = await _tokens(provider, db)
+    row = await db.get(OAuthToken, store.hash_secret(tokens.access_token))
+    grant = await db.get(OAuthGrant, row.grant_id)
+    grant.expires_at = utcnow() + timedelta(seconds=10)
+    db.add(grant)
+    await db.commit()
+    rt = await provider.load_refresh_token(CLIENT, tokens.refresh_token)
+    new = await provider.exchange_refresh_token(CLIENT, rt, [])
+    assert 1 <= new.expires_in <= 10
+
+
+@pytest.mark.asyncio
+async def test_expires_in_never_below_one(provider, db, monkeypatch):
+    code = await provider.load_authorization_code(CLIENT, await _code(provider, db))
+    # The access token row already expired by the time expires_in is computed.
+    later = utcnow() + timedelta(hours=2)
+    monkeypatch.setattr(oauth_provider, "utcnow", lambda: later)
+    tokens = await provider.exchange_authorization_code(CLIENT, code)
+    assert tokens.expires_in == 1

@@ -5,6 +5,7 @@ consent page (``approve``); refresh never calls the identity provider, and the
 roles copied onto the grant at approval are the only roles tokens carry.
 """
 
+import math
 import secrets
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -33,7 +34,6 @@ from cell_explorer_api.db.oauth_models import (
 )
 from cell_explorer_api.db.oauth_models import OAuthToken as OAuthTokenRow
 from cell_explorer_api.services.oauth_store import (
-    ACCESS_TTL,
     CODE_TTL,
     PENDING_TTL,
     create_grant,
@@ -104,7 +104,9 @@ class CellExplorerOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCo
             params = AuthorizationParams.model_validate(raw)
             await self._require_resource(db, params.resource)
 
-            grant = await create_grant(db, user=user, client_id=client_id, resource=params.resource)
+            grant = await create_grant(
+                db, user=user, client_id=client_id, resource=params.resource, scopes=params.scopes
+            )
             code = secrets.token_urlsafe(32)
             db.add(
                 OAuthCode(
@@ -133,7 +135,7 @@ class CellExplorerOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCo
                 return None
             return AuthorizationCode(
                 code=authorization_code,
-                scopes=[],
+                scopes=grant.scopes or [],
                 expires_at=_epoch(row.expires_at),
                 client_id=row.client_id,
                 code_challenge=row.code_challenge,
@@ -174,7 +176,7 @@ class CellExplorerOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCo
             return RefreshToken(
                 token=refresh_token,
                 client_id=token.client_id,
-                scopes=[],
+                scopes=grant.scopes or [],
                 expires_at=_epoch(token.expires_at),
                 resource=grant.resource,
                 subject=grant.user_sub,
@@ -214,7 +216,7 @@ class CellExplorerOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCo
             return AccessToken(
                 token=token,
                 client_id=row.client_id,
-                scopes=[],
+                scopes=grant.scopes or [],
                 expires_at=_epoch(row.expires_at),
                 resource=grant.resource,
                 subject=grant.user_sub,
@@ -236,12 +238,14 @@ class CellExplorerOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCo
 
     @staticmethod
     async def _issue_pair(db: AsyncSession, grant: OAuthGrant) -> OAuthToken:
-        access, _ = await issue_token(db, grant=grant, kind="access", audience=grant.resource)
+        access, row = await issue_token(db, grant=grant, kind="access", audience=grant.resource)
+        access_expires_at = row.expires_at  # read before the next commit expires the row
         refresh, _ = await issue_token(db, grant=grant, kind="refresh", audience=grant.resource)
-        remaining = int((grant.expires_at - utcnow()).total_seconds())
         return OAuthToken(
             access_token=access,
             token_type="Bearer",
-            expires_in=min(ACCESS_TTL, remaining),
+            # From the issued row (capped by the grant); never 0 or negative.
+            expires_in=max(1, math.ceil((access_expires_at - utcnow()).total_seconds())),
+            scope=" ".join(grant.scopes) or None,
             refresh_token=refresh,
         )

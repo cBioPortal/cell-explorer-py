@@ -29,6 +29,12 @@ async def db():
         await engine.dispose()
 
 
+async def _mark_used(db, tok):
+    tok.used_at = utcnow()
+    db.add(tok)
+    await db.commit()
+
+
 async def _grant(db):
     return await store.create_grant(db, user=USER, client_id="cid", resource=RES)
 
@@ -108,7 +114,7 @@ async def test_used_refresh_token_not_found(db):
     g = await _grant(db)
     plain, tok = await store.issue_token(db, grant=g, kind="refresh", audience=RES)
     assert await store.find_token(db, plain, kind="refresh") is not None
-    await store.mark_token_used(db, tok)
+    await _mark_used(db, tok)
     assert await store.find_token(db, plain, kind="refresh") is None
 
 
@@ -116,7 +122,7 @@ async def test_used_refresh_token_not_found(db):
 async def test_find_token_allow_used_returns_rotated_refresh_token(db):
     g = await _grant(db)
     plain, tok = await store.issue_token(db, grant=g, kind="refresh", audience=RES)
-    await store.mark_token_used(db, tok)
+    await _mark_used(db, tok)
     found = await store.find_token(db, plain, kind="refresh", allow_used=True)
     assert found is not None and found[0].used_at is not None
     await store.revoke_grant(db, g.id)

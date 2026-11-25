@@ -59,6 +59,7 @@ class OAuthGrant(SQLModel, table=True):
     user_email: str
     user_name: str
     roles: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    scopes: list[str] = Field(default_factory=list, sa_column=Column(JSON))  # requested at /authorize
     client_id: str
     resource: str
     created_at: datetime = Field(default_factory=utcnow)

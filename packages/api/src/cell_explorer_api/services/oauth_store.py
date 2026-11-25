@@ -30,13 +30,16 @@ def hash_secret(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-async def create_grant(db: AsyncSession, *, user: User, client_id: str, resource: str) -> OAuthGrant:
+async def create_grant(
+    db: AsyncSession, *, user: User, client_id: str, resource: str, scopes: list[str] | None = None
+) -> OAuthGrant:
     """Record consent; roles are copied and never change for the grant's lifetime."""
     grant = OAuthGrant(
         user_sub=user.sub,
         user_email=user.email or "",
         user_name=user.name or "",
         roles=list(user.roles),
+        scopes=list(scopes or []),
         client_id=client_id,
         resource=resource,
         expires_at=utcnow() + GRANT_TTL,
@@ -73,14 +76,6 @@ async def issue_token(
     await db.refresh(token)
     await db.refresh(grant)  # commit expires the caller's grant
     return plaintext, token
-
-
-async def mark_token_used(db: AsyncSession, token: OAuthToken) -> None:
-    """Mark a refresh token as rotated."""
-    token.used_at = utcnow()
-    db.add(token)
-    await db.commit()
-    await db.refresh(token)
 
 
 async def find_token(
