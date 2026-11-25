@@ -225,3 +225,7 @@ class ChatFeedback(SQLModel, table=True):
     comment: str | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+# Register the OAuth tables on the same metadata, so create_all sees them.
+from cell_explorer_api.db import oauth_models  # noqa: E402,F401

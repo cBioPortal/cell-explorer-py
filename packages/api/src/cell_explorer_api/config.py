@@ -104,6 +104,10 @@ class Settings(BaseSettings):
     anon_chat_per_ip_per_hour: int = 200
     anon_chat_per_day: int = 10000
 
+    # Public base URL of this deployment (https://host, no path). Setting it,
+    # with auth enabled, turns on the OAuth server that signs MCP clients in.
+    public_url: str | None = None
+
     # CLI integration
     cli_state_secret: str | None = None
 
@@ -177,6 +181,18 @@ class Settings(BaseSettings):
     def auth_enabled(self) -> bool:
         """Auth is enabled when issuer + client id + secret resolve."""
         return all([self.resolved_issuer, self.resolved_client_id, self.resolved_client_secret])
+
+    @property
+    def oauth_issuer_url(self) -> str | None:
+        """Issuer of the MCP sign-in OAuth server, under /api/oauth."""
+        if self.public_url is None:
+            return None
+        return f"{self.public_url.rstrip('/')}/api/oauth"
+
+    @property
+    def oauth_enabled(self) -> bool:
+        """The OAuth server runs only with auth enabled and PUBLIC_URL set."""
+        return self.auth_enabled and self.public_url is not None
 
     @property
     def cors_origin_list(self) -> list[str]:

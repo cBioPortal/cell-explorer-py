@@ -81,6 +81,7 @@ than "broken".
 | Variable | Default | Notes |
 |---|---|---|
 | `ACCESS_CONTACT` | unset | Email shown to signed-in users who lack access to a private dataset ("Email … to request access"), served by `/api/info`. Unset means "Contact your administrator" with no address |
+| `PUBLIC_URL` | unset | Public base URL of this deployment (e.g. `https://cell-explorer.example.org`). With auth enabled, turns on the OAuth server under `/api/oauth` that signs MCP clients in; unset means no OAuth routes exist |
 
 ### Data and logging
 

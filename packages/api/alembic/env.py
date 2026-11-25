@@ -7,6 +7,7 @@ from sqlmodel import SQLModel
 
 from cell_explorer_api.config import Settings
 from cell_explorer_api.db.models import Dataset, Datasource  # noqa: F401 — register tables
+from cell_explorer_api.db import oauth_models  # noqa: F401 — register tables
 
 config = context.config
 if config.config_file_name is not None:
