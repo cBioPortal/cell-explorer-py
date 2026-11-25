@@ -1,13 +1,14 @@
 """Pure redaction functions for trace payloads.
 
 These run before any data leaves the process. Each takes a `public: bool`
-flag derived from `Dataset.is_public`: when True, the input passes through
-unchanged; when False, content fields are replaced with a sentinel and
-structural fields (sizes, names) are preserved separately.
+flag derived from `Dataset.is_public` (and the LANGFUSE_REDACT_PRIVATE
+toggle): when True, the input passes through unchanged; when False, content
+fields are replaced with a sentinel and structural fields (sizes, names) are
+preserved separately.
 
 No Langfuse dependency — keeps the redaction surface unit-testable in
-isolation. The trace context calls these once at trace creation (with
-the dataset's `is_public` flag) and applies the result everywhere.
+isolation. The trace context decides once at trace creation whether the
+turn's content may be sent, and passes that decision to every call.
 """
 
 from __future__ import annotations

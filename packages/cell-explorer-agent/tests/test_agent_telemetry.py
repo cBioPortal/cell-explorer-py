@@ -125,3 +125,75 @@ async def test_agent_private_dataset_redacts(monkeypatch):
     assert fake.trace_field("output") == "[redacted]"
     assert fake.root_observation.metadata["view_state"] == {"_redacted": "view_state"}
     assert fake.generations[0].output == "[redacted]"
+
+
+async def test_agent_private_dataset_ships_content_when_redaction_off(monkeypatch):
+    """LANGFUSE_REDACT_PRIVATE=false (self-hosted Langfuse): private content is
+    sent, but the trace is still tagged visibility:private."""
+    fake = FakeLangfuseClient()
+    monkeypatch.setattr(
+        "cell_explorer_agent.telemetry.langfuse_client.get", lambda cfg: fake
+    )
+    monkeypatch.setenv("LANGFUSE_REDACT_PRIVATE", "false")
+
+    usage = LLMUsage(input_tokens=10, output_tokens=5, cache_read_tokens=0, cache_write_tokens=0)
+    llm = _StubLLM([[LLMTextDelta(text="hello"), LLMStop(reason="end_turn", usage=usage)]])
+    agent = ChatAgent(
+        llm=llm, catalog=ToolCatalog(), dataset_ctx=_ctx(), config=AgentConfig()
+    )
+
+    async for _ in agent.run(
+        messages=[UserMessage(content="sensitive question")],
+        view_state={"embedding": "X_umap"},
+        telemetry_context={
+            "user_id": "user-1",
+            "thread_id": "thread-abc",
+            "dataset_slug": "private",
+            "is_public": False,
+            "environment": "test",
+        },
+    ):
+        pass
+
+    tags = fake.trace_field("tags")
+    assert "visibility:private" in tags
+    assert "visibility:public" not in tags
+    assert fake.root_observation.input == "sensitive question"
+    assert fake.trace_field("output") == "hello"
+    assert fake.root_observation.metadata["view_state"] == {"embedding": "X_umap"}
+    assert fake.generations[0].output == "hello"
+
+
+@pytest.mark.parametrize("redact_private", [True, False])
+async def test_agent_public_dataset_unaffected_by_redaction_toggle(monkeypatch, redact_private):
+    fake = FakeLangfuseClient()
+    monkeypatch.setattr(
+        "cell_explorer_agent.telemetry.langfuse_client.get", lambda cfg: fake
+    )
+
+    usage = LLMUsage(input_tokens=10, output_tokens=5, cache_read_tokens=0, cache_write_tokens=0)
+    llm = _StubLLM([[LLMTextDelta(text="hello"), LLMStop(reason="end_turn", usage=usage)]])
+    agent = ChatAgent(
+        llm=llm,
+        catalog=ToolCatalog(),
+        dataset_ctx=_ctx(),
+        config=AgentConfig(langfuse_redact_private=redact_private),
+    )
+
+    async for _ in agent.run(
+        messages=[UserMessage(content="what are the top genes?")],
+        view_state={"embedding": "X_umap"},
+        telemetry_context={
+            "user_id": "user-1",
+            "thread_id": "thread-abc",
+            "dataset_slug": "pbmc3k",
+            "is_public": True,
+            "environment": "test",
+        },
+    ):
+        pass
+
+    assert "visibility:public" in fake.trace_field("tags")
+    assert fake.root_observation.input == "what are the top genes?"
+    assert fake.trace_field("output") == "hello"
+    assert fake.generations[0].output == "hello"

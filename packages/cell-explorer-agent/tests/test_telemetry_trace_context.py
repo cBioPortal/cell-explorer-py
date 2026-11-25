@@ -110,6 +110,68 @@ async def test_private_dataset_trace_redacts_content(fake):
     assert fake.tool_spans[0].input == {"_redacted": "tool_args", "tool": "filter_by_ids"}
 
 
+async def test_private_dataset_ships_content_when_redaction_off(fake):
+    """A self-hosted instance (LANGFUSE_REDACT_PRIVATE=false) receives private
+    content, but the tag still says the dataset is private."""
+    async with TurnTrace(
+        client=fake,
+        user_id="user-1",
+        thread_id="thread-abc",
+        dataset_slug="private-ovarian",
+        is_public=False,
+        model="claude-sonnet-4-6",
+        environment="test",
+        user_input="sensitive question",
+        view_state={"embedding": "X_umap"},
+        redact_content=False,
+    ) as trace:
+        trace.add_generation(
+            input_messages=[{"role": "user", "content": "sensitive question"}],
+            output_text="Sensitive answer.",
+            usage={"input_tokens": 100, "output_tokens": 50, "cache_read_tokens": 0, "cache_write_tokens": 0},
+        )
+        trace.add_tool_span(
+            name="filter_by_ids",
+            args={"ids": ["barcode1", "barcode2"]},
+            result={"matched": 2},
+            duration_ms=10,
+            status="ok",
+        )
+        trace.set_output("Sensitive final text.")
+
+    tags = fake.trace_field("tags")
+    assert "visibility:private" in tags
+    assert "visibility:public" not in tags
+
+    assert fake.root_observation.input == "sensitive question"
+    assert fake.trace_field("input") == "sensitive question"
+    assert fake.root_observation.metadata["view_state"] == {"embedding": "X_umap"}
+    assert fake.generations[0].input == [{"role": "user", "content": "sensitive question"}]
+    assert fake.generations[0].output == "Sensitive answer."
+    assert fake.tool_spans[0].input == {"ids": ["barcode1", "barcode2"]}
+    assert fake.tool_spans[0].output == {"matched": 2}
+    assert fake.trace_field("output") == "Sensitive final text."
+
+
+async def test_redact_content_defaults_to_not_is_public(fake):
+    """Callers that don't pass redact_content keep the Phase 1 behavior."""
+    async with TurnTrace(
+        client=fake,
+        user_id="user-1",
+        thread_id="thread-abc",
+        dataset_slug="private-ovarian",
+        is_public=False,
+        model="m",
+        environment="test",
+        user_input="sensitive question",
+        view_state=None,
+    ) as trace:
+        trace.set_output("Sensitive final text.")
+
+    assert fake.root_observation.input == "[redacted]"
+    assert fake.trace_field("output") == "[redacted]"
+
+
 async def test_turn_trace_captures_trace_id_from_active_span(fake):
     """Once the root span is open, get_current_trace_id() returns a value;
     TurnTrace caches it on self.trace_id so the route layer can persist it."""

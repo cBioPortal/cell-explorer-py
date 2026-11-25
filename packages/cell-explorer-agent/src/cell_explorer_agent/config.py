@@ -45,6 +45,12 @@ class AgentConfig(BaseSettings):
     langfuse_trace_enabled_raw: str | None = Field(
         default=None, alias="LANGFUSE_TRACE_ENABLED"
     )
+    # Private datasets ship metadata only by default — the right call when the
+    # destination is Langfuse Cloud. Set LANGFUSE_REDACT_PRIVATE=false for a
+    # self-hosted instance trusted to receive private-dataset content too.
+    # The visibility:private tag is set either way: it reflects the dataset,
+    # not whether redaction ran.
+    langfuse_redact_private: bool = Field(default=True, alias="LANGFUSE_REDACT_PRIVATE")
 
     @property
     def langfuse_trace_enabled(self) -> bool:
