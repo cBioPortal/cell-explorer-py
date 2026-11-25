@@ -96,6 +96,8 @@ class Dataset(SQLModel, table=True):
     # Signed-out visitors may chat on this dataset (only with chat_enabled
     # and is_public too). Switched on per event, e.g. a conference.
     anonymous_chat: bool = Field(default=False)
+    # MCP clients may read this dataset when it is private (roles still apply).
+    mcp_enabled: bool = Field(default=False)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

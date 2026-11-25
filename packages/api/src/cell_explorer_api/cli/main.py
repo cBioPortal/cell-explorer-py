@@ -179,6 +179,7 @@ def datasets() -> None:
         def __init__(self, row):
             self.is_public = row["is_public"]
             self.required_roles = row["required_roles"]
+            self.mcp_enabled = False  # CLI users are never MCP callers
 
     visible = [row for row in rows if user_can_access(_DS(row), user=user)]
 

@@ -121,6 +121,8 @@ class DatasetCreate(BaseModel):
     chat_enabled: bool = False
     # Signed-out visitors may chat (also needs chat_enabled and is_public).
     anonymous_chat: bool = False
+    # MCP clients may read this dataset when it is private (roles still apply).
+    mcp_enabled: bool = False
 
 
 class DatasetUpdate(BaseModel):
@@ -133,6 +135,7 @@ class DatasetUpdate(BaseModel):
     default_view: dict | None = None
     chat_enabled: bool | None = None
     anonymous_chat: bool | None = None
+    mcp_enabled: bool | None = None
     collection_id: str | None = None
 
 
@@ -171,6 +174,7 @@ class DatasetAdminResponse(BaseModel):
     default_view: dict | None
     chat_enabled: bool
     anonymous_chat: bool
+    mcp_enabled: bool
     metadata: DatasetMetadataAdminResponse | None = None
 
 
@@ -226,6 +230,7 @@ def _dataset_to_admin_response(
         default_view=dataset.default_view,
         chat_enabled=dataset.chat_enabled,
         anonymous_chat=dataset.anonymous_chat,
+        mcp_enabled=dataset.mcp_enabled,
         metadata=(
             DatasetMetadataAdminResponse(
                 n_obs=metadata.n_obs,
