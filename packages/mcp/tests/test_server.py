@@ -104,3 +104,19 @@ def test_instructions_link_to_the_configured_cell_explorer():
     assert "(https://btc.example.org)" in out
     assert "(https://btc.example.org/view?dataset=<slug>)" in out
     assert "cbioportal.org" not in out
+
+
+def test_instructions_explain_scaled_data_and_differential_expression():
+    text = " ".join(server.mcp.instructions.split())
+    assert '"fraction_expressing" means the fraction of cells above average' in text
+    assert "on scaled data it approximates the group's markers versus all cells" in text
+    assert "It does not compare two groups." in text
+    assert "use gene_expression with group_by (means and fractions, no statistics)" in text
+    assert "where the chat assistant can compare groups if chat is enabled for that dataset" in text
+
+
+async def test_top_genes_description_is_not_a_group_comparison(client):
+    tools = {t.name: t for t in await client.list_tools()}
+    description = " ".join(tools["top_genes"].description.split())
+    assert "on scaled data the ranking approximates the group's markers versus all cells" in description
+    assert "Not a comparison between two groups." in description

@@ -28,13 +28,20 @@ Workflow:
    group_value; naming varies by dataset (e.g. 'T.cell' vs 'T cell').
 4. search_genes to resolve gene names; then gene_expression or top_genes.
 
-Expression values are as stored in each dataset: usually log-normalized, but
-some datasets are scaled (z-scored), where negative means are normal.
-"fraction_expressing" is the fraction of cells with a value > 0.
+Expression values are as stored in each dataset: usually log-normalized; some
+datasets are scaled (each gene z-scored across cells), where a negative mean is
+below that gene's dataset average and "fraction_expressing" means the fraction
+of cells above average rather than expressing.
 Grouping by a column in fast_group_by_columns is cheap; other columns read
-per-cell data and may be refused on very large datasets. Differential
-expression between groups is not offered; point users to the Cell Explorer UI
-({queries.UI_URL}/view?dataset=<slug>) for that.
+per-cell data and may be refused on very large datasets.
+top_genes ranks genes by mean within one group: on log-normalized data broadly
+expressed genes (ribosomal, mitochondrial, MALAT1, B2M) lead; on scaled data it
+approximates the group's markers versus all cells. It does not compare two
+groups. Differential expression is not offered: to compare candidate genes
+across groups use gene_expression with group_by (means and fractions, no
+statistics), and for a marker or differential analysis point users to the
+dataset page ({queries.UI_URL}/view?dataset=<slug>), where the chat assistant
+can compare groups if chat is enabled for that dataset.
 """
 
 catalog = CatalogClient(os.getenv("CELL_EXPLORER_API_URL", DEFAULT_API_URL))
@@ -163,9 +170,10 @@ async def top_genes(
     group_value: Annotated[str, Field(description="Value of obs_column selecting the cells, e.g. 'T.cell'.")],
     n: Annotated[int, Field(ge=1, le=50)] = 20,
 ) -> dict[str, Any]:
-    """Top-N genes by mean expression within one group of cells. Ranks by
-    absolute expression, not specificity: housekeeping and ribosomal genes
-    often lead."""
+    """Top-N genes by mean expression within one group of cells. On
+    log-normalized data broadly expressed genes (ribosomal, mitochondrial)
+    lead; on scaled data the ranking approximates the group's markers versus
+    all cells. Not a comparison between two groups."""
     ds, entry = await _open(dataset)
     return await _run(queries.top_genes(ds, obs_column, group_value, n, entry=entry))
 
